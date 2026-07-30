@@ -91,7 +91,11 @@ test("project deletion confirmation is preserved and stale UI responses cannot r
     source,
     /deletedMissionIdsRef\.current\.has\(mission\.missionId\)/,
   );
-  assert.match(source, /missionPayload\.missions\.filter\(/);
+  assert.match(
+    source,
+    /loadedMissions\.filter\(/,
+    "validated catalogue responses must still exclude optimistically deleted missions",
+  );
   const deleteFunction = source.slice(
     source.indexOf("async function deleteProject"),
     source.indexOf("const providersReady"),

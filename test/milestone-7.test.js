@@ -39,6 +39,10 @@ import { rankRoutesByPersistedTaskHistory } from "../src/work-plane/model-gatewa
 
 const TIME = "2026-07-01T12:00:00.000Z";
 const HELLO = "Hello Foundry.";
+// Windows process startup can exceed two seconds while the full real-build
+// suite is under load. These probes test exit/output semantics, not timeout
+// behavior; the dedicated 50ms/200ms cases below own timeout coverage.
+const STABLE_COMMAND_TIMEOUT_MS = 10_000;
 
 function temporaryStores(t) {
   const root = mkdtempSync(join(tmpdir(), "foundry-v2-execution-"));
@@ -456,7 +460,7 @@ test("does not blindly repeat a command interrupted before durable command evide
     WorkUnitAction.RUN_COMMAND,
     {
       procedureName: "commandSuccessProbe",
-      timeoutMs: 2_000,
+      timeoutMs: STABLE_COMMAND_TIMEOUT_MS,
       outputLimitBytes: 4_096,
     },
   );
@@ -501,7 +505,7 @@ test("runs only manifest-declared commands and records complete stdout, stderr, 
       procedureName: "commandSuccessProbe",
       workingDirectory: ".",
       environment: {},
-      timeoutMs: 2_000,
+      timeoutMs: STABLE_COMMAND_TIMEOUT_MS,
       outputLimitBytes: 4_096,
     }),
   );
@@ -515,14 +519,17 @@ test("runs only manifest-declared commands and records complete stdout, stderr, 
     stderr: "command-note\n",
   });
   assert.equal(successEvidence.metadata.declaredExecutable, "node");
-  assert.equal(successEvidence.metadata.timeoutMs, 2_000);
+  assert.equal(
+    successEvidence.metadata.timeoutMs,
+    STABLE_COMMAND_TIMEOUT_MS,
+  );
   assert.equal(typeof successEvidence.metadata.startTimestamp, "string");
   assert.equal(typeof successEvidence.metadata.endTimestamp, "string");
 
   const failed = await control.execution.executeWorkUnit(
     workRequest(missionId, "command-fail", WorkUnitAction.RUN_COMMAND, {
       procedureName: "commandFailureProbe",
-      timeoutMs: 2_000,
+      timeoutMs: STABLE_COMMAND_TIMEOUT_MS,
       outputLimitBytes: 4_096,
     }),
   );
@@ -574,7 +581,7 @@ test("enforces timeout, cancellation, output limits, environment filtering, and 
   const cancelled = await control.execution.executeWorkUnit(
     workRequest(missionId, "cancel", WorkUnitAction.RUN_COMMAND, {
       procedureName: "longRunningProbe",
-      timeoutMs: 2_000,
+      timeoutMs: STABLE_COMMAND_TIMEOUT_MS,
       outputLimitBytes: 4_096,
     }),
     { cancellationSignal: abort.signal },
@@ -584,7 +591,7 @@ test("enforces timeout, cancellation, output limits, environment filtering, and 
   const bounded = await control.execution.executeWorkUnit(
     workRequest(missionId, "bounded", WorkUnitAction.RUN_COMMAND, {
       procedureName: "outputLimitProbe",
-      timeoutMs: 2_000,
+      timeoutMs: STABLE_COMMAND_TIMEOUT_MS,
       outputLimitBytes: 128,
     }),
   );
@@ -599,7 +606,7 @@ test("enforces timeout, cancellation, output limits, environment filtering, and 
     workRequest(missionId, "environment", WorkUnitAction.RUN_COMMAND, {
       procedureName: "environmentFilterProbe",
       environment: { FOUNDRY_TEST_VALUE: secret },
-      timeoutMs: 2_000,
+      timeoutMs: STABLE_COMMAND_TIMEOUT_MS,
       outputLimitBytes: 4_096,
     }),
   );

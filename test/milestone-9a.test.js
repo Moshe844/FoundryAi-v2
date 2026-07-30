@@ -359,7 +359,7 @@ test("model discovery adapters are registry-owned and credentials are never pers
   );
 });
 
-test("live discovery exposes task-tier candidates instead of one arbitrary model", async (t) => {
+test("live discovery retains the provider catalogue without model-name tier inference", async (t) => {
   const originalFetch = globalThis.fetch;
   t.after(() => {
     globalThis.fetch = originalFetch;
@@ -369,8 +369,8 @@ test("live discovery exposes task-tier candidates instead of one arbitrary model
       JSON.stringify({
         data: [
           {
-            id: "claude-opus-current",
-            display_name: "Claude Opus Current",
+            id: "provider-model-one",
+            display_name: "Provider Model One",
             max_input_tokens: 200_000,
             capabilities: {
               structured_outputs: { supported: true },
@@ -379,8 +379,8 @@ test("live discovery exposes task-tier candidates instead of one arbitrary model
             },
           },
           {
-            id: "claude-sonnet-current",
-            display_name: "Claude Sonnet Current",
+            id: "provider-model-two",
+            display_name: "Provider Model Two",
             max_input_tokens: 200_000,
             capabilities: {
               structured_outputs: { supported: true },
@@ -389,8 +389,8 @@ test("live discovery exposes task-tier candidates instead of one arbitrary model
             },
           },
           {
-            id: "claude-haiku-current",
-            display_name: "Claude Haiku Current",
+            id: "provider-model-three",
+            display_name: "Provider Model Three",
             max_input_tokens: 200_000,
             capabilities: {
               structured_outputs: { supported: true },
@@ -410,9 +410,9 @@ test("live discovery exposes task-tier candidates instead of one arbitrary model
   assert.deepEqual(
     models.map((model) => [model.modelId, model.latencyProfile]),
     [
-      ["claude-haiku-current", LatencyProfile.FAST],
-      ["claude-sonnet-current", LatencyProfile.BALANCED],
-      ["claude-opus-current", LatencyProfile.THOROUGH],
+      ["provider-model-one", LatencyProfile.BALANCED],
+      ["provider-model-two", LatencyProfile.BALANCED],
+      ["provider-model-three", LatencyProfile.BALANCED],
     ],
   );
 });
