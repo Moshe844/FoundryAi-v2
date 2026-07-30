@@ -1,0 +1,187 @@
+<title>Foundry — refined discovery surface</title>
+<!--
+  This page links the REAL shipped stylesheet (apps/web/app/globals.css) and
+  reproduces the markup that apps/web/app/page.tsx renders for the discovery
+  surface. Nothing here is a mock-up of an intention: if it looks right here,
+  it looks right in the app.
+-->
+<link rel="stylesheet" href="../../../apps/web/app/globals.css" />
+
+<div class="shell">
+  <nav class="rail" aria-label="Foundry">
+    <button class="brand">
+      <span class="brand-seed" aria-hidden="true"></span>
+      <span class="brand-word">Foundry</span>
+    </button>
+    <div class="nav">
+      <button class="nav-item active">
+        <svg class="nav-icon" width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M2 6.5 8 2l6 4.5V14H2V6.5Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
+        <span>Home</span>
+      </button>
+      <button class="nav-item">
+        <svg class="nav-icon" width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="2" y="3" width="12" height="10" rx="2" stroke="currentColor" stroke-width="1.3"/><path d="M2 6.5h12" stroke="currentColor" stroke-width="1.3"/></svg>
+        <span>Projects</span>
+      </button>
+    </div>
+    <div class="rail-spacer"></div>
+    <div class="rail-foot">
+      <button class="provider-chip"><span class="orb" aria-hidden="true"></span><span>2 providers ready</span></button>
+    </div>
+  </nav>
+
+  <main class="main" id="main">
+    <div class="content">
+
+      <!-- ACT: Foundry speaks first -->
+      <section class="act">
+        <div class="voice measure">
+          <span class="voice-mark" aria-hidden="true"></span>
+          <p class="t-label voice-label">Here&rsquo;s what I&rsquo;m thinking</p>
+          <h1 class="t-display-l voice-title">Ridgeway Plumbing</h1>
+          <p class="t-body-l voice-lead">A website that wins emergency callouts and quote requests for a local plumbing business — built so someone with a burst pipe can reach you in one tap, and someone planning a bathroom can ask for a written estimate.</p>
+        </div>
+
+        <div class="proposal">
+          <div class="rule-head">
+            <span class="rule-mark" aria-hidden="true"></span>
+            <h2 class="t-title-m">Here&rsquo;s what I&rsquo;d build</h2>
+          </div>
+          <p class="t-body-m lead measure" style="margin-top:0">This is the whole thing, not a starting point. I&rsquo;ve included what a business like yours normally needs, whether or not you asked for it.</p>
+
+          <ol class="proposal-list">
+            <li><span class="proposal-num" aria-hidden="true">01</span><span class="proposal-text">A visitor lands on a home page that says what you do, where you work, and how fast you answer</span></li>
+            <li><span class="proposal-num" aria-hidden="true">02</span><span class="proposal-text">A visitor with an urgent leak reaches an emergency callout page and can call in one tap</span></li>
+            <li><span class="proposal-num" aria-hidden="true">03</span><span class="proposal-text">A visitor browses your services with plain-language descriptions and indicative pricing</span></li>
+            <li><span class="proposal-num" aria-hidden="true">04</span><span class="proposal-text">A visitor requests a written estimate through a form that captures the job, address, and photos</span></li>
+            <li><span class="proposal-num" aria-hidden="true">05</span><span class="proposal-text">A visitor reads reviews from previous customers before deciding to call</span></li>
+            <li><span class="proposal-num" aria-hidden="true">06</span><span class="proposal-text">A visitor learns who you are, how long you have traded, and what you are certified for</span></li>
+            <li><span class="proposal-num" aria-hidden="true">07</span><span class="proposal-text">A visitor finds your contact details, hours, and the areas you cover on every page</span></li>
+            <li><span class="proposal-num" aria-hidden="true">08</span><span class="proposal-text">You see every estimate request in one place and can mark it as answered</span></li>
+          </ol>
+
+          <div class="included">
+            <p class="t-label ink-tertiary">Built in as standard — I didn&rsquo;t need to ask</p>
+            <div class="included-chips">
+              <span class="included-chip"><span class="included-tick" aria-hidden="true">✓</span>Its own database</span>
+              <span class="included-chip"><span class="included-tick" aria-hidden="true">✓</span>People can add records</span>
+              <span class="included-chip"><span class="included-tick" aria-hidden="true">✓</span>Data survives a refresh</span>
+              <span class="included-chip"><span class="included-tick" aria-hidden="true">✓</span>Tested in a real browser</span>
+              <span class="included-chip"><span class="included-tick" aria-hidden="true">✓</span>Built the way it would really ship</span>
+              <span class="included-chip"><span class="included-tick" aria-hidden="true">✓</span>Runs on your machine</span>
+            </div>
+          </div>
+
+          <p class="t-body-s ink-tertiary proposal-actors">Designed for homeowners with an urgent problem, homeowners planning work, and you.</p>
+        </div>
+      </section>
+
+      <!-- ACT: reasoning -->
+      <section class="act">
+        <div class="rule-head">
+          <span class="rule-mark" aria-hidden="true"></span>
+          <h2 class="t-title-m">Why I&rsquo;d build it this way</h2>
+        </div>
+        <ul class="reasoning measure">
+          <li class="t-body-m">Most of your visitors arrive on a phone, mid-problem, so the emergency route is one tap from every page rather than buried in a menu.</li>
+          <li class="t-body-m">Estimate requests are stored rather than emailed, because an email you miss is a job you lose and a list you can work through is not.</li>
+          <li class="t-body-m">Services get their own page each, so searches for a specific job find a specific page instead of your home page.</li>
+          <li class="t-body-m">Reviews sit next to the call button, since that is the moment someone decides whether to trust you.</li>
+        </ul>
+      </section>
+
+      <!-- ACT: curated recommendations -->
+      <section class="act">
+        <div class="rule-head">
+          <span class="rule-mark" aria-hidden="true"></span>
+          <h2 class="t-title-m">I&rsquo;d also recommend</h2>
+        </div>
+        <p class="t-body-m lead measure" style="margin-top:0">These aren&rsquo;t upsells or a checklist. They&rsquo;re the things I&rsquo;d push for if we were sitting down together, because businesses like yours usually get real value from them.</p>
+        <div class="sug-stack">
+          <button class="sug" role="switch" aria-checked="true">
+            <span class="sug-toggle" aria-hidden="true">✓</span>
+            <span class="sug-body">
+              <span class="sug-title">Photo upload on the estimate form</span>
+              <span class="sug-why t-body-s">A picture of the actual pipe saves you a site visit before you have even quoted, which is the single biggest time saver for a trade business.</span>
+            </span>
+            <span class="sug-state t-caption" aria-hidden="true">Added</span>
+          </button>
+          <button class="sug" role="switch" aria-checked="false">
+            <span class="sug-toggle" aria-hidden="true">+</span>
+            <span class="sug-body">
+              <span class="sug-title">Service-area checker by postcode</span>
+              <span class="sug-why t-body-s">Stops calls from outside your patch before they reach you, and reassures the ones inside it that you actually cover their street.</span>
+            </span>
+            <span class="sug-state t-caption" aria-hidden="true">Add</span>
+          </button>
+          <button class="sug" role="switch" aria-checked="false">
+            <span class="sug-toggle" aria-hidden="true">+</span>
+            <span class="sug-body">
+              <span class="sug-title">Out-of-hours notice that changes itself</span>
+              <span class="sug-why t-body-s">Outside your hours the emergency page says what the callout charge is, so you stop having that conversation at 2am.</span>
+            </span>
+            <span class="sug-state t-caption" aria-hidden="true">Add</span>
+          </button>
+          <button class="sug" role="switch" aria-checked="false">
+            <span class="sug-toggle" aria-hidden="true">+</span>
+            <span class="sug-body">
+              <span class="sug-title">Gas Safe and insurance badges near the call button</span>
+              <span class="sug-why t-body-s">Certification is the thing homeowners check before letting a stranger into the house, so it belongs at the point of decision rather than on the about page.</span>
+            </span>
+            <span class="sug-state t-caption" aria-hidden="true">Add</span>
+          </button>
+        </div>
+        <p class="t-body-s ink-tertiary" style="margin-top:var(--space-4)">1 added. I&rsquo;ll build it and prove it works like everything else.</p>
+      </section>
+
+      <!-- ACT: the one real decision -->
+      <section class="act">
+        <div class="rule-head">
+          <span class="rule-mark" aria-hidden="true"></span>
+          <h2 class="t-title-m">One thing only you can decide</h2>
+        </div>
+        <p class="t-body-m lead measure" style="margin-top:0">Everything else I&rsquo;ve already decided. If you&rsquo;d rather not weigh in, skip it and I&rsquo;ll use my judgement — that&rsquo;s a perfectly good answer.</p>
+
+        <div style="margin-top:var(--space-6);max-width:840px">
+          <fieldset class="question">
+            <legend class="t-title-s question-prompt">Should estimate requests be something only you can see?</legend>
+            <p class="t-body-m question-reason">If they are private, the site needs a way for you to sign in, and that changes how the whole thing is put together. If they are not, anyone with the link could read your customers&rsquo; addresses — which I would not do to you.</p>
+
+            <button class="opt opt-decide" role="radio" aria-checked="false">
+              <span class="opt-row">
+                <span class="opt-check" aria-hidden="true">✓</span>
+                <span>
+                  <span class="opt-decide-head">
+                    <span class="opt-decide-lead">I recommend a private list only you can sign in to</span>
+                    <span class="badge">My recommendation</span>
+                  </span>
+                  <span class="opt-decide-detail t-body-s">Leave this with me and that&rsquo;s what I&rsquo;ll do.</span>
+                </span>
+              </span>
+            </button>
+
+            <div class="opt-grid" role="radiogroup" aria-label="Estimate request privacy">
+              <button class="opt" role="radio" aria-checked="false"><span class="opt-row"><span class="opt-check" aria-hidden="true">✓</span><span>A private list I sign in to see</span></span></button>
+              <button class="opt" role="radio" aria-checked="false"><span class="opt-row"><span class="opt-check" aria-hidden="true">✓</span><span>Send them straight to my email instead</span></span></button>
+            </div>
+
+            <div class="q-links">
+              <button class="btn-quiet small">Something else&hellip;</button>
+              <button class="btn-quiet small">Skip for now</button>
+            </div>
+          </fieldset>
+        </div>
+      </section>
+
+      <!-- ACT: conversational close -->
+      <section class="act confirm-band">
+        <h2 class="t-title-l">Does this sound right?</h2>
+        <p class="t-body-m lead measure" style="margin-top:var(--space-2)">I&rsquo;ll fold in the 1 idea you picked and write the plan.</p>
+        <div class="continue-row">
+          <button class="btn btn-primary btn-large">Yes — write the plan</button>
+          <span class="t-body-s continue-note">1 left to me</span>
+        </div>
+      </section>
+
+    </div>
+  </main>
+</div>

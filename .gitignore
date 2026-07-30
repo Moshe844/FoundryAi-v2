@@ -1,0 +1,9 @@
+node_modules/
+coverage/
+*.log
+*.tsbuildinfo
+**/.git.nested-backup/
+.env
+.env.*
+!.env.example
+.foundry/

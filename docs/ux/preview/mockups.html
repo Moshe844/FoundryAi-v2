@@ -1,0 +1,393 @@
+<title>Foundry — clickable mockups</title>
+<!--
+  Clickable walkthrough of the Foundry customer experience.
+  Links the REAL shipped stylesheet (apps/web/app/globals.css), so this is not
+  a separate mock-up language — it is what the application renders.
+-->
+<link rel="stylesheet" href="../../../apps/web/app/globals.css" />
+<style>
+  /* Review chrome only — not part of the product. */
+  .mk-bar {
+    position: sticky; top: 0; z-index: 60;
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+    padding: 10px 24px;
+    background: var(--surface-ink); color: var(--ink-inverse);
+    border-bottom: 1px solid rgba(0,0,0,.4);
+  }
+  .mk-bar strong { font: 600 13px/18px var(--font-text); }
+  .mk-note { font: 400 12px/16px var(--font-text); color: #b9ada5; }
+  .mk-tabs { display: flex; gap: 2px; flex-wrap: wrap; }
+  .mk-tabs button {
+    padding: 5px 11px; border-radius: 6px;
+    font: 500 13px/18px var(--font-text); color: #c9beb6;
+  }
+  .mk-tabs button:hover { background: rgba(255,255,255,.08); color: #fff; }
+  .mk-tabs button[aria-current="true"] { background: var(--accent-fill); color: #fff; }
+  .mk-screen[hidden] { display: none; }
+</style>
+
+<div class="mk-bar">
+  <strong>Foundry · clickable mockups</strong>
+  <div class="mk-tabs" role="tablist">
+    <button data-screen="home" aria-current="true">Home</button>
+    <button data-screen="read">The proposal</button>
+    <button data-screen="plan">The plan</button>
+    <button data-screen="build">Building</button>
+    <button data-screen="done">Delivered</button>
+  </div>
+  <span class="mk-note">Buttons move you through the flow. Real stylesheet, real markup.</span>
+</div>
+
+<div class="shell">
+  <nav class="rail" aria-label="Foundry">
+    <button class="brand"><span class="brand-seed" aria-hidden="true"></span><span class="brand-word">Foundry</span></button>
+    <div class="nav">
+      <button class="nav-item active"><svg class="nav-icon" width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M2 6.5 8 2l6 4.5V14H2V6.5Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg><span>Home</span></button>
+      <button class="nav-item"><svg class="nav-icon" width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="2" y="3" width="12" height="10" rx="2" stroke="currentColor" stroke-width="1.3"/><path d="M2 6.5h12" stroke="currentColor" stroke-width="1.3"/></svg><span>Projects</span></button>
+    </div>
+    <div class="rail-spacer"></div>
+    <div class="rail-foot">
+      <button class="provider-chip"><span class="orb" aria-hidden="true"></span><span>2 providers ready</span></button>
+    </div>
+  </nav>
+
+  <main class="main" id="main">
+    <div class="content">
+
+    <!-- ============================ HOME ============================ -->
+    <div class="mk-screen" data-screen="home">
+      <section class="act">
+        <div class="masthead">
+          <span class="t-micro">Foundry</span>
+          <span class="masthead-rule" aria-hidden="true"></span>
+          <span class="t-caption">Design · Architecture · Build · Proof</span>
+        </div>
+
+        <div class="home-split">
+          <div>
+            <div class="measure">
+              <h1 class="t-display-xl">What should I build for you?</h1>
+              <p class="t-body-l lead">A sentence is enough. I&rsquo;ll work out what a business like yours needs, propose it, then build it, run it, and prove it works.</p>
+            </div>
+
+            <div class="measure" style="margin-top:var(--space-6)">
+              <div class="composer">
+                <textarea id="mk-intent" rows="3" placeholder="A booking site for my studio">Build me a website for my plumbing business</textarea>
+                <div class="composer-foot">
+                  <span class="t-caption ink-tertiary">Enter to start · Shift + Enter for a new line</span>
+                  <button class="btn btn-primary" data-go="read">Start</button>
+                </div>
+              </div>
+              <p class="t-body-s trust">I&rsquo;ll come back with a proposal before anything is built — and I&rsquo;ll tell you what I&rsquo;d add that you didn&rsquo;t ask for.</p>
+
+              <p class="t-micro ink-tertiary" style="margin-top:var(--space-6)">Try</p>
+              <div class="chips">
+                <button class="chip">A website for my business</button>
+                <button class="chip">An appointment booking system</button>
+                <button class="chip">A customer portal with logins</button>
+                <button class="chip">An internal tool for my team</button>
+                <button class="chip">An API for reservations</button>
+              </div>
+            </div>
+          </div>
+
+          <aside class="how-panel">
+            <p class="t-label">How this works</p>
+            <div class="how-step"><span class="how-num">01</span><span class="how-body"><span class="how-title">You describe the outcome</span><span class="how-detail t-body-s">One sentence. No specs, no page lists, no technical decisions.</span></span></div>
+            <div class="how-step"><span class="how-num">02</span><span class="how-body"><span class="how-title">I come back with a proposal</span><span class="how-detail t-body-s">The whole thing — including what I&rsquo;d add that you didn&rsquo;t ask for, and why.</span></span></div>
+            <div class="how-step"><span class="how-num">03</span><span class="how-body"><span class="how-title">You decide only what matters</span><span class="how-detail t-body-s">Usually one or two things. Skip them and I&rsquo;ll use my judgement.</span></span></div>
+            <div class="how-step"><span class="how-num">04</span><span class="how-body"><span class="how-title">I build it and prove it</span><span class="how-detail t-body-s">Run in a real browser against every promise I made. If something doesn&rsquo;t hold, I say so.</span></span></div>
+            <p class="how-foot t-caption">Web work only — web apps, business websites, customer portals, internal tools, and web APIs. Ask for mobile, desktop, or a native game and I&rsquo;ll tell you honestly rather than substitute something else.</p>
+          </aside>
+        </div>
+      </section>
+
+      <section class="act">
+        <div class="section-head"><h2 class="t-title-m">Your projects</h2></div>
+        <div class="grid-3">
+          <article class="card project">
+            <div class="project-top"><span class="mono-mark">R</span><div class="project-body"><p class="project-name">Ridgeway Plumbing</p><p class="t-body-s project-sum">Emergency callouts and written estimates for a local trade business.</p></div></div>
+            <div class="project-foot"><span class="pill pill-building"><i></i>Building</span><span class="t-caption ink-tertiary">Just now</span></div>
+            <div class="project-actions"><button class="btn btn-secondary btn-wide" data-go="build">Watch</button></div>
+          </article>
+          <article class="card project">
+            <div class="project-top"><span class="mono-mark">S</span><div class="project-body"><p class="project-name">Studio Booking</p><p class="t-body-s project-sum">Clients pick a service, choose a real available time, and confirm.</p></div></div>
+            <div class="project-foot"><span class="pill pill-delivered"><i></i>Delivered</span><span class="t-caption ink-tertiary">2h ago</span></div>
+            <div class="project-actions"><button class="btn btn-secondary btn-wide" data-go="done">Continue</button></div>
+          </article>
+          <article class="card project">
+            <div class="project-top"><span class="mono-mark">T</span><div class="project-body"><p class="project-name">Team Directory</p><p class="t-body-s project-sum">A searchable directory of who does what, with a printable report.</p></div></div>
+            <div class="project-foot"><span class="pill pill-attention"><i></i>Waiting on you</span><span class="t-caption ink-tertiary">Yesterday</span></div>
+            <div class="project-actions"><button class="btn btn-secondary btn-wide" data-go="read">Answer</button></div>
+          </article>
+        </div>
+      </section>
+    </div>
+
+    <!-- ========================= THE PROPOSAL ========================= -->
+    <div class="mk-screen" data-screen="read" hidden>
+      <section class="act">
+        <div class="voice measure">
+          <span class="voice-mark" aria-hidden="true"></span>
+          <p class="t-label voice-label">Here&rsquo;s what I&rsquo;m thinking</p>
+          <h1 class="t-display-l voice-title">Ridgeway Plumbing</h1>
+          <p class="t-body-l voice-lead">A website that wins emergency callouts and quote requests for a local plumbing business — built so someone with a burst pipe can reach you in one tap, and someone planning a bathroom can ask for a written estimate.</p>
+        </div>
+
+        <div class="proposal">
+          <div class="rule-head"><span class="rule-mark" aria-hidden="true"></span><h2 class="t-title-m">Here&rsquo;s what I&rsquo;d build</h2></div>
+          <p class="t-body-m lead measure" style="margin-top:0">This is the whole thing, not a starting point. I&rsquo;ve included what a business like yours normally needs, whether or not you asked for it.</p>
+          <ol class="proposal-list">
+            <li><span class="proposal-num">01</span><span class="proposal-text">A visitor lands on a home page that says what you do, where you work, and how fast you answer</span></li>
+            <li><span class="proposal-num">02</span><span class="proposal-text">A visitor with an urgent leak reaches an emergency callout page and can call in one tap</span></li>
+            <li><span class="proposal-num">03</span><span class="proposal-text">A visitor browses your services with plain-language descriptions and indicative pricing</span></li>
+            <li><span class="proposal-num">04</span><span class="proposal-text">A visitor requests a written estimate through a form that captures the job, address, and photos</span></li>
+            <li><span class="proposal-num">05</span><span class="proposal-text">A visitor reads reviews from previous customers before deciding to call</span></li>
+            <li><span class="proposal-num">06</span><span class="proposal-text">A visitor learns who you are, how long you have traded, and what you are certified for</span></li>
+            <li><span class="proposal-num">07</span><span class="proposal-text">A visitor finds your contact details, hours, and the areas you cover on every page</span></li>
+            <li><span class="proposal-num">08</span><span class="proposal-text">You see every estimate request in one place and can mark it as answered</span></li>
+          </ol>
+          <div class="included">
+            <p class="t-label ink-tertiary">Built in as standard — I didn&rsquo;t need to ask</p>
+            <div class="included-chips">
+              <span class="included-chip"><span class="included-tick">✓</span>Its own database</span>
+              <span class="included-chip"><span class="included-tick">✓</span>People can add records</span>
+              <span class="included-chip"><span class="included-tick">✓</span>Data survives a refresh</span>
+              <span class="included-chip"><span class="included-tick">✓</span>Tested in a real browser</span>
+              <span class="included-chip"><span class="included-tick">✓</span>Built the way it would really ship</span>
+            </div>
+          </div>
+          <p class="t-body-s ink-tertiary proposal-actors">Designed for homeowners with an urgent problem, homeowners planning work, and you.</p>
+        </div>
+      </section>
+
+      <section class="act">
+        <div class="rule-head"><span class="rule-mark" aria-hidden="true"></span><h2 class="t-title-m">The calls I made, and why</h2></div>
+        <p class="t-body-m lead measure" style="margin-top:0">These are decisions, not options. I&rsquo;ve already weighed them — but if one looks wrong for your business, say so and I&rsquo;ll rethink it.</p>
+        <ul class="reasoning measure">
+          <li class="t-body-m">Most of your visitors arrive on a phone, mid-problem, so the emergency route is one tap from every page rather than buried in a menu.</li>
+          <li class="t-body-m">Estimate requests are stored rather than emailed, because an email you miss is a job you lose and a list you can work through is not.</li>
+          <li class="t-body-m">Services get their own page each, so searches for a specific job find a specific page instead of your home page.</li>
+          <li class="t-body-m">Reviews sit next to the call button, since that is the moment someone decides whether to trust you.</li>
+        </ul>
+      </section>
+
+      <section class="act">
+        <div class="rule-head"><span class="rule-mark" aria-hidden="true"></span><h2 class="t-title-m">What I&rsquo;ve deliberately left out</h2></div>
+        <p class="t-body-m lead measure" style="margin-top:0">Knowing what a project isn&rsquo;t matters as much as knowing what it is. None of this is an oversight — ask for any of it and I&rsquo;ll fold it in.</p>
+        <ul class="left-out measure">
+          <li class="t-body-m">Online payment. Trade work is quoted before it is priced, so taking card details up front would cost you jobs rather than win them.</li>
+          <li class="t-body-m">A blog. It is a commitment to write, and an empty blog reads worse than no blog at all.</li>
+          <li class="t-body-m">Live chat. You are under a sink most of the day, and an unanswered chat widget damages trust more than not having one.</li>
+          <li class="t-body-m">Customer accounts. Nobody creates a login to book a plumber once. If repeat servicing becomes a real part of the business, that changes.</li>
+        </ul>
+      </section>
+
+      <section class="act">
+        <div class="rule-head"><span class="rule-mark" aria-hidden="true"></span><h2 class="t-title-m">I&rsquo;d also recommend</h2></div>
+        <p class="t-body-m lead measure" style="margin-top:0">These aren&rsquo;t upsells or a checklist. They&rsquo;re the things I&rsquo;d push for if we were sitting down together, because businesses like yours usually get real value from them.</p>
+        <div class="sug-stack">
+          <button class="sug" role="switch" aria-checked="true"><span class="sug-toggle">✓</span><span class="sug-body"><span class="sug-title">Photo upload on the estimate form</span><span class="sug-why t-body-s">A picture of the actual pipe saves you a site visit before you have even quoted, which is the single biggest time saver for a trade business.</span></span><span class="sug-state t-caption">Added</span></button>
+          <button class="sug" role="switch" aria-checked="false"><span class="sug-toggle">+</span><span class="sug-body"><span class="sug-title">Service-area checker by postcode</span><span class="sug-why t-body-s">Stops calls from outside your patch before they reach you, and reassures the ones inside it that you actually cover their street.</span></span><span class="sug-state t-caption">Add</span></button>
+          <button class="sug" role="switch" aria-checked="false"><span class="sug-toggle">+</span><span class="sug-body"><span class="sug-title">Out-of-hours notice that changes itself</span><span class="sug-why t-body-s">Outside your hours the emergency page says what the callout charge is, so you stop having that conversation at 2am.</span></span><span class="sug-state t-caption">Add</span></button>
+          <button class="sug" role="switch" aria-checked="false"><span class="sug-toggle">+</span><span class="sug-body"><span class="sug-title">Certification badges near the call button</span><span class="sug-why t-body-s">Accreditation is the thing homeowners check before letting a stranger into the house, so it belongs at the point of decision rather than on the about page.</span></span><span class="sug-state t-caption">Add</span></button>
+        </div>
+      </section>
+
+      <section class="act">
+        <div class="rule-head"><span class="rule-mark" aria-hidden="true"></span><h2 class="t-title-m">One thing only you can decide</h2></div>
+        <p class="t-body-m lead measure" style="margin-top:0">Everything else I&rsquo;ve already decided. If you&rsquo;d rather not weigh in, skip it and I&rsquo;ll use my judgement — that&rsquo;s a perfectly good answer.</p>
+        <div style="margin-top:var(--space-6);max-width:840px">
+          <fieldset class="question">
+            <legend class="t-title-s question-prompt">Should estimate requests be something only you can see?</legend>
+            <p class="t-body-m question-reason">If they are private, the site needs a way for you to sign in, and that changes how the whole thing is put together. If they are not, anyone with the link could read your customers&rsquo; addresses — which I would not do to you.</p>
+            <button class="opt opt-decide" role="radio" aria-checked="false"><span class="opt-row"><span class="opt-check">✓</span><span><span class="opt-decide-head"><span class="opt-decide-lead">I recommend a private list only you can sign in to</span><span class="badge">My recommendation</span></span><span class="opt-decide-detail t-body-s">Leave this with me and that&rsquo;s what I&rsquo;ll do.</span></span></span></button>
+            <div class="opt-grid" role="radiogroup" aria-label="Privacy">
+              <button class="opt" role="radio" aria-checked="false"><span class="opt-row"><span class="opt-check">✓</span><span>A private list I sign in to see</span></span></button>
+              <button class="opt" role="radio" aria-checked="false"><span class="opt-row"><span class="opt-check">✓</span><span>Send them straight to my email</span></span></button>
+            </div>
+            <div class="q-links"><button class="btn-quiet small">Something else&hellip;</button><button class="btn-quiet small">Skip for now</button></div>
+          </fieldset>
+        </div>
+      </section>
+
+      <section class="act confirm-band">
+        <h2 class="t-title-l">Does this sound right?</h2>
+        <p class="t-body-m lead measure" style="margin-top:var(--space-2)">I&rsquo;ll fold in the 1 idea you picked and write the plan.</p>
+        <div class="continue-row"><button class="btn btn-primary btn-large" data-go="plan">Yes — write the plan</button><span class="t-body-s continue-note">1 left to me</span></div>
+      </section>
+    </div>
+
+    <!-- =========================== THE PLAN =========================== -->
+    <div class="mk-screen" data-screen="plan" hidden>
+      <section class="act">
+        <div class="voice measure">
+          <span class="voice-mark" aria-hidden="true"></span>
+          <p class="t-label voice-label">Before I start</p>
+          <h1 class="t-display-l voice-title">Here&rsquo;s the plan</h1>
+          <p class="t-body-l voice-lead">Everything I&rsquo;m going to build, the calls I&rsquo;ve made on your behalf, and exactly what I&rsquo;ll prove before I tell you it&rsquo;s done.</p>
+        </div>
+
+        <dl style="margin-top:var(--space-10);max-width:900px">
+          <div class="field-row"><dt>What I&rsquo;ll build</dt><dd class="t-body-m">Ridgeway Plumbing — a website that wins emergency callouts and written estimate requests for a local trade business.</dd></div>
+          <div class="field-row"><dt>Who it&rsquo;s for</dt><dd class="t-body-m"><div class="inline-list"><span>Homeowners with an urgent problem</span><span>Homeowners planning work</span><span>You</span></div></dd></div>
+          <div class="field-row"><dt>How it&rsquo;s put together</dt><dd>
+            <p class="t-body-m">A web application with its own database, built the way it would really ship, running on your machine.</p>
+            <details><summary class="t-label" style="color:var(--accent-fill);margin-top:var(--space-3)"><svg class="chev" width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M3 1.5 6.5 5 3 8.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>Technical shape</summary><p class="t-body-s ink-secondary" style="margin-top:var(--space-3)">Next.js · TypeScript · SQLite · npm · Playwright for browser testing. I chose this because it&rsquo;s the one setup I&rsquo;ve certified end to end.</p></details>
+          </dd></div>
+          <div class="field-row"><dt>Your decisions</dt><dd><p class="t-body-m">Estimate privacy · A private list you sign in to — <span class="attribution">my call, because it holds customer addresses</span></p></dd></div>
+          <div class="field-row"><dt>Ideas you added</dt><dd><p class="t-body-m">Photo upload on the estimate form</p></dd></div>
+          <div class="field-row"><dt>What I&rsquo;m assuming</dt><dd><ul class="bullets t-body-m stack-list"><li>One trading location, covering the surrounding area</li><li>You answer the phone yourself during working hours</li><li>Pricing shown is indicative, not a fixed quote</li></ul></dd></div>
+          <div class="field-row"><dt>What I&rsquo;ll prove</dt><dd>
+            <p class="t-body-m">14 things, including:</p>
+            <ul class="proved t-body-m stack-list" style="margin-top:var(--space-3)"><li>A visitor can submit an estimate request end to end</li><li>An estimate request still exists after a refresh</li><li>The emergency number is reachable in one tap at phone width</li><li>No blocking errors in a real browser</li></ul>
+          </dd></div>
+        </dl>
+
+        <div class="continue-row"><button class="btn btn-primary btn-large" data-go="build">Start building</button><button class="btn-quiet small">Change something</button><button class="btn-quiet small">Reconsider this</button></div>
+      </section>
+    </div>
+
+    <!-- ============================ BUILDING ============================ -->
+    <div class="mk-screen" data-screen="build" hidden>
+      <section class="act">
+        <div class="build-head">
+          <h1 class="t-title-l">Ridgeway Plumbing</h1>
+          <div class="build-head-meta"><span class="pill pill-building"><i></i>Building</span><span class="t-caption ink-tertiary">6 min</span><button class="btn btn-secondary btn-compact">Stop</button></div>
+        </div>
+
+        <div class="dock-layout has-dock">
+          <div>
+            <ol class="spine">
+              <li class="done"><span class="spine-mark"><span class="spine-dot">✓</span><span class="spine-line"></span></span><div class="spine-body"><span class="spine-text">Understanding what you need</span></div></li>
+              <li class="done"><span class="spine-mark"><span class="spine-dot">✓</span><span class="spine-line"></span></span><div class="spine-body"><span class="spine-text">Designing the experience</span></div></li>
+              <li class="done"><span class="spine-mark"><span class="spine-dot">✓</span><span class="spine-line"></span></span><div class="spine-body"><span class="spine-text">Creating the application structure</span><span class="spine-count"> · 2 proved</span></div></li>
+              <li class="now"><span class="spine-mark"><span class="spine-dot"></span><span class="spine-line"></span></span><div class="spine-body"><span class="spine-text">Building the main workflows</span></div></li>
+              <li><span class="spine-mark"><span class="spine-dot"></span><span class="spine-line"></span></span><div class="spine-body"><span class="spine-text">Connecting data</span></div></li>
+              <li><span class="spine-mark"><span class="spine-dot"></span><span class="spine-line"></span></span><div class="spine-body"><span class="spine-text">Preparing it to run</span></div></li>
+              <li><span class="spine-mark"><span class="spine-dot"></span><span class="spine-line"></span></span><div class="spine-body"><span class="spine-text">Running the application</span></div></li>
+              <li><span class="spine-mark"><span class="spine-dot"></span><span class="spine-line"></span></span><div class="spine-body"><span class="spine-text">Testing important actions</span></div></li>
+              <li><span class="spine-mark"><span class="spine-dot"></span><span class="spine-line"></span></span><div class="spine-body"><span class="spine-text">Verifying the result</span></div></li>
+            </ol>
+
+            <div class="now-block measure">
+              <h2 class="t-display-l">Building the main workflows</h2>
+              <p class="now-why">I&rsquo;m connecting estimate requests to permanent storage so an inquiry is never lost between the form and your inbox.</p>
+            </div>
+
+            <p class="t-body-s ink-tertiary">You can leave this page. I&rsquo;ll keep going and everything is recorded.</p>
+
+            <details class="eng"><summary><svg class="chev" width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M3 1.5 6.5 5 3 8.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>Engineering details · 61 records</summary>
+              <div class="eng-body"><p class="t-body-s eng-intro">Everything below is reconstructed from records Foundry can&rsquo;t rewrite.</p>
+                <div class="eng-scroll"><table><thead><tr><th>provider</th><th>model</th><th>task</th><th>in</th><th>out</th><th>cost</th></tr></thead><tbody>
+                  <tr><td>anthropic</td><td>claude-sonnet-4</td><td>file generation</td><td>8,412</td><td>3,190</td><td>$0.0471</td></tr>
+                  <tr><td>openai</td><td>gpt-5-mini</td><td>mechanical transform</td><td>1,204</td><td>388</td><td>cost unavailable locally</td></tr>
+                </tbody></table></div>
+              </div>
+            </details>
+          </div>
+
+          <div>
+            <div class="preview">
+              <div class="preview-bar"><span class="preview-bar-title">Preview</span><div class="preview-tools"><button aria-pressed="true" aria-label="Desktop">▭</button><button aria-label="Phone">▯</button><button aria-label="Open">↗</button></div></div>
+              <div class="preview-body" style="height:360px;background:#fff">
+                <div style="font-family:var(--font-text);color:#22201e;height:100%">
+                  <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid #eceae7">
+                    <span style="font:600 15px/22px var(--font-display)">Ridgeway Plumbing</span>
+                    <span style="font-size:12px;background:#9b3126;color:#fff;padding:6px 12px;border-radius:5px">24h emergency · 0800 555 0134</span>
+                  </div>
+                  <div style="padding:26px 20px 16px">
+                    <h2 style="font:600 23px/29px var(--font-display);letter-spacing:-.01em">Burst pipe? We answer in 30 minutes.</h2>
+                    <p style="font-size:13px;color:#6b645e;margin-top:6px">Gas Safe registered · Covering Ridgeway and 12 miles around</p>
+                  </div>
+                  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:0 20px 16px">
+                    <div style="border:1px solid #e4e0dc;border-radius:6px;padding:10px;font-size:12px">Emergency callout</div>
+                    <div style="border:1px solid #e4e0dc;border-radius:6px;padding:10px;font-size:12px">Bathrooms</div>
+                    <div style="border:1px solid #e4e0dc;border-radius:6px;padding:10px;font-size:12px">Boilers</div>
+                  </div>
+                  <div style="margin:0 20px;height:36px;border-radius:6px;background:#22201e;color:#fff;display:grid;place-items:center;font:600 13px/20px var(--font-text)">Request a written estimate</div>
+                </div>
+              </div>
+              <div class="preview-foot"><span class="orb"></span><span>Live · localhost:4310</span></div>
+            </div>
+            <div class="continue-row"><button class="btn btn-secondary" data-go="done">Skip ahead to delivery →</button></div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- ============================ DELIVERED ============================ -->
+    <div class="mk-screen" data-screen="done" hidden>
+      <section class="act">
+        <div class="delivery">
+          <p class="t-micro eyebrow">Ridgeway Plumbing</p>
+          <h1 class="t-display-xl">It&rsquo;s built, and I&rsquo;ve proved it works.</h1>
+          <p class="t-body-l lead measure">Here&rsquo;s the handover: what I built, the calls I made and why, what I left out on purpose, and where I&rsquo;d take it next.</p>
+
+          <div class="delivery-preview preview">
+            <div class="preview-bar"><span class="preview-bar-title">Preview</span><div class="preview-tools"><button aria-pressed="true" aria-label="Desktop">▭</button><button aria-label="Phone">▯</button><button aria-label="Open">↗</button></div></div>
+            <div class="preview-body" style="height:300px;background:#fff">
+              <div style="font-family:var(--font-text);color:#22201e;height:100%">
+                <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid #eceae7"><span style="font:600 15px/22px var(--font-display)">Ridgeway Plumbing</span><span style="font-size:12px;background:#9b3126;color:#fff;padding:6px 12px;border-radius:5px">24h emergency</span></div>
+                <div style="padding:24px 20px"><h2 style="font:600 22px/28px var(--font-display)">Estimate request received</h2><p style="font-size:13px;color:#6b645e;margin-top:6px">We&rsquo;ll come back to you within one working day.</p></div>
+              </div>
+            </div>
+            <div class="preview-foot"><span class="orb"></span><span>Live · localhost:4310</span></div>
+          </div>
+
+          <dl style="margin-top:var(--space-8)">
+            <div class="field-row"><dt>What you got</dt><dd class="t-body-m">A website that wins emergency callouts and written estimate requests, running on your machine with its own database.</dd></div>
+            <div class="field-row"><dt>What I proved</dt><dd>
+              <p class="t-body-m"><span class="count-strong">14 of 14</span></p>
+              <ul class="proved t-body-m stack-list" style="margin-top:var(--space-3)"><li>A visitor can submit an estimate request end to end</li><li>An estimate request still exists after a refresh</li><li>The emergency number is reachable in one tap at phone width</li><li>Photo uploads are stored against the right request</li><li>No blocking errors in a real browser</li></ul>
+            </dd></div>
+            <div class="field-row"><dt>Why I built it this way</dt><dd>
+              <p class="t-body-m">Estimate privacy · A private list you sign in to — <span class="attribution">my call, because it holds customer addresses</span></p>
+              <p class="t-body-m">Pricing · Shown as indicative ranges — <span class="attribution">my call, so you are not held to a fixed quote</span></p>
+            </dd></div>
+            <div class="field-row"><dt>What I left out on purpose</dt><dd><ul class="left-out stack-list t-body-m"><li>Email notifications — needs a mail service this machine doesn&rsquo;t have</li><li>Built for one trading location</li><li>The database suits a single copy of the application</li></ul></dd></div>
+            <div class="field-row"><dt>If this became Version 2</dt><dd><p class="t-body-m" style="margin-bottom:var(--space-3)">This is where I&rsquo;d take it next, in the order I&rsquo;d do it.</p><ol class="numbered t-body-m stack-list"><li><span><strong>Service-area checker by postcode</strong> — stops out-of-area calls reaching you at all, which is the biggest drain on your time right now.</span></li><li><span><strong>Out-of-hours notice that changes itself</strong> — sets the callout charge expectation before the phone rings at 2am.</span></li><li><span><strong>Certification badges by the call button</strong> — cheapest trust win available, right at the decision point.</span></li></ol></dd></div>
+          </dl>
+        </div>
+      </section>
+    </div>
+
+    </div>
+  </main>
+</div>
+
+<script>
+(function () {
+  var screens = document.querySelectorAll(".mk-screen");
+  var tabs = document.querySelectorAll(".mk-tabs button");
+  function show(name) {
+    screens.forEach(function (s) { s.hidden = s.dataset.screen !== name; });
+    tabs.forEach(function (t) { t.setAttribute("aria-current", String(t.dataset.screen === name)); });
+    window.scrollTo(0, 0);
+  }
+  tabs.forEach(function (t) { t.addEventListener("click", function () { show(t.dataset.screen); }); });
+  document.querySelectorAll("[data-go]").forEach(function (b) {
+    b.addEventListener("click", function () { show(b.dataset.go); });
+  });
+  // Options and recommendations are live so the interaction can be felt.
+  document.querySelectorAll(".opt").forEach(function (o) {
+    o.addEventListener("click", function () {
+      var group = o.closest("fieldset");
+      group.querySelectorAll(".opt").forEach(function (x) { x.setAttribute("aria-checked", String(x === o)); });
+    });
+  });
+  document.querySelectorAll(".sug").forEach(function (s) {
+    s.addEventListener("click", function () {
+      var on = s.getAttribute("aria-checked") === "true";
+      s.setAttribute("aria-checked", String(!on));
+      s.querySelector(".sug-toggle").textContent = on ? "+" : "✓";
+      s.querySelector(".sug-state").textContent = on ? "Add" : "Added";
+    });
+  });
+  document.querySelectorAll(".chip").forEach(function (c) {
+    c.addEventListener("click", function () {
+      document.getElementById("mk-intent").value = c.textContent.trim();
+    });
+  });
+})();
+</script>

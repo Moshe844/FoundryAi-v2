@@ -1,0 +1,17 @@
+{
+  "name": "foundry-v2",
+  "version": "0.10.0",
+  "private": true,
+  "description": "Foundry v2 through Milestone 10: a calm, guided software-engineering experience over the existing production foundation",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "scripts": {
+    "test": "node --test --test-concurrency=1",
+    "test:coverage": "node --test --test-concurrency=1 --experimental-test-coverage"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

@@ -1,0 +1,1604 @@
+<title>Foundry v2 — Experience Prototype</title>
+
+<style>
+/* ==========================================================================
+   Foundry v2 — coded design prototype
+   Implements docs/ux/04-design-system.md and 05-typography.md verbatim.
+
+   Light-committed by design decision (see 04-design-system.md §4.1 rule 6):
+   the token set is AA-verified in light only, so a half-checked dark palette
+   is not shipped. Tokens are pinned identically under every theme signal so
+   this page renders correctly regardless of the viewer's OS or toggle.
+   ========================================================================== */
+
+:root,
+:root[data-theme="light"],
+:root[data-theme="dark"] {
+  /* Surfaces */
+  --surface-canvas: #FBF8F4;
+  --surface-raised: #FFFDFB;
+  --surface-inset:  #F4EEE7;
+  --surface-cream:  #F7EFE3;
+  --surface-ink:    #241F1C;
+  --surface-scrim:  rgba(36, 31, 28, .44);
+
+  /* Ink */
+  --ink-primary:   #1F1A17;
+  --ink-secondary: #574C45;
+  --ink-tertiary:  #7A6C63;
+  --ink-inverse:   #FDFBF8;
+
+  /* Accent — three values, three jobs */
+  --accent-fill: #A94E1F;
+  --accent-hover:#96431A;
+  --accent-press:#853B16;
+  --accent-line: #C8622C;
+  --accent-tint: #FBEADF;
+  --accent-wash: #FEF6F0;
+
+  /* Semantic */
+  --verified: #3F6B4E;  --verified-tint: #EAF2EC;
+  --attention:#8A5A12;  --attention-tint:#FBF0DC;
+  --fault:    #9B3126;  --fault-tint:    #FBEAE7;
+
+  /* Lines */
+  --line-hairline: rgba(74,52,38,.10);
+  --line:          rgba(74,52,38,.16);
+  --line-strong:   rgba(74,52,38,.28);
+
+  /* Elevation */
+  --shadow-1: 0 1px 2px rgba(74,52,38,.06);
+  --shadow-2: 0 2px 8px rgba(74,52,38,.07), 0 1px 2px rgba(74,52,38,.05);
+  --shadow-3: 0 12px 32px rgba(74,52,38,.10), 0 2px 6px rgba(74,52,38,.06);
+  --shadow-well: inset 0 1px 2px rgba(74,52,38,.05);
+  --ring-accent: 0 0 0 3px rgba(200,98,44,.32);
+
+  /* Spacing */
+  --space-1:4px;  --space-2:8px;  --space-3:12px; --space-4:16px;
+  --space-5:20px; --space-6:24px; --space-8:32px; --space-10:40px;
+  --space-14:56px;--space-20:80px;
+
+  /* Radii */
+  --radius-xs:4px; --radius-sm:6px; --radius-md:10px;
+  --radius-lg:14px; --radius-xl:20px; --radius-pill:999px;
+
+  /* Type */
+  --font-text: "Segoe UI Variable Text", "Segoe UI Variable Static Text",
+    "Segoe UI", Inter, system-ui, -apple-system, BlinkMacSystemFont,
+    "Helvetica Neue", Arial, sans-serif;
+  --font-display: "Segoe UI Variable Display", "Segoe UI Variable Static Display",
+    "Segoe UI Semibold", "Segoe UI", Inter, system-ui, -apple-system,
+    BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+  --font-brand: "Georgia Pro", Georgia, "Iowan Old Style", "Palatino Linotype",
+    "Times New Roman", serif;
+  --font-mono: "Cascadia Mono", "Cascadia Code", Consolas, "SF Mono",
+    ui-monospace, "Liberation Mono", monospace;
+
+  /* Motion */
+  --dur-micro:120ms; --dur-enter:180ms; --dur-panel:240ms;
+  --ease: cubic-bezier(.2,0,.2,1);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--surface-canvas);
+  color: var(--ink-primary);
+  font-family: var(--font-text);
+  font-size: 16px;
+  -webkit-font-smoothing: auto;
+  text-rendering: auto;
+  font-synthesis: none;
+  font-variant-ligatures: none;
+}
+
+button, input, textarea { color: inherit; font: inherit; }
+button { border: 0; background: none; cursor: pointer; }
+:focus-visible { outline: none; box-shadow: var(--ring-accent); }
+
+/* ---------- Type tokens ---------- */
+.t-display-xl { font: 700 40px/46px var(--font-brand); letter-spacing: -.02em; }
+.t-display-l  { font: 600 32px/38px var(--font-display); letter-spacing: -.018em; }
+.t-title-l    { font: 600 24px/30px var(--font-display); letter-spacing: -.014em; }
+.t-title-m    { font: 600 20px/26px var(--font-display); letter-spacing: -.01em; }
+.t-title-s    { font: 600 18px/26px var(--font-text); letter-spacing: -.006em; }
+.t-body-l     { font: 400 16px/26px var(--font-text); }
+.t-body-m     { font: 400 15px/24px var(--font-text); }
+.t-body-s     { font: 400 14px/22px var(--font-text); }
+.t-label      { font: 500 13px/18px var(--font-text); letter-spacing: .005em; }
+.t-caption    { font: 400 12px/16px var(--font-text); letter-spacing: .01em; }
+.t-micro      { font: 600 11px/14px var(--font-text); letter-spacing: .06em;
+                text-transform: uppercase; }
+.t-mono       { font: 400 13px/20px var(--font-mono); }
+
+h1, h2, h3, h4, p, ul, ol { margin: 0; }
+ul, ol { padding: 0; list-style: none; }
+
+/* ==========================================================================
+   Prototype chrome — NOT part of the product
+   ========================================================================== */
+.proto-bar {
+  position: sticky; top: 0; z-index: 60;
+  display: flex; align-items: center; gap: var(--space-4);
+  flex-wrap: wrap;
+  padding: 10px var(--space-6);
+  background: var(--surface-ink); color: var(--ink-inverse);
+  border-bottom: 1px solid rgba(0,0,0,.4);
+}
+.proto-bar strong { font: 600 13px/18px var(--font-text); }
+.proto-bar .proto-note { font: 400 12px/16px var(--font-text); color: #B9ADA5; }
+.proto-acts { display: flex; gap: 2px; flex-wrap: wrap; }
+.proto-acts button {
+  padding: 5px 11px; border-radius: var(--radius-sm);
+  font: 500 13px/18px var(--font-text); color: #C9BEB6;
+}
+.proto-acts button:hover { background: rgba(255,255,255,.08); color: #fff; }
+.proto-acts button[aria-current="true"] {
+  background: var(--accent-fill); color: #fff;
+}
+
+/* ==========================================================================
+   App shell
+   ========================================================================== */
+.shell { display: grid; grid-template-columns: 240px 1fr; min-height: 100vh; }
+
+.rail {
+  border-right: 1px solid var(--line-hairline);
+  padding: var(--space-6) var(--space-4);
+  display: flex; flex-direction: column; gap: var(--space-6);
+}
+.brand { display: flex; align-items: center; gap: 10px; padding: 0 var(--space-3); }
+.brand-seed {
+  width: 14px; height: 14px; border-radius: 4px;
+  background: var(--accent-fill);
+  box-shadow: inset 0 0 0 2px rgba(255,255,255,.35);
+}
+.brand span:last-child { font: 600 17px/24px var(--font-display); letter-spacing: -.01em; }
+
+.nav { display: flex; flex-direction: column; gap: 2px; }
+.nav a {
+  display: flex; align-items: center; gap: 10px;
+  height: 40px; padding: 0 var(--space-3);
+  border-radius: var(--radius-sm);
+  font: 500 15px/24px var(--font-text);
+  color: var(--ink-secondary); text-decoration: none;
+  border-left: 2px solid transparent;
+}
+.nav a:hover { background: var(--accent-wash); color: var(--ink-primary); }
+.nav a[aria-current="page"] {
+  background: var(--surface-cream); color: var(--ink-primary);
+  border-left-color: var(--accent-fill);
+}
+.nav svg { flex: none; }
+.rail-spacer { flex: 1; }
+
+.rail-foot { display: flex; flex-direction: column; gap: var(--space-1); }
+.provider-chip {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px var(--space-3); border-radius: var(--radius-sm);
+  text-align: left; color: var(--ink-tertiary);
+  font: 400 12px/16px var(--font-text);
+}
+.provider-chip:hover { background: var(--accent-wash); }
+.orb { width: 7px; height: 7px; border-radius: 50%; background: var(--verified); flex: none; }
+
+/* ---------- Content ---------- */
+.main { padding: var(--space-20) var(--space-8) var(--space-20) var(--space-10); }
+.content { max-width: 1100px; }
+.measure { max-width: 720px; }
+.act { margin-bottom: var(--space-20); }
+.act:last-child { margin-bottom: 0; }
+
+.eyebrow { color: var(--ink-tertiary); margin-bottom: var(--space-3); }
+.lead { color: var(--ink-secondary); margin-top: var(--space-4); }
+
+/* ---------- Buttons ---------- */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  height: 40px; padding: 0 var(--space-5);
+  border-radius: var(--radius-sm);
+  font: 600 15px/24px var(--font-text);
+  white-space: nowrap;
+  transition: background var(--dur-micro) var(--ease),
+              border-color var(--dur-micro) var(--ease);
+}
+.btn-primary { background: var(--accent-fill); color: var(--ink-inverse); box-shadow: var(--shadow-1); }
+.btn-primary:hover { background: var(--accent-hover); }
+.btn-primary:active { background: var(--accent-press); }
+.btn-primary[disabled] {
+  background: var(--surface-inset); color: var(--ink-tertiary);
+  cursor: not-allowed; box-shadow: none;
+}
+.btn-secondary {
+  background: var(--surface-raised); color: var(--ink-primary);
+  border: 1px solid var(--line-strong);
+}
+.btn-secondary:hover { background: var(--accent-wash); border-color: var(--accent-line); }
+.btn-quiet {
+  height: auto; padding: 0; color: var(--accent-fill);
+  font: 500 15px/24px var(--font-text);
+  border-bottom: 1px solid rgba(169,78,31,.25);
+  border-radius: 0;
+}
+.btn-quiet:hover { border-bottom-color: var(--accent-fill); }
+.btn-destructive {
+  background: var(--surface-raised); color: var(--fault);
+  border: 1px solid var(--fault);
+}
+
+/* ---------- Composer ---------- */
+.composer {
+  background: var(--surface-raised);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: var(--space-5);
+  box-shadow: var(--shadow-2);
+  transition: border-color var(--dur-micro) var(--ease);
+}
+.composer:focus-within { border-color: var(--accent-line); box-shadow: var(--shadow-2), var(--ring-accent); }
+.composer textarea {
+  width: 100%; border: 0; background: none; resize: none;
+  font: 400 16px/26px var(--font-text);
+  outline: none; display: block;
+}
+.composer textarea::placeholder { color: var(--ink-tertiary); }
+.composer-foot {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--space-4); margin-top: var(--space-4);
+}
+.trust { color: var(--ink-tertiary); margin-top: var(--space-3); }
+
+/* ---------- Chips ---------- */
+.chips { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-5); }
+.chip {
+  padding: 7px 13px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: var(--surface-raised);
+  font: 400 14px/22px var(--font-text);
+  color: var(--ink-secondary);
+  transition: background var(--dur-micro) var(--ease),
+              border-color var(--dur-micro) var(--ease),
+              opacity var(--dur-enter) var(--ease);
+}
+.chip:hover { background: var(--accent-wash); border-color: var(--accent-line); color: var(--ink-primary); }
+.capability { color: var(--ink-tertiary); margin-top: var(--space-5); max-width: 640px; }
+
+/* ---------- Cards ---------- */
+.card {
+  background: var(--surface-raised);
+  border: 1px solid var(--line-hairline);
+  border-radius: var(--radius-md);
+  padding: var(--space-6);
+  box-shadow: var(--shadow-1);
+}
+.grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px,1fr)); gap: var(--space-4); }
+.grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px,1fr)); gap: var(--space-4); }
+.grid-4 { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px,1fr)); gap: var(--space-3); }
+
+.section-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-4); margin-bottom: var(--space-5); }
+
+/* ---------- Project card ---------- */
+.project { display: flex; flex-direction: column; gap: var(--space-3); }
+.project:hover { border-color: var(--line); box-shadow: var(--shadow-2); }
+.project-top { display: flex; gap: var(--space-3); align-items: flex-start; }
+.mono-mark {
+  width: 40px; height: 40px; flex: none;
+  border-radius: var(--radius-sm);
+  background: var(--surface-cream); color: var(--accent-fill);
+  display: grid; place-items: center;
+  font: 600 17px/24px var(--font-display);
+}
+.project-name { font: 600 16px/24px var(--font-text); }
+.project-sum {
+  color: var(--ink-secondary);
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.project-foot { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+
+/* ---------- Status pill ---------- */
+.pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 22px; padding: 0 10px; border-radius: var(--radius-pill);
+  font: 500 12px/16px var(--font-text); white-space: nowrap;
+}
+.pill i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: none; }
+.pill-delivered { background: var(--verified-tint);  color: var(--verified); }
+.pill-building  { background: var(--accent-wash);    color: var(--accent-fill); }
+.pill-attention { background: var(--attention-tint); color: var(--attention); }
+.pill-stopped   { background: var(--fault-tint);     color: var(--fault); }
+.pill-neutral   { background: var(--surface-inset);  color: var(--ink-secondary); }
+.pill-building i { animation: breathe 1.8s var(--ease) infinite; }
+@keyframes breathe { 0%,100% { opacity: 1; } 50% { opacity: .45; } }
+
+/* ---------- Question card ---------- */
+.question {
+  background: var(--surface-raised);
+  border: 1px solid var(--line-hairline);
+  border-radius: var(--radius-lg);
+  padding: var(--space-6);
+  box-shadow: var(--shadow-1);
+  margin-bottom: var(--space-4);
+}
+.question legend { padding: 0; margin-bottom: var(--space-5); }
+.question fieldset { border: 0; padding: 0; margin: 0; }
+
+.opt {
+  display: block; width: 100%; text-align: left;
+  background: var(--surface-raised);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  min-height: 48px; padding: 11px var(--space-4);
+  font: 400 15px/24px var(--font-text);
+  transition: background var(--dur-micro) var(--ease), border-color var(--dur-micro) var(--ease);
+}
+.opt:hover { background: var(--accent-wash); border-color: var(--accent-line); }
+.opt[aria-checked="true"] { background: var(--accent-tint); border-color: var(--accent-line); font-weight: 500; }
+.opt-row { display: flex; align-items: flex-start; gap: 10px; }
+.opt-check {
+  width: 16px; height: 16px; flex: none; margin-top: 4px;
+  border-radius: 50%; border: 1px solid var(--line-strong);
+  display: grid; place-items: center;
+  font-size: 10px; color: transparent;
+}
+.opt[aria-checked="true"] .opt-check { border-color: var(--accent-line); color: var(--accent-fill); }
+
+.opt-decide { margin-bottom: var(--space-3); }
+.opt-decide[aria-checked="true"] { background: var(--verified-tint); border-color: var(--verified); }
+.opt-decide[aria-checked="true"] .opt-check { border-color: var(--verified); color: var(--verified); }
+.opt-decide-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.badge {
+  background: var(--verified-tint); color: var(--verified);
+  border-radius: var(--radius-xs); padding: 2px 6px;
+  font: 600 11px/14px var(--font-text); letter-spacing: .02em;
+}
+.opt-decide-detail { color: var(--ink-secondary); margin-top: 3px; }
+
+/* Max two per row — three choices in a row reads as pricing tiers. */
+.opt-grid { display: grid; grid-template-columns: 1fr; gap: var(--space-3); }
+@media (min-width: 720px) { .opt-grid { grid-template-columns: repeat(2, minmax(0,1fr)); } }
+.q-links { display: flex; gap: var(--space-5); margin-top: var(--space-4); flex-wrap: wrap; }
+.q-extra { margin-top: var(--space-4); display: none; }
+.q-extra.open { display: block; }
+.q-extra label { display: block; color: var(--ink-secondary); margin-bottom: var(--space-2); }
+.q-extra textarea {
+  width: 100%; background: var(--surface-raised);
+  border: 1px solid var(--line); border-radius: var(--radius-sm);
+  padding: var(--space-3); font: 400 15px/24px var(--font-text);
+  box-shadow: var(--shadow-well); resize: vertical; outline: none;
+}
+.q-extra textarea:focus { border-color: var(--accent-line); box-shadow: var(--ring-accent); }
+
+.why { margin-top: var(--space-5); border-top: 1px solid var(--line-hairline); padding-top: var(--space-4); }
+details > summary { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 8px; }
+details > summary::-webkit-details-marker { display: none; }
+.chev { transition: transform var(--dur-micro) var(--ease); flex: none; }
+details[open] > summary .chev { transform: rotate(90deg); }
+.why p { color: var(--ink-secondary); margin-top: var(--space-3); }
+
+.continue-row { display: flex; align-items: center; gap: var(--space-4); margin-top: var(--space-6); flex-wrap: wrap; }
+.continue-note { color: var(--ink-tertiary); }
+
+/* ---------- Suggestion card ---------- */
+.sug {
+  background: var(--surface-raised);
+  border: 1px solid var(--line-hairline);
+  border-radius: var(--radius-md);
+  padding: var(--space-5);
+  text-align: left; width: 100%;
+  transition: background var(--dur-micro) var(--ease), border-color var(--dur-micro) var(--ease);
+}
+.sug:hover { border-color: var(--line); }
+.sug[aria-checked="true"] { background: var(--accent-tint); border-color: var(--accent-line); }
+.sug-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-3); }
+.sug-title { font: 600 15px/24px var(--font-text); }
+.sug-toggle {
+  width: 28px; height: 28px; flex: none; border-radius: var(--radius-sm);
+  border: 1px solid var(--line-strong); display: grid; place-items: center;
+  color: var(--ink-tertiary); font: 400 15px/24px var(--font-text);
+}
+.sug[aria-checked="true"] .sug-toggle { border-color: var(--accent-line); color: var(--accent-fill); }
+.sug-why { color: var(--ink-secondary); margin-top: var(--space-2); }
+
+/* ---------- Field rows (brief, delivery) ---------- */
+.field-row { display: grid; grid-template-columns: 168px 1fr; gap: var(--space-6); padding: var(--space-5) 0; border-top: 1px solid var(--line-hairline); }
+.field-row:first-of-type { border-top: 0; }
+.field-row dt { color: var(--ink-tertiary); font: 500 13px/18px var(--font-text); }
+.field-row dd { margin: 0; }
+.field-row dd > * + * { margin-top: var(--space-2); }
+.numbered { counter-reset: j; }
+.numbered li { display: flex; gap: 10px; }
+.numbered li::before {
+  counter-increment: j; content: counter(j) "."; color: var(--ink-tertiary);
+  font-variant-numeric: tabular-nums; flex: none;
+}
+.bullets li { display: flex; gap: 10px; }
+.bullets li::before { content: "•"; color: var(--ink-tertiary); flex: none; }
+.proved li { display: flex; gap: 10px; }
+.proved li::before { content: "✓"; color: var(--verified); flex: none; font-size: 14px; }
+.inline-list { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-4); }
+
+/* ---------- Tags (already in the plan) ---------- */
+.tag {
+  background: var(--surface-cream);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3) var(--space-4);
+  font: 400 14px/22px var(--font-text);
+  color: var(--ink-primary);
+}
+
+/* ---------- Build surface ---------- */
+.build-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--space-4); padding-bottom: var(--space-5);
+  border-bottom: 1px solid var(--line-hairline); flex-wrap: wrap;
+}
+.build-head-meta { display: flex; align-items: center; gap: var(--space-3); }
+
+.dock-layout { display: grid; grid-template-columns: 1fr; gap: var(--space-6); align-items: start; }
+.dock-layout.has-dock { grid-template-columns: 1fr 520px; }
+
+.spine { margin: var(--space-6) 0 var(--space-10); }
+.spine li { display: flex; align-items: flex-start; gap: var(--space-3); min-height: 40px; }
+.spine-mark { width: 18px; flex: none; display: flex; flex-direction: column; align-items: center; }
+.spine-dot { width: 8px; height: 8px; border-radius: 50%; border: 1px solid var(--line-strong); margin-top: 8px; }
+.spine-line { width: 1px; flex: 1; background: var(--line-hairline); min-height: 14px; }
+.spine li:last-child .spine-line { display: none; }
+.spine-text { font: 400 15px/24px var(--font-text); color: var(--ink-tertiary); padding-top: 2px; }
+
+.spine li.done .spine-dot {
+  width: 18px; height: 18px; margin-top: 3px; border: 0;
+  background: var(--verified-tint); color: var(--verified);
+  display: grid; place-items: center; font-size: 11px;
+}
+.spine li.done .spine-text { color: var(--ink-secondary); font-weight: 500; }
+.spine li.now .spine-dot {
+  width: 10px; height: 10px; margin-top: 7px; border: 0;
+  background: var(--accent-fill);
+  box-shadow: 0 0 0 3px rgba(200,98,44,.22);
+  animation: halo 1.8s var(--ease) infinite;
+}
+@keyframes halo { 0%,100% { box-shadow: 0 0 0 3px rgba(200,98,44,.22); } 50% { box-shadow: 0 0 0 6px rgba(200,98,44,.10); } }
+.spine li.now .spine-text { color: var(--ink-primary); font-weight: 600; }
+.spine li.fixing .spine-dot { background: var(--attention); box-shadow: 0 0 0 3px rgba(138,90,18,.18); animation: none; }
+.spine li.fixing .spine-text { color: var(--ink-primary); font-weight: 600; }
+.spine-count { color: var(--ink-tertiary); font: 400 13px/18px var(--font-text); }
+
+.repair { margin: var(--space-2) 0 var(--space-2) 0; padding-left: var(--space-4); border-left: 2px solid var(--attention-tint); }
+.repair li { display: block; min-height: 0; color: var(--ink-tertiary); font: 400 14px/22px var(--font-text); padding: 2px 0; }
+.repair li.active { color: var(--ink-primary); font-weight: 500; }
+
+.now-block { margin-bottom: var(--space-8); }
+.now-why { font: 400 18px/26px var(--font-text); color: var(--ink-secondary); margin-top: var(--space-3); }
+
+/* ---------- Needs you ---------- */
+.needs {
+  background: var(--surface-raised);
+  border: 1px solid rgba(138,90,18,.4);
+  border-left: 3px solid var(--attention);
+  border-radius: var(--radius-lg);
+  padding: var(--space-6);
+  box-shadow: var(--shadow-2);
+  margin: var(--space-5) 0;
+}
+.needs-label { color: var(--attention); margin-bottom: var(--space-2); }
+.needs dl { margin: var(--space-5) 0 0; }
+.needs .field-row { grid-template-columns: 120px 1fr; padding: var(--space-3) 0; }
+.needs-actions { display: flex; gap: var(--space-4); align-items: flex-start; margin-top: var(--space-6); flex-wrap: wrap; }
+.needs-action { display: flex; flex-direction: column; gap: 4px; }
+.consequence { color: var(--ink-tertiary); font: 400 12px/16px var(--font-text); }
+
+/* ---------- Preview shell ---------- */
+.preview {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xl);
+  overflow: hidden;
+  background: var(--surface-ink);
+  box-shadow: var(--shadow-3);
+}
+.preview-bar {
+  height: 36px; display: flex; align-items: center; justify-content: space-between;
+  padding: 0 var(--space-3); background: var(--surface-raised);
+  border-bottom: 1px solid var(--line-hairline);
+}
+.preview-bar-title { font: 500 13px/18px var(--font-text); color: var(--ink-secondary); }
+.preview-tools { display: flex; gap: 2px; }
+.preview-tools button {
+  width: 26px; height: 26px; border-radius: var(--radius-xs);
+  color: var(--ink-tertiary); display: grid; place-items: center; font-size: 13px;
+}
+.preview-tools button:hover { background: var(--surface-inset); color: var(--ink-primary); }
+.preview-tools button[aria-pressed="true"] { background: var(--accent-tint); color: var(--accent-fill); }
+.preview-body { height: 380px; background: #fff; position: relative; overflow: hidden; }
+.preview-foot {
+  height: 28px; display: flex; align-items: center; gap: 7px;
+  padding: 0 var(--space-3); background: var(--surface-raised);
+  border-top: 1px solid var(--line-hairline);
+  font: 400 12px/16px var(--font-text); color: var(--ink-tertiary);
+}
+.preview-foot .orb { width: 6px; height: 6px; }
+.preview-starting {
+  position: absolute; inset: 0; background: var(--surface-inset);
+  display: grid; place-items: center; color: var(--ink-tertiary);
+  font: 400 14px/22px var(--font-text);
+  animation: breathe 1.6s var(--ease) infinite;
+}
+.preview-collapsed {
+  height: 44px; display: flex; align-items: center; justify-content: space-between;
+  padding: 0 var(--space-4); background: var(--surface-raised);
+  border: 1px solid var(--line); border-radius: var(--radius-md);
+}
+
+/* Fake rendered booking site inside the preview */
+.fake { font-family: var(--font-text); color: #22201e; height: 100%; overflow: hidden; }
+.fake-nav { display: flex; align-items: center; justify-content: space-between; padding: 14px 20px; border-bottom: 1px solid #eceae7; }
+.fake-logo { font: 600 15px/22px var(--font-display); }
+.fake-nav ul { display: flex; gap: 16px; font-size: 13px; color: #6b645e; }
+.fake-hero { padding: 28px 20px 20px; }
+.fake-hero h2 { font: 600 24px/30px var(--font-display); letter-spacing: -.01em; }
+.fake-hero p { font-size: 13px; color: #6b645e; margin-top: 6px; }
+.fake-slots { display: grid; grid-template-columns: repeat(4,1fr); gap: 8px; padding: 4px 20px 20px; }
+.fake-slot { border: 1px solid #e4e0dc; border-radius: 6px; padding: 9px 0; text-align: center; font-size: 12px; color: #3d3833; }
+.fake-slot.on { background: #2f6b46; border-color: #2f6b46; color: #fff; }
+.fake-cta { margin: 0 20px; height: 38px; border-radius: 6px; background: #22201e; color: #fff; display: grid; place-items: center; font: 600 13px/20px var(--font-text); }
+
+/* ---------- Delivery ---------- */
+.delivery {
+  background: var(--surface-raised);
+  border: 1px solid var(--line-hairline);
+  border-radius: var(--radius-xl);
+  padding: var(--space-10);
+  box-shadow: var(--shadow-2);
+}
+.delivery-preview { margin: var(--space-6) 0 var(--space-4); }
+.count-strong { color: var(--verified); font-weight: 600; }
+.attribution { color: var(--ink-tertiary); }
+
+/* ---------- Unsupported ---------- */
+.decline {
+  background: var(--surface-raised);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: var(--space-8);
+  box-shadow: var(--shadow-2);
+  max-width: 720px;
+}
+.decline p { color: var(--ink-secondary); margin-top: var(--space-4); }
+.decline-actions { display: flex; gap: var(--space-4); margin-top: var(--space-6); align-items: center; flex-wrap: wrap; }
+
+/* ---------- Banner ---------- */
+.banner {
+  display: flex; gap: var(--space-3); align-items: flex-start;
+  border-radius: var(--radius-md); padding: var(--space-4);
+  background: var(--attention-tint); border: 1px solid rgba(138,90,18,.4);
+  margin-bottom: var(--space-5);
+}
+.banner strong { font: 600 15px/24px var(--font-text); }
+.banner p { color: var(--ink-secondary); margin-top: 2px; }
+
+/* ---------- Engineering details ---------- */
+.eng { margin-top: var(--space-10); border-top: 1px solid var(--line-hairline); padding-top: var(--space-5); }
+.eng > summary { font: 500 15px/24px var(--font-text); color: var(--ink-secondary); }
+.eng > summary:hover { color: var(--ink-primary); }
+.eng-body { margin-top: var(--space-4); background: var(--surface-inset); border-radius: var(--radius-md); padding: var(--space-5); }
+.eng-intro { color: var(--ink-tertiary); margin-bottom: var(--space-4); }
+.eng-sec + .eng-sec { margin-top: var(--space-5); border-top: 1px solid var(--line-hairline); padding-top: var(--space-4); }
+.eng h4 { color: var(--ink-tertiary); font: 500 13px/18px var(--font-text); margin-bottom: var(--space-2); }
+.eng-scroll { overflow-x: auto; }
+.eng table { border-collapse: collapse; width: 100%; min-width: 620px; }
+.eng th, .eng td {
+  text-align: left; padding: 6px 12px 6px 0;
+  font: 400 13px/20px var(--font-mono); white-space: nowrap;
+}
+.eng th { color: var(--ink-tertiary); font-weight: 400; border-bottom: 1px solid var(--line); }
+.eng td { color: var(--ink-secondary); font-variant-numeric: tabular-nums; }
+
+/* ---------- Utility ---------- */
+.hidden { display: none !important; }
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;
+}
+
+/* ---------- Responsive ---------- */
+@media (max-width: 1279px) {
+  .shell { grid-template-columns: 64px 1fr; }
+  .rail { padding: var(--space-5) var(--space-2); align-items: center; }
+  .brand span:last-child, .nav a span, .provider-chip span { display: none; }
+  .brand { padding: 0; }
+  .nav a { justify-content: center; padding: 0; }
+  .main { padding: var(--space-14) var(--space-6); }
+  .measure { max-width: 640px; }
+  .dock-layout.has-dock { grid-template-columns: 1fr; }
+}
+@media (max-width: 767px) {
+  .shell { grid-template-columns: 1fr; }
+  .rail {
+    flex-direction: row; align-items: center; gap: var(--space-2);
+    border-right: 0; border-bottom: 1px solid var(--line-hairline);
+    padding: var(--space-2) var(--space-4); min-height: 56px;
+  }
+  .nav { flex-direction: row; }
+  .nav a { width: 40px; border-left: 0; border-bottom: 2px solid transparent; }
+  .nav a[aria-current="page"] { border-bottom-color: var(--accent-fill); }
+  .rail-foot { flex-direction: row; align-items: center; }
+  .rail-spacer { flex: 1; }
+  .main { padding: var(--space-8) var(--space-5) var(--space-14); }
+  .field-row { grid-template-columns: 1fr; gap: var(--space-2); }
+  .opt-grid { grid-template-columns: 1fr; }
+  .delivery { padding: var(--space-6); }
+  .t-display-xl { font-size: 30px; line-height: 36px; }
+  .t-display-l { font-size: 25px; line-height: 32px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+}
+</style>
+
+<div class="proto-bar">
+  <strong>Foundry v2 · experience prototype</strong>
+  <div class="proto-acts" role="tablist" aria-label="Prototype acts">
+    <button data-act="home" aria-current="true">Home</button>
+    <button data-act="read">The Read</button>
+    <button data-act="plan">The Plan</button>
+    <button data-act="build">Building</button>
+    <button data-act="repair">Repair + preview</button>
+    <button data-act="delivery">Delivery</button>
+    <button data-act="decline">Unsupported</button>
+  </div>
+  <span class="proto-note">Review chrome only — not part of the product.</span>
+</div>
+
+<div class="shell">
+  <nav class="rail" aria-label="Foundry">
+    <div class="brand"><span class="brand-seed" aria-hidden="true"></span><span>Foundry</span></div>
+    <div class="nav">
+      <a href="#" aria-current="page">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M2 6.5 8 2l6 4.5V14H2V6.5Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
+        <span>Home</span>
+      </a>
+      <a href="#">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="2" y="3" width="12" height="10" rx="2" stroke="currentColor" stroke-width="1.3"/><path d="M2 6.5h12" stroke="currentColor" stroke-width="1.3"/></svg>
+        <span>Projects</span>
+      </a>
+    </div>
+    <div class="rail-spacer"></div>
+    <div class="rail-foot">
+      <button class="provider-chip"><span class="orb" aria-hidden="true"></span><span>2 providers ready</span></button>
+      <button class="provider-chip">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="2.4" stroke="currentColor" stroke-width="1.3"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2" stroke="currentColor" stroke-width="1.3"/></svg>
+        <span>Settings</span>
+      </button>
+    </div>
+  </nav>
+
+  <main class="main" id="main">
+    <div class="content">
+
+<!-- ====================================================================
+     ACT — HOME
+     ==================================================================== -->
+<section class="act" data-panel="home">
+  <div class="measure">
+    <h1 class="t-display-xl" style="text-wrap:balance">What should I build for you?</h1>
+    <p class="t-body-l lead">Describe the outcome in a sentence. I&rsquo;ll design it, choose how it&rsquo;s built, build it, run it, and prove it works.</p>
+  </div>
+
+  <div class="measure" style="margin-top:var(--space-6)">
+    <div class="composer">
+      <label class="sr-only" for="intent">Describe what you want built</label>
+      <textarea id="intent" rows="3" placeholder="A booking site for my studio" aria-describedby="intent-help"></textarea>
+      <div class="composer-foot">
+        <span id="intent-help" class="t-caption" style="color:var(--ink-tertiary)">Enter to start · Shift + Enter for a new line</span>
+        <button class="btn btn-primary" id="start-btn" disabled>Start</button>
+      </div>
+    </div>
+    <p class="t-body-s trust">I&rsquo;ll come back with a plan before anything is built.</p>
+
+    <div id="chip-zone">
+      <p class="t-micro" style="color:var(--ink-tertiary);margin-top:var(--space-6)">Try</p>
+      <div class="chips" id="chips"></div>
+    </div>
+    <p class="t-body-s capability" id="enough" hidden>That&rsquo;s enough to start. I&rsquo;ll ask if anything&rsquo;s genuinely unclear.</p>
+
+    <p class="t-caption capability">I build for the web today &mdash; web apps, business websites, customer portals, internal tools, and web APIs. Ask me for a mobile, desktop, or native game build and I&rsquo;ll tell you honestly instead of substituting something else.</p>
+  </div>
+
+  <div style="margin-top:var(--space-20)">
+    <div class="section-head">
+      <h2 class="t-title-m">Your projects</h2>
+      <button class="btn-quiet t-body-s">Show all 11 &rarr;</button>
+    </div>
+    <div class="grid-3">
+      <article class="card project">
+        <div class="project-top">
+          <span class="mono-mark" aria-hidden="true">S</span>
+          <div style="min-width:0">
+            <p class="project-name">Studio Booking</p>
+            <p class="t-body-s project-sum">Clients pick a service, choose a real available time, and confirm without phoning.</p>
+          </div>
+        </div>
+        <div class="project-foot">
+          <span class="pill pill-delivered"><i aria-hidden="true"></i>Delivered</span>
+          <span class="t-caption" style="color:var(--ink-tertiary)">2h ago</span>
+        </div>
+        <button class="btn btn-secondary" style="width:100%">Continue</button>
+      </article>
+
+      <article class="card project">
+        <div class="project-top">
+          <span class="mono-mark" aria-hidden="true">I</span>
+          <div style="min-width:0">
+            <p class="project-name">Team Directory</p>
+            <p class="t-body-s project-sum">A searchable directory of who does what, with a printable report.</p>
+          </div>
+        </div>
+        <div class="project-foot">
+          <span class="pill pill-building"><i aria-hidden="true"></i>Building</span>
+          <span class="t-caption" style="color:var(--ink-tertiary)">Just now</span>
+        </div>
+        <button class="btn btn-secondary" style="width:100%">Watch</button>
+      </article>
+
+      <article class="card project">
+        <div class="project-top">
+          <span class="mono-mark" aria-hidden="true">R</span>
+          <div style="min-width:0">
+            <p class="project-name">Reservations API</p>
+            <p class="t-body-s project-sum">An endpoint another team can call to hold and confirm a table.</p>
+          </div>
+        </div>
+        <div class="project-foot">
+          <span class="pill pill-attention"><i aria-hidden="true"></i>Waiting on you</span>
+          <span class="t-caption" style="color:var(--ink-tertiary)">Yesterday</span>
+        </div>
+        <button class="btn btn-secondary" style="width:100%">Answer</button>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- ====================================================================
+     ACT — THE READ
+     ==================================================================== -->
+<section class="act hidden" data-panel="read">
+  <div class="measure">
+    <p class="t-micro eyebrow">What I understand</p>
+    <h1 class="t-display-l" style="text-wrap:balance">Studio Booking</h1>
+    <p class="t-body-l lead">A booking site for a small studio where clients pick a service, choose an available time, and confirm without phoning.</p>
+  </div>
+
+  <div class="grid-2" style="margin-top:var(--space-8)">
+    <div class="card">
+      <h2 class="t-label" style="color:var(--ink-tertiary)">Who it&rsquo;s for</h2>
+      <ul class="bullets t-body-m" style="margin-top:var(--space-3);display:flex;flex-direction:column;gap:var(--space-2)">
+        <li>Studio clients booking their own time</li>
+        <li>The studio owner reviewing the day</li>
+        <li>Front desk staff taking phone bookings</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h2 class="t-label" style="color:var(--ink-tertiary)">How they&rsquo;ll use it</h2>
+      <ol class="numbered t-body-m" style="margin-top:var(--space-3);display:flex;flex-direction:column;gap:var(--space-2)">
+        <li>Pick a service</li>
+        <li>See real availability</li>
+        <li>Book and get a confirmation</li>
+        <li>Owner reviews the day&rsquo;s bookings</li>
+      </ol>
+    </div>
+  </div>
+
+  <div style="margin-top:var(--space-10)">
+    <h2 class="t-title-m">Already in the plan &mdash; I didn&rsquo;t need to ask</h2>
+    <p class="t-body-m lead measure" style="margin-top:var(--space-2)">These come with a project like yours. I&rsquo;ve included them without asking.</p>
+    <div class="grid-4" style="margin-top:var(--space-5)">
+      <div class="tag">Its own database</div>
+      <div class="tag">People can add and change bookings</div>
+      <div class="tag">Data survives a refresh</div>
+      <div class="tag">Tested in a real browser</div>
+      <div class="tag">Built the way it would really ship</div>
+      <div class="tag">Works at phone width</div>
+    </div>
+  </div>
+
+  <div style="margin-top:var(--space-20)">
+    <div class="measure">
+      <h2 class="t-title-m" id="dec-h">Two decisions change what you get.</h2>
+      <p class="t-body-m lead" style="margin-top:var(--space-2)">Everything else I&rsquo;ve decided myself. You can change any of it later.</p>
+      <p class="sr-only">Nothing here is required. Anything you skip, I&rsquo;ll decide.</p>
+    </div>
+
+    <div style="margin-top:var(--space-6);max-width:840px" id="questions">
+
+      <fieldset class="question" data-q="signin">
+        <legend class="t-title-s">How should people sign in?</legend>
+        <button class="opt opt-decide" role="radio" aria-checked="false" data-val="decide">
+          <span class="opt-row">
+            <span class="opt-check" aria-hidden="true">✓</span>
+            <span>
+              <span class="opt-decide-head">
+                <span>Let me choose the best option</span>
+                <span class="badge">Recommended</span>
+              </span>
+              <span class="opt-decide-detail t-body-s">Email and password with a secure reset</span>
+            </span>
+          </span>
+        </button>
+        <div class="opt-grid" role="radiogroup" aria-labelledby="dec-h">
+          <button class="opt" role="radio" aria-checked="false"><span class="opt-row"><span class="opt-check" aria-hidden="true">✓</span><span>Email and password</span></span></button>
+          <button class="opt" role="radio" aria-checked="false"><span class="opt-row"><span class="opt-check" aria-hidden="true">✓</span><span>Google or Microsoft accounts</span></span></button>
+          <button class="opt" role="radio" aria-checked="false"><span class="opt-row"><span class="opt-check" aria-hidden="true">✓</span><span>No sign-in &mdash; it&rsquo;s a visual prototype</span></span></button>
+        </div>
+        <div class="q-links">
+          <button class="btn-quiet t-body-s" data-open="other">Something else&hellip;</button>
+          <button class="btn-quiet t-body-s" data-open="skip">Skip for now</button>
+        </div>
+        <div class="q-extra" data-extra="other">
+          <label>In your own words</label>
+          <textarea rows="2" placeholder="What should I do instead?"></textarea>
+        </div>
+        <div class="q-extra" data-extra="skip">
+          <label>Anything you&rsquo;d like Foundry to keep in mind?</label>
+          <textarea rows="2"></textarea>
+        </div>
+        <details class="why">
+          <summary class="t-label" style="color:var(--ink-tertiary)">
+            <svg class="chev" width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true"><path d="M3 1.5 6.5 5 3 8.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            Why I&rsquo;m asking
+          </summary>
+          <p class="t-body-s">Sign-in decides whether every page needs to know who&rsquo;s looking, which changes how the whole product is put together.</p>
+        </details>
+      </fieldset>
+
+      <fieldset class="question" data-q="reminders">
+        <legend class="t-title-s">Should clients get a reminder before their appointment?</legend>
+        <button class="opt opt-decide" role="radio" aria-checked="false" data-val="decide">
+          <span class="opt-row">
+            <span class="opt-check" aria-hidden="true">✓</span>
+            <span>
+              <span class="opt-decide-head">
+                <span>Let me choose the best option</span>
+                <span class="badge">Recommended</span>
+              </span>
+              <span class="opt-decide-detail t-body-s">A reminder shown on screen when they return</span>
+            </span>
+          </span>
+        </button>
+        <div class="opt-grid" role="radiogroup" aria-label="Reminders">
+          <button class="opt" role="radio" aria-checked="false"><span class="opt-row"><span class="opt-check" aria-hidden="true">✓</span><span>On screen when they come back</span></span></button>
+          <button class="opt" role="radio" aria-checked="false"><span class="opt-row"><span class="opt-check" aria-hidden="true">✓</span><span>By email the day before</span></span></button>
+          <button class="opt" role="radio" aria-checked="false"><span class="opt-row"><span class="opt-check" aria-hidden="true">✓</span><span>No reminders</span></span></button>
+        </div>
+        <div class="q-links">
+          <button class="btn-quiet t-body-s" data-open="other">Something else&hellip;</button>
+          <button class="btn-quiet t-body-s" data-open="skip">Skip for now</button>
+        </div>
+        <div class="q-extra" data-extra="other">
+          <label>In your own words</label>
+          <textarea rows="2" placeholder="What should I do instead?"></textarea>
+        </div>
+        <div class="q-extra" data-extra="skip">
+          <label>Anything you&rsquo;d like Foundry to keep in mind?</label>
+          <textarea rows="2"></textarea>
+        </div>
+        <details class="why">
+          <summary class="t-label" style="color:var(--ink-tertiary)">
+            <svg class="chev" width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true"><path d="M3 1.5 6.5 5 3 8.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            Why I&rsquo;m asking
+          </summary>
+          <p class="t-body-s">Sending email needs a mail service this machine doesn&rsquo;t have, so it changes what I can honestly promise to prove.</p>
+        </details>
+      </fieldset>
+    </div>
+
+    <div class="continue-row">
+      <button class="btn btn-primary">Continue</button>
+      <span class="t-body-s continue-note" id="progress">0 answered &middot; 2 left to me</span>
+    </div>
+  </div>
+
+  <div style="margin-top:var(--space-20)">
+    <div class="measure">
+      <h2 class="t-title-m">Worth adding</h2>
+      <p class="t-body-m lead" style="margin-top:var(--space-2)">Ideas that fit this specific project. Pick any &mdash; I&rsquo;ll fold them into the plan and into what I test.</p>
+    </div>
+    <div class="grid-2" style="margin-top:var(--space-5);max-width:840px" id="sugs">
+      <button class="sug" role="switch" aria-checked="false">
+        <span class="sug-head"><span class="sug-title">Cancellation window</span><span class="sug-toggle" aria-hidden="true">+</span></span>
+        <span class="sug-why t-body-s" style="display:block">Clients cancel themselves up to 24 hours before, so the desk stops fielding calls.</span>
+      </button>
+      <button class="sug" role="switch" aria-checked="false">
+        <span class="sug-head"><span class="sug-title">Deposit at booking</span><span class="sug-toggle" aria-hidden="true">+</span></span>
+        <span class="sug-why t-body-s" style="display:block">Holds the slot with a small payment, which cuts no-shows on longer services.</span>
+      </button>
+      <button class="sug" role="switch" aria-checked="false">
+        <span class="sug-head"><span class="sug-title">Staff calendars</span><span class="sug-toggle" aria-hidden="true">+</span></span>
+        <span class="sug-why t-body-s" style="display:block">Clients pick the person as well as the time, and availability follows that person.</span>
+      </button>
+      <button class="sug" role="switch" aria-checked="false">
+        <span class="sug-head"><span class="sug-title">Owner&rsquo;s day view</span><span class="sug-toggle" aria-hidden="true">+</span></span>
+        <span class="sug-why t-body-s" style="display:block">One screen showing today in order, so the owner stops opening the booking list.</span>
+      </button>
+    </div>
+  </div>
+</section>
+
+<!-- ====================================================================
+     ACT — THE PLAN
+     ==================================================================== -->
+<section class="act hidden" data-panel="plan">
+  <div class="measure">
+    <p class="t-micro eyebrow">Before I start</p>
+    <h1 class="t-display-l">The plan</h1>
+    <p class="t-body-l lead">This is what I&rsquo;ll build and what I&rsquo;ll prove before I call it done.</p>
+  </div>
+
+  <dl style="margin-top:var(--space-8);max-width:900px">
+    <div class="field-row">
+      <dt>What I&rsquo;ll build</dt>
+      <dd class="t-body-m">Studio Booking &mdash; a booking site where clients pick a service, choose a real available time, and confirm without phoning.</dd>
+    </div>
+    <div class="field-row">
+      <dt>Who it&rsquo;s for</dt>
+      <dd class="t-body-m"><div class="inline-list"><span>Studio clients</span><span>&middot;</span><span>Studio owner</span><span>&middot;</span><span>Front desk</span></div></dd>
+    </div>
+    <div class="field-row">
+      <dt>How people will use it</dt>
+      <dd><ol class="numbered t-body-m" style="display:flex;flex-direction:column;gap:6px"><li>Pick a service</li><li>See real availability</li><li>Book and get a confirmation</li><li>Owner reviews the day</li></ol></dd>
+    </div>
+    <div class="field-row">
+      <dt>How it&rsquo;s put together</dt>
+      <dd>
+        <p class="t-body-m">A web application with its own database, built the way it would really ship, running on your machine.</p>
+        <details>
+          <summary class="t-label" style="color:var(--accent-fill);margin-top:var(--space-3)">
+            <svg class="chev" width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true"><path d="M3 1.5 6.5 5 3 8.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            Technical shape
+          </summary>
+          <p class="t-body-s" style="color:var(--ink-secondary);margin-top:var(--space-3)">Next.js 15.4.4 · TypeScript · SQLite · npm · Playwright for browser testing. I chose this because it&rsquo;s the one setup I&rsquo;ve certified end to end: I can generate it, build it, run it, test it, and watch it work.</p>
+          <p class="t-body-s" style="color:var(--ink-tertiary);margin-top:var(--space-2)">Worth knowing: the database suits a single copy of the application, and browser testing runs in Chromium-based browsers.</p>
+        </details>
+      </dd>
+    </div>
+    <div class="field-row">
+      <dt>Your decisions</dt>
+      <dd>
+        <p class="t-body-m">Sign-in &middot; Email and password &nbsp;<button class="btn-quiet t-body-s">Change</button></p>
+        <p class="t-body-m">Reminders &middot; <span class="attribution">Left to me</span> &nbsp;<button class="btn-quiet t-body-s">Change</button></p>
+      </dd>
+    </div>
+    <div class="field-row">
+      <dt>Ideas you added</dt>
+      <dd><p class="t-body-m">Cancellation window &nbsp;<button class="btn-quiet t-body-s">Remove</button></p></dd>
+    </div>
+    <div class="field-row">
+      <dt>What I&rsquo;m assuming</dt>
+      <dd>
+        <ul class="bullets t-body-m" style="display:flex;flex-direction:column;gap:6px">
+          <li>One studio location</li>
+          <li>Times shown in your local timezone</li>
+          <li>Staff members are not individually bookable</li>
+        </ul>
+        <button class="btn-quiet t-body-s" style="margin-top:var(--space-3)">Change an assumption</button>
+      </dd>
+    </div>
+    <div class="field-row">
+      <dt>What I&rsquo;ll prove</dt>
+      <dd>
+        <p class="t-body-m" style="margin-bottom:var(--space-3)">12 things, including:</p>
+        <ul class="proved t-body-m" style="display:flex;flex-direction:column;gap:6px">
+          <li>A client can complete a booking end to end</li>
+          <li>A booking still exists after a refresh</li>
+          <li>The site works at phone width</li>
+          <li>No blocking errors in a real browser</li>
+        </ul>
+        <button class="btn-quiet t-body-s" style="margin-top:var(--space-3)">Show all 12</button>
+      </dd>
+    </div>
+  </dl>
+
+  <div class="continue-row" style="margin-top:var(--space-8)">
+    <button class="btn btn-primary">Start building</button>
+    <button class="btn-quiet t-body-s">Change something</button>
+    <button class="btn-quiet t-body-s">Add a note</button>
+    <button class="btn-quiet t-body-s">Reconsider this</button>
+  </div>
+</section>
+
+<!-- ====================================================================
+     ACT — BUILDING (no preview yet)
+     ==================================================================== -->
+<section class="act hidden" data-panel="build">
+  <div class="build-head">
+    <div>
+      <h1 class="t-title-l">Studio Booking</h1>
+    </div>
+    <div class="build-head-meta">
+      <span class="pill pill-building"><i aria-hidden="true"></i>Building</span>
+      <span class="t-caption" style="color:var(--ink-tertiary)">4 min</span>
+      <button class="btn btn-secondary" style="height:32px;padding:0 14px">Stop</button>
+    </div>
+  </div>
+
+  <div class="dock-layout" id="build-layout">
+    <div>
+      <ol class="spine" id="spine-a"></ol>
+
+      <div class="now-block measure">
+        <h2 class="t-display-l" id="now-a">Building the main workflows</h2>
+        <p class="now-why" id="why-a">So a client can pick a time and actually get a booking.</p>
+      </div>
+
+      <p class="t-body-s" style="color:var(--ink-tertiary)">You can leave this page. I&rsquo;ll keep going and everything is recorded.</p>
+
+      <details class="eng">
+        <summary>
+          <svg class="chev" width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true"><path d="M3 1.5 6.5 5 3 8.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Engineering details · 47 records
+        </summary>
+        <div class="eng-body">
+          <p class="t-body-s eng-intro">Everything below is reconstructed from records Foundry can&rsquo;t rewrite. It&rsquo;s here for proof, not for you to act on.</p>
+          <div class="eng-sec">
+            <h4>Model routing</h4>
+            <div class="eng-scroll">
+              <table>
+                <thead><tr><th>provider</th><th>model</th><th>task</th><th>status</th><th>in</th><th>out</th><th>cost</th></tr></thead>
+                <tbody>
+                  <tr><td>anthropic</td><td>claude-sonnet-4</td><td>file generation</td><td>succeeded</td><td>8,412</td><td>3,190</td><td>$0.0471</td></tr>
+                  <tr><td>anthropic</td><td>claude-sonnet-4</td><td>file generation</td><td>succeeded</td><td>7,905</td><td>2,744</td><td>$0.0418</td></tr>
+                  <tr><td>openai</td><td>gpt-5-mini</td><td>mechanical transform</td><td>succeeded</td><td>1,204</td><td>388</td><td>cost unavailable locally</td></tr>
+                  <tr><td>anthropic</td><td>claude-opus-4</td><td>architecture</td><td>succeeded</td><td>4,110</td><td>1,902</td><td>$0.1284</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div class="eng-sec">
+            <h4>Counters</h4>
+            <p class="t-mono" style="color:var(--ink-secondary)">providerCallCount 14 · uniqueHypothesisCount 0 · installCount 1 · reinstallCount 0 · rebuildCount 2 · runtimeRestartCount 0</p>
+          </div>
+          <div class="eng-sec">
+            <h4>Workspace</h4>
+            <p class="t-mono" style="color:var(--ink-secondary)">mission-1785241724270-a91f4c02<br>nextjs-typescript-sqlite-npm-playwright@1.0.0<br>nextjs-web-runtime</p>
+          </div>
+        </div>
+      </details>
+    </div>
+  </div>
+</section>
+
+<!-- ====================================================================
+     ACT — REPAIR + PREVIEW LIVE
+     ==================================================================== -->
+<section class="act hidden" data-panel="repair">
+  <div class="build-head">
+    <div><h1 class="t-title-l">Studio Booking</h1></div>
+    <div class="build-head-meta">
+      <span class="pill pill-attention"><i aria-hidden="true"></i>Correcting an issue</span>
+      <span class="t-caption" style="color:var(--ink-tertiary)">9 min</span>
+      <button class="btn btn-secondary" style="height:32px;padding:0 14px">Stop</button>
+    </div>
+  </div>
+
+  <div class="dock-layout has-dock" id="repair-layout">
+    <div>
+      <ol class="spine" id="spine-b"></ol>
+
+      <div class="now-block">
+        <h2 class="t-display-l">Correcting an issue</h2>
+        <p class="now-why">A booking didn&rsquo;t save the way the plan promised. I&rsquo;m fixing that part and rerunning only the checks that matter.</p>
+      </div>
+
+      <div class="banner">
+        <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true" style="margin-top:3px;flex:none"><circle cx="9" cy="9" r="7.2" stroke="var(--attention)" stroke-width="1.4"/><path d="M9 5.4v4.2M9 12.2v.6" stroke="var(--attention)" stroke-width="1.5" stroke-linecap="round"/></svg>
+        <div>
+          <strong>I&rsquo;ve tried 3 approaches to this.</strong>
+          <p class="t-body-s">2 remain before I stop and tell you what I know.</p>
+        </div>
+      </div>
+
+      <details class="eng">
+        <summary>
+          <svg class="chev" width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true"><path d="M3 1.5 6.5 5 3 8.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Engineering details · 112 records
+        </summary>
+        <div class="eng-body">
+          <p class="t-body-s eng-intro">Everything below is reconstructed from records Foundry can&rsquo;t rewrite.</p>
+          <p class="t-mono" style="color:var(--ink-secondary)">classification: persistence failure<br>strategy family: persistence<br>attempt: 3 of 5<br>evidence: obs-4a19c7e2, obs-7bd0114f</p>
+        </div>
+      </details>
+    </div>
+
+    <div>
+      <div class="preview" id="dock">
+        <div class="preview-bar">
+          <span class="preview-bar-title">Preview</span>
+          <div class="preview-tools">
+            <button aria-pressed="true" title="Desktop width" aria-label="Desktop width">▭</button>
+            <button title="Phone width" aria-label="Phone width">▯</button>
+            <button title="Reload" aria-label="Reload">⟳</button>
+            <button title="Open in a new tab" aria-label="Open in a new tab">↗</button>
+            <button title="Collapse" aria-label="Collapse the preview panel" id="collapse-btn">✕</button>
+          </div>
+        </div>
+        <div class="preview-body">
+          <div class="fake">
+            <div class="fake-nav">
+              <span class="fake-logo">Ridgeway Studio</span>
+              <ul><li>Services</li><li>Book</li><li>Contact</li></ul>
+            </div>
+            <div class="fake-hero">
+              <h2>Book a session</h2>
+              <p>Pick a service, then a time that&rsquo;s actually free.</p>
+            </div>
+            <div class="fake-slots">
+              <div class="fake-slot">09:00</div>
+              <div class="fake-slot">10:30</div>
+              <div class="fake-slot on">12:00</div>
+              <div class="fake-slot">14:30</div>
+              <div class="fake-slot">15:00</div>
+              <div class="fake-slot">16:30</div>
+              <div class="fake-slot">17:00</div>
+              <div class="fake-slot">18:30</div>
+            </div>
+            <div class="fake-cta">Confirm 12:00 &mdash; Deep tissue, 60 min</div>
+          </div>
+        </div>
+        <div class="preview-foot"><span class="orb" aria-hidden="true"></span>Live · localhost:4310</div>
+      </div>
+
+      <div class="preview-collapsed hidden" id="dock-collapsed">
+        <span class="t-label" style="color:var(--ink-secondary)"><span class="orb" aria-hidden="true" style="display:inline-block;margin-right:7px"></span>Preview · Live</span>
+        <button class="btn-quiet t-body-s" id="restore-btn">Show preview</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ====================================================================
+     ACT — DELIVERY
+     ==================================================================== -->
+<section class="act hidden" data-panel="delivery">
+  <div class="delivery">
+    <p class="t-micro eyebrow">Studio Booking</p>
+    <h1 class="t-display-xl" style="text-wrap:balance">Your booking site is ready.</h1>
+
+    <div class="delivery-preview preview">
+      <div class="preview-bar">
+        <span class="preview-bar-title">Preview</span>
+        <div class="preview-tools">
+          <button aria-pressed="true" aria-label="Desktop width">▭</button>
+          <button aria-label="Tablet width">▤</button>
+          <button aria-label="Phone width">▯</button>
+          <button aria-label="Open in a new tab">↗</button>
+        </div>
+      </div>
+      <div class="preview-body" style="height:320px">
+        <div class="fake">
+          <div class="fake-nav"><span class="fake-logo">Ridgeway Studio</span><ul><li>Services</li><li>Book</li><li>Contact</li></ul></div>
+          <div class="fake-hero"><h2>Booking confirmed</h2><p>Tuesday 12:00 · Deep tissue, 60 min · with Marta</p></div>
+          <div class="fake-slots">
+            <div class="fake-slot">09:00</div><div class="fake-slot">10:30</div>
+            <div class="fake-slot on">12:00</div><div class="fake-slot">14:30</div>
+          </div>
+          <div class="fake-cta">Add to calendar</div>
+        </div>
+      </div>
+      <div class="preview-foot"><span class="orb" aria-hidden="true"></span>Live · localhost:4310</div>
+    </div>
+
+    <dl style="margin-top:var(--space-8)">
+      <div class="field-row">
+        <dt>What you got</dt>
+        <dd class="t-body-m">A booking site where clients pick a service, choose a real available time, and confirm. Runs on your machine with its own database.</dd>
+      </div>
+      <div class="field-row">
+        <dt>What I proved</dt>
+        <dd>
+          <p class="t-body-m"><span class="count-strong">12 of 12</span></p>
+          <ul class="proved t-body-m" style="display:flex;flex-direction:column;gap:6px;margin-top:var(--space-3)">
+            <li>A client can complete a booking end to end</li>
+            <li>A booking still exists after a refresh</li>
+            <li>Two clients can&rsquo;t take the same slot</li>
+            <li>The site works at phone width</li>
+            <li>No blocking errors in a real browser</li>
+          </ul>
+          <button class="btn-quiet t-body-s" style="margin-top:var(--space-3)">Show all 12</button>
+        </dd>
+      </div>
+      <div class="field-row">
+        <dt>Decisions I made</dt>
+        <dd>
+          <p class="t-body-m">Sign-in · Email and password &mdash; <span class="attribution">you chose this</span></p>
+          <p class="t-body-m">Reminders · On screen only &mdash; <span class="attribution">my call, because there&rsquo;s no mail service on this machine</span></p>
+          <p class="t-body-m">Times · Your local timezone &mdash; <span class="attribution">my call, because one location was assumed</span></p>
+        </dd>
+      </div>
+      <div class="field-row">
+        <dt>What I didn&rsquo;t do</dt>
+        <dd><ul class="bullets t-body-m" style="display:flex;flex-direction:column;gap:6px">
+          <li>Email confirmations &mdash; needs a mail service</li>
+          <li>Staff members aren&rsquo;t individually bookable</li>
+          <li>Built for one studio location</li>
+          <li>The database suits a single copy of the application</li>
+        </ul></dd>
+      </div>
+      <div class="field-row">
+        <dt>What I&rsquo;d do next</dt>
+        <dd><div class="inline-list t-body-m">
+          <span>Add staff calendars</span><span>·</span><span>Take a deposit at booking</span><span>·</span><span>Send confirmations by email</span>
+        </div></dd>
+      </div>
+    </dl>
+
+    <div style="margin-top:var(--space-8)">
+      <h2 class="t-title-m">What next?</h2>
+      <div class="composer" style="margin-top:var(--space-4);max-width:640px">
+        <label class="sr-only" for="followup">What should change?</label>
+        <textarea id="followup" rows="2" placeholder="Make the buttons larger"></textarea>
+        <div class="composer-foot">
+          <span class="t-caption" style="color:var(--ink-tertiary);max-width:400px">I&rsquo;ll start a new version and carry this project&rsquo;s plan and decisions into it. The files from this build stay where they are.</span>
+          <button class="btn btn-primary">Send it</button>
+        </div>
+      </div>
+      <p class="t-body-s" style="margin-top:var(--space-4)"><button class="btn-quiet t-body-s">Explain why you chose this</button></p>
+    </div>
+
+    <details class="eng">
+      <summary>
+        <svg class="chev" width="10" height="10" viewBox="0 0 10 10" fill="none" aria-hidden="true"><path d="M3 1.5 6.5 5 3 8.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        Engineering details · 183 records
+      </summary>
+      <div class="eng-body">
+        <div class="eng-sec">
+          <h4>Verification</h4>
+          <div class="eng-scroll">
+            <table>
+              <thead><tr><th>obligation</th><th>verdict</th><th>evidence</th></tr></thead>
+              <tbody>
+                <tr><td>booking-end-to-end</td><td>SATISFIED</td><td>obs-9c14a7</td></tr>
+                <tr><td>booking-survives-refresh</td><td>SATISFIED</td><td>obs-2f80bb</td></tr>
+                <tr><td>no-double-booking</td><td>SATISFIED</td><td>obs-5ad301</td></tr>
+                <tr><td>production-build</td><td>SATISFIED</td><td>obs-71ee4c</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </details>
+  </div>
+</section>
+
+<!-- ====================================================================
+     ACT — UNSUPPORTED
+     ==================================================================== -->
+<section class="act hidden" data-panel="decline">
+  <div class="measure">
+    <p class="t-micro eyebrow">What I understand</p>
+    <h1 class="t-display-l">Studio Booking (iPhone app)</h1>
+    <p class="t-body-l lead">A native iPhone app where clients book studio time and get a push reminder before their appointment.</p>
+  </div>
+
+  <div class="decline" style="margin-top:var(--space-8)">
+    <h2 class="t-title-l" style="text-wrap:balance">I can&rsquo;t build this one &mdash; and I won&rsquo;t fake it.</h2>
+    <p class="t-body-m">You asked for a native iPhone app. Today I build for the web: web apps, business websites, customer portals, internal tools, and web APIs. I could build something that looks close and doesn&rsquo;t run on a phone, but I&rsquo;d rather tell you.</p>
+    <p class="t-body-m">A web version would work in a phone&rsquo;s browser, and people wouldn&rsquo;t need to install anything. If that&rsquo;s useful, I&rsquo;ll design that instead.</p>
+    <div class="decline-actions">
+      <button class="btn btn-primary">Design a web version</button>
+      <button class="btn-quiet t-body-s">Start something else</button>
+    </div>
+  </div>
+</section>
+
+    </div>
+  </main>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  /* ---------------- Act switching (prototype chrome) ---------------- */
+  var panels = document.querySelectorAll("[data-panel]");
+  var actBtns = document.querySelectorAll(".proto-acts button");
+  actBtns.forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      var act = btn.getAttribute("data-act");
+      actBtns.forEach(function (b) { b.setAttribute("aria-current", String(b === btn)); });
+      panels.forEach(function (p) {
+        p.classList.toggle("hidden", p.getAttribute("data-panel") !== act);
+      });
+      window.scrollTo({ top: 0, behavior: "instant" });
+    });
+  });
+
+  /* ---------------- Home: composer + dynamic suggestions ---------------- */
+  var LEXICON = [
+    { k: ["booking", "appointment", "appointments"], v: ["…for a hair studio", "…for a dental practice", "…with staff calendars", "…that takes a deposit"] },
+    { k: ["shop", "store", "sell", "selling"], v: ["…with a catalogue and prices", "…that takes card payments", "…that tracks what is left"] },
+    { k: ["website", "site"], v: ["…with a contact form", "…with service pages", "…with customer reviews"] },
+    { k: ["portal", "login", "logins", "account", "accounts"], v: ["…where customers see their own records", "…with password reset", "…with staff and customer roles"] },
+    { k: ["records", "catalogue", "catalog"], v: ["…that tracks who changed what", "…with a printable report", "…with search and filters"] },
+    { k: ["api"], v: ["…for another team to call", "…with rate limiting", "…with documentation"] },
+    { k: ["dashboard", "report", "reports"], v: ["…for my team", "…with a weekly summary", "…that exports to a spreadsheet"] },
+    { k: ["crm", "customers", "clients"], v: ["…with notes and history", "…with a follow-up reminder"] }
+  ];
+  var STARTERS = [
+    "A website for my business",
+    "An appointment booking system",
+    "A customer portal with logins",
+    "An internal tool for my team",
+    "An API for reservations"
+  ];
+
+  var intent = document.getElementById("intent");
+  var chips = document.getElementById("chips");
+  var chipZone = document.getElementById("chip-zone");
+  var enough = document.getElementById("enough");
+  var startBtn = document.getElementById("start-btn");
+  var debounce;
+
+  function renderChips(list, append) {
+    chips.textContent = "";
+    list.slice(0, 5).forEach(function (label) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.className = "chip";
+      b.textContent = label;
+      b.addEventListener("click", function () {
+        if (append) {
+          var base = intent.value.replace(/\s+$/, "");
+          intent.value = base + " " + label.replace(/^…/, "").trim();
+        } else {
+          intent.value = label;
+        }
+        intent.focus();
+        intent.setSelectionRange(intent.value.length, intent.value.length);
+        update();
+      });
+      chips.appendChild(b);
+    });
+  }
+
+  function update() {
+    var text = intent.value.trim();
+    var words = text ? text.split(/\s+/) : [];
+    startBtn.disabled = words.length === 0;
+
+    if (words.length === 0) {
+      chipZone.hidden = false; enough.hidden = true;
+      renderChips(STARTERS, false);
+      return;
+    }
+    if (words.length >= 4) {
+      chipZone.hidden = true; enough.hidden = false;
+      return;
+    }
+    // 1-3 words: offer completions
+    var lower = text.toLowerCase();
+    var hits = [];
+    LEXICON.forEach(function (entry) {
+      var matched = entry.k.some(function (key) {
+        return new RegExp("\\b" + key + "\\b").test(lower);
+      });
+      if (matched) { hits = hits.concat(entry.v); }
+    });
+    if (hits.length) {
+      chipZone.hidden = false; enough.hidden = true;
+      renderChips(hits, true);
+    } else {
+      chipZone.hidden = false; enough.hidden = true;
+      renderChips(STARTERS, false);
+    }
+  }
+
+  intent.addEventListener("input", function () {
+    intent.style.height = "auto";
+    intent.style.height = Math.min(intent.scrollHeight, 208) + "px";
+    clearTimeout(debounce);
+    debounce = setTimeout(update, 180);
+  });
+  intent.addEventListener("keydown", function (e) {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (!startBtn.disabled) startBtn.click(); }
+  });
+  update();
+
+  /* ---------------- Clarification: options, other, skip, progress ---------------- */
+  var questions = document.querySelectorAll(".question");
+  var progress = document.getElementById("progress");
+
+  function refreshProgress() {
+    var answered = 0;
+    questions.forEach(function (q) {
+      var chosen = q.querySelector('[role="radio"][aria-checked="true"]');
+      var skipOpen = q.querySelector('[data-extra="skip"]').classList.contains("open");
+      var otherText = q.querySelector('[data-extra="other"] textarea').value.trim();
+      var isDecide = chosen && chosen.getAttribute("data-val") === "decide";
+      if ((chosen && !isDecide) || otherText) { answered += 1; }
+      else if (skipOpen || isDecide) { /* left to Foundry */ }
+    });
+    var left = questions.length - answered;
+    progress.textContent = answered + " answered · " + left + " left to me";
+    if (answered === 0) {
+      progress.textContent = "All " + questions.length + " left to me — that's a perfectly good answer.";
+    }
+  }
+
+  questions.forEach(function (q) {
+    var radios = q.querySelectorAll('[role="radio"]');
+    radios.forEach(function (r, idx) {
+      r.addEventListener("click", function () {
+        radios.forEach(function (o) { o.setAttribute("aria-checked", String(o === r)); });
+        refreshProgress();
+      });
+      r.addEventListener("keydown", function (e) {
+        var dir = e.key === "ArrowDown" || e.key === "ArrowRight" ? 1
+                : e.key === "ArrowUp" || e.key === "ArrowLeft" ? -1 : 0;
+        if (!dir) return;
+        e.preventDefault();
+        var next = radios[(idx + dir + radios.length) % radios.length];
+        next.focus(); next.click();
+      });
+    });
+
+    q.querySelectorAll("[data-open]").forEach(function (link) {
+      link.addEventListener("click", function () {
+        var which = link.getAttribute("data-open");
+        var target = q.querySelector('[data-extra="' + which + '"]');
+        var opening = !target.classList.contains("open");
+        q.querySelectorAll(".q-extra").forEach(function (x) { x.classList.remove("open"); });
+        if (opening) {
+          target.classList.add("open");
+          target.querySelector("textarea").focus();
+        }
+        refreshProgress();
+      });
+    });
+
+    q.querySelector('[data-extra="other"] textarea').addEventListener("input", refreshProgress);
+  });
+  refreshProgress();
+
+  /* ---------------- Suggestion toggles ---------------- */
+  document.querySelectorAll(".sug").forEach(function (s) {
+    s.addEventListener("click", function () {
+      var on = s.getAttribute("aria-checked") === "true";
+      s.setAttribute("aria-checked", String(!on));
+      s.querySelector(".sug-toggle").textContent = on ? "+" : "✓";
+    });
+  });
+
+  /* ---------------- Phase spine ---------------- */
+  var PHASES = [
+    ["Understanding what you need", "Working out what you need."],
+    ["Designing the experience", "Working out the pages and how people move between them."],
+    ["Creating the application structure", "Setting up the project so everything has a place."],
+    ["Building the main workflows", "So a client can pick a time and actually get a booking."],
+    ["Connecting data", "So a booking is saved and still there after a refresh."],
+    ["Preparing it to run", "Installing what it needs and building it the way it would really ship."],
+    ["Running the application", "Starting it for real and waiting until it actually answers."],
+    ["Testing important actions", "Doing the things a real person would do, in a real browser."],
+    ["Verifying the result", "Checking every promise I made in the plan."]
+  ];
+  var PROVED = { 2: 2, 4: 3, 6: 1 };
+  var REPAIR_LINES = [
+    "A booking didn't save the way the plan promised.",
+    "I found the likely cause.",
+    "I'm correcting the affected part.",
+    "I'm rerunning only the checks that matter."
+  ];
+
+  function buildSpine(el, currentIndex, opts) {
+    opts = opts || {};
+    el.textContent = "";
+    PHASES.forEach(function (phase, i) {
+      var li = document.createElement("li");
+      var state = i < currentIndex ? "done" : i === currentIndex ? (opts.fixing ? "fixing" : "now") : "";
+      if (state) li.className = state;
+
+      var mark = document.createElement("span");
+      mark.className = "spine-mark";
+      var dot = document.createElement("span");
+      dot.className = "spine-dot";
+      if (state === "done") { dot.textContent = "✓"; }
+      dot.setAttribute("aria-hidden", "true");
+      var line = document.createElement("span");
+      line.className = "spine-line";
+      mark.appendChild(dot); mark.appendChild(line);
+
+      var body = document.createElement("div");
+      body.style.flex = "1";
+      body.style.paddingBottom = "6px";
+      var text = document.createElement("span");
+      text.className = "spine-text";
+      text.textContent = phase[0];
+      body.appendChild(text);
+
+      if (state === "done" && PROVED[i]) {
+        var c = document.createElement("span");
+        c.className = "spine-count";
+        c.textContent = " · " + PROVED[i] + " proved";
+        body.appendChild(c);
+      }
+
+      if (state === "fixing" && opts.repairStep != null) {
+        var rep = document.createElement("ul");
+        rep.className = "repair";
+        rep.setAttribute("aria-live", "polite");
+        REPAIR_LINES.slice(0, opts.repairStep + 1).forEach(function (l, ri) {
+          var rli = document.createElement("li");
+          rli.textContent = l;
+          if (ri === opts.repairStep) rli.className = "active";
+          rep.appendChild(rli);
+        });
+        body.appendChild(rep);
+      }
+
+      li.appendChild(mark); li.appendChild(body);
+      el.appendChild(li);
+    });
+  }
+
+  /* Act "Building": advance slowly so reviewers see the mechanic */
+  var spineA = document.getElementById("spine-a");
+  var nowA = document.getElementById("now-a");
+  var whyA = document.getElementById("why-a");
+  var idxA = 3;
+  buildSpine(spineA, idxA);
+  var reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (!reduce) {
+    setInterval(function () {
+      idxA = idxA >= 8 ? 3 : idxA + 1;
+      buildSpine(spineA, idxA);
+      nowA.textContent = PHASES[idxA][0];
+      whyA.textContent = PHASES[idxA][1];
+    }, 5200);
+  }
+
+  /* Act "Repair": phase 7 interrupted, narrative advances */
+  var spineB = document.getElementById("spine-b");
+  var step = 0;
+  buildSpine(spineB, 7, { fixing: true, repairStep: step });
+  if (!reduce) {
+    setInterval(function () {
+      step = (step + 1) % REPAIR_LINES.length;
+      buildSpine(spineB, 7, { fixing: true, repairStep: step });
+    }, 2600);
+  }
+
+  /* ---------------- Preview dock collapse / restore ---------------- */
+  var dock = document.getElementById("dock");
+  var dockCollapsed = document.getElementById("dock-collapsed");
+  var layout = document.getElementById("repair-layout");
+  document.getElementById("collapse-btn").addEventListener("click", function () {
+    dock.classList.add("hidden");
+    dockCollapsed.classList.remove("hidden");
+    layout.classList.remove("has-dock");
+    document.getElementById("restore-btn").focus();
+  });
+  document.getElementById("restore-btn").addEventListener("click", function () {
+    dock.classList.remove("hidden");
+    dockCollapsed.classList.add("hidden");
+    layout.classList.add("has-dock");
+    document.getElementById("collapse-btn").focus();
+  });
+
+  /* Width presets in the preview toolbars */
+  document.querySelectorAll(".preview-tools").forEach(function (bar) {
+    var presets = Array.prototype.filter.call(bar.children, function (b) {
+      return b.hasAttribute("aria-pressed");
+    });
+    presets.forEach(function (b) {
+      b.addEventListener("click", function () {
+        presets.forEach(function (o) { o.setAttribute("aria-pressed", String(o === b)); });
+      });
+    });
+  });
+})();
+</script>
