@@ -30,7 +30,29 @@ function matchesType(value, type) {
 }
 
 function validateValue(value, schema, path) {
-  if (!isPlainObject(schema) || typeof schema.type !== "string") {
+  if (!isPlainObject(schema)) {
+    throw new ModelOutputValidationError(
+      `Response schema at ${path} is malformed.`,
+    );
+  }
+  if (Array.isArray(schema.anyOf) && schema.anyOf.length > 0) {
+    const matches = schema.anyOf.filter((candidate) => {
+      try {
+        validateValue(value, candidate, path);
+        return true;
+      } catch (error) {
+        if (error instanceof ModelOutputValidationError) return false;
+        throw error;
+      }
+    });
+    if (matches.length !== 1) {
+      throw new ModelOutputValidationError(
+        `Model response ${path} must match exactly one allowed schema.`,
+      );
+    }
+    return;
+  }
+  if (typeof schema.type !== "string") {
     throw new ModelOutputValidationError(
       `Response schema at ${path} is malformed.`,
     );
@@ -47,6 +69,15 @@ function validateValue(value, schema, path) {
   ) {
     throw new ModelOutputValidationError(
       `Model response ${path} must contain at least ${schema.minLength} characters.`,
+    );
+  }
+  if (
+    schema.type === "string" &&
+    Number.isSafeInteger(schema.maxLength) &&
+    value.length > schema.maxLength
+  ) {
+    throw new ModelOutputValidationError(
+      `Model response ${path} must contain at most ${schema.maxLength} characters.`,
     );
   }
   if (
@@ -91,6 +122,14 @@ function validateValue(value, schema, path) {
     ) {
       throw new ModelOutputValidationError(
         `Model response ${path} must contain at least ${schema.minItems} items.`,
+      );
+    }
+    if (
+      Number.isSafeInteger(schema.maxItems) &&
+      value.length > schema.maxItems
+    ) {
+      throw new ModelOutputValidationError(
+        `Model response ${path} must contain at most ${schema.maxItems} items.`,
       );
     }
     value.forEach((item, index) =>

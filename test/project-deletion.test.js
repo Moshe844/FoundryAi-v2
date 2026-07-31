@@ -79,7 +79,10 @@ test("project deletion confirmation is preserved and stale UI responses cannot r
   // Deletion stays behind an explicit confirmation. The native dialog was
   // replaced by an in-product confirm sheet that states what is kept on disk,
   // so the gate is asserted by its wiring rather than by window.confirm.
-  assert.match(source, /setConfirm\(\{ kind: "delete", mission \}\)/);
+  assert.match(
+    source,
+    /setConfirm\(\{\s*kind: "delete",\s*mission,\s*returnFocus\s*\}\)/,
+  );
   assert.match(source, /confirm\?\.kind === "delete"/);
   assert.match(source, /confirmLabel="Delete"/);
   assert.doesNotMatch(source, /window\.(confirm|alert|prompt)\(/);

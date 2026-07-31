@@ -61,7 +61,16 @@ const control = openMissionControl({
 });
 
 let stopping = false;
-async function stop() {
+async function cancel() {
+  if (stopping) return;
+  stopping = true;
+  try {
+    await control.production.cancel(missionId);
+  } catch {}
+  process.exit(0);
+}
+
+async function cleanup() {
   if (stopping) return;
   stopping = true;
   try {
@@ -71,10 +80,11 @@ async function stop() {
 }
 
 process.on("message", (message) => {
-  if (message?.type === "stop") void stop();
+  if (message?.type === "stop") void cancel();
+  if (message?.type === "shutdown") void cleanup();
 });
-process.once("SIGINT", () => void stop());
-process.once("SIGTERM", () => void stop());
+process.once("SIGINT", () => void cleanup());
+process.once("SIGTERM", () => void cleanup());
 
 try {
   await control.production.execute(missionId);

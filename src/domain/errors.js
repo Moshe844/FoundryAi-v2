@@ -718,3 +718,28 @@ export class ProjectProfileValidationError extends FoundryError {
     super(message, "PROJECT_PROFILE_VALIDATION", options);
   }
 }
+
+export class ProjectDesignValidationError extends FoundryError {
+  constructor(message, options = {}) {
+    super(message, "PROJECT_DESIGN_VALIDATION", options);
+  }
+}
+
+export class ProjectDesignQualityError extends FoundryError {
+  constructor(message, issues = [], options = {}) {
+    super(message, "PROJECT_DESIGN_QUALITY", options);
+    this.issues = Object.freeze([...issues]);
+  }
+}
+
+export class ApprovedProjectContractValidationError extends FoundryError {
+  constructor(message, options = {}) {
+    super(message, "APPROVED_PROJECT_CONTRACT_VALIDATION", options);
+  }
+}
+
+export class ContractBindingValidationError extends FoundryError {
+  constructor(message, options = {}) {
+    super(message, "CONTRACT_BINDING_VALIDATION", options);
+  }
+}

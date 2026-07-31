@@ -44,15 +44,28 @@ export type ProjectJourney = Readonly<{
 export type FoundryObservation = Readonly<{
   id: string;
   observation: Sourced<string>;
-  whyItMatters: Sourced<string>;
-  confidence: Sourced<Confidence>;
+  whyItMatters: Sourced<string | null>;
+  confidence: Sourced<Confidence | null>;
 }>;
 
 export type DesignAlternative = Readonly<{
   id: string;
   name: Sourced<string>;
   description: Sourced<string>;
-  tradeoffs: Sourced<readonly string[]>;
+  whyItFits: Sourced<string>;
+  layoutApproach: Sourced<string>;
+  visualPersonality: Sourced<string>;
+  informationDensity: Sourced<string>;
+  navigationApproach: Sourced<string>;
+  mobileBehavior: Sourced<string>;
+  tradeoff: Sourced<string>;
+  confidence: Sourced<number>;
+  preview: Readonly<{
+    typographyCharacter: Sourced<string>;
+    spacingDensity: Sourced<string>;
+    colorMood: Sourced<string>;
+    hierarchy: Sourced<string>;
+  }>;
   recommended: Sourced<boolean>;
 }>;
 
@@ -62,22 +75,41 @@ export type FoundryRecommendation = Readonly<{
   value: Sourced<string>;
   reason: Sourced<string>;
   selectedByDefault: Sourced<boolean | null>;
-  impact: Sourced<RecommendationImpact | null>;
+  impact: Sourced<string | null>;
+  confidence: Sourced<number | null>;
+  dependencies: Sourced<readonly string[]>;
+}>;
+
+export type ProjectDesignDirection = Readonly<{
+  recommendedStyle: Sourced<string>;
+  reason: Sourced<string>;
+  layoutApproach: Sourced<string>;
+  tone: Sourced<string>;
+  mobilePriority: Sourced<string>;
+  accessibilityConsiderations: Sourced<readonly string[]>;
 }>;
 
 export type FoundryProposal = Readonly<{
   items: Sourced<readonly string[]>;
   includedDefaults: Sourced<readonly string[]>;
+  designDirection: ProjectDesignDirection;
   reasoning: Sourced<readonly string[]>;
+  exclusions: Sourced<readonly string[]>;
   observations: readonly FoundryObservation[];
   alternatives: readonly DesignAlternative[];
   recommendations: readonly FoundryRecommendation[];
+  smartSuggestions: readonly Readonly<{
+    id: string;
+    label: Sourced<string>;
+    reason: Sourced<string>;
+  }>[];
 }>;
 
 export type ProjectUnderstanding = Readonly<{
   projectName: Sourced<string>;
   summary: Sourced<string>;
   audiences: Sourced<readonly string[]>;
+  isRevised: Sourced<boolean>;
   journeys: readonly ProjectJourney[];
   proposal: FoundryProposal;
 }>;
@@ -88,15 +120,35 @@ export type ClarificationDecision = Readonly<{
   reason: Sourced<string>;
   choices: Sourced<readonly string[]>;
   recommendation: Sourced<string>;
+  recommendationReason: Sourced<string>;
+  consequences: Sourced<readonly string[]>;
+  architectureImpact: Sourced<string>;
+  scopeImpact: Sourced<string>;
   answer: Sourced<string | null> | null;
 }>;
 
 export type DecisionBrief = Readonly<{
-  whatWillBeBuilt: Sourced<readonly string[]>;
+  projectName: Sourced<string>;
+  whatWillBeBuilt: Sourced<string>;
   audiences: Sourced<readonly string[]>;
   journeys: readonly ProjectJourney[];
-  decisions: Sourced<readonly string[]>;
+  designDirection: ProjectDesignDirection;
+  structure: Sourced<string>;
+  technicalShape: Readonly<{
+    stackId: Sourced<string>;
+    stackVersion: Sourced<string>;
+    framework: Sourced<string>;
+    frameworkVersion: Sourced<string | null>;
+    language: Sourced<string>;
+    database: Sourced<string>;
+    packageManager: Sourced<string>;
+    browserTesting: Sourced<string>;
+    knownLimitations: Sourced<readonly string[]>;
+  }>;
+  decisions: readonly ClarificationDecision[];
+  foundryChoices: Sourced<readonly string[]>;
   assumptions: Sourced<readonly string[]>;
+  explicitExclusions: Sourced<readonly string[]>;
   selectedEnhancements: readonly FoundryRecommendation[];
   verificationObligations: Sourced<readonly string[]>;
 }>;
@@ -121,6 +173,16 @@ export type MissionNarrative = Readonly<{
 }>;
 
 export type RepairNarrative = Readonly<{
+  state: Sourced<
+    | "automatic"
+    | "different-strategy"
+    | "budget-warning"
+    | "customer-action-required"
+    | "external-service"
+    | "verification-incomplete"
+    | "honest-exhaustion"
+  >;
+  lines: Sourced<readonly string[]>;
   affectedArea: Sourced<string | null>;
   observedProblem: Sourced<string | null>;
   correction: Sourced<string | null>;
@@ -133,8 +195,11 @@ export type PreviewStateName =
   | "starting"
   | "live"
   | "rebuilding"
-  | "unavailable"
-  | "stopped";
+  | "disconnected"
+  | "crashed"
+  | "stopped"
+  | "error"
+  | "unavailable";
 
 export type PreviewState = Readonly<{
   state: Sourced<PreviewStateName>;
@@ -159,6 +224,21 @@ export type VerifiedOutcome = Readonly<{
   evidenceReferences: Sourced<readonly string[]>;
 }>;
 
+export type UnverifiedOutcome = Readonly<{
+  obligationId: string;
+  statement: Sourced<string>;
+  result: Sourced<"PENDING" | "NOT_SATISFIED" | "UNVERIFIABLE">;
+  detail: Sourced<string | null>;
+}>;
+
+export type CompletionDecision = Readonly<{
+  id: string;
+  label: Sourced<string>;
+  answer: Sourced<string>;
+  attribution: Sourced<"customer" | "foundry">;
+  reason: Sourced<string>;
+}>;
+
 export type KnownLimitation = Readonly<{
   id: string;
   description: Sourced<string>;
@@ -171,11 +251,48 @@ export type SuggestedNextStep = Readonly<{
 
 export type CompletionSummary = Readonly<{
   available: Sourced<boolean>;
+  complete: Sourced<boolean>;
+  projectName: Sourced<string | null>;
   deliveredArtifact: Sourced<string | null>;
+  buildDuration: Sourced<string | null>;
+  browserEvidencePresent: Sourced<boolean>;
+  provedCount: Sourced<number>;
+  totalCount: Sourced<number>;
   verifiedOutcomes: readonly VerifiedOutcome[];
-  unverifiedObligations: Sourced<readonly string[]>;
+  unverifiedOutcomes: readonly UnverifiedOutcome[];
+  decisions: readonly CompletionDecision[];
+  launchRequirements: readonly KnownLimitation[];
   limitations: readonly KnownLimitation[];
   nextSteps: readonly SuggestedNextStep[];
+}>;
+
+export type LifecycleOutcomeKind =
+  | "failed"
+  | "exhausted"
+  | "blocked"
+  | "cancelled";
+
+export type LifecycleOutcome = Readonly<{
+  kind: Sourced<LifecycleOutcomeKind>;
+  projectName: Sourced<string>;
+  headline: Sourced<string>;
+  whatWasHappening: Sourced<string>;
+  whatHappened: Sourced<string>;
+  provedCount: Sourced<number>;
+  totalCount: Sourced<number>;
+  provedOutcomes: readonly VerifiedOutcome[];
+  unprovedOutcomes: readonly UnverifiedOutcome[];
+  completedPhases: Sourced<readonly string[]>;
+  whatToTryNext: Sourced<string>;
+  whatINeed: Sourced<string>;
+  planSaved: Sourced<boolean>;
+}>;
+
+export type UnsupportedSummary = Readonly<{
+  requestedPlatform: Sourced<string>;
+  requestedDescription: Sourced<string>;
+  supportedOutcome: Sourced<string>;
+  alternative: Sourced<string>;
 }>;
 
 export type ProviderModelTransparency = Readonly<{
@@ -205,6 +322,8 @@ export type FoundryExperienceModel = Readonly<{
   approval: ApprovalRequest;
   blocker: Blocker | null;
   completion: CompletionSummary;
+  lifecycleOutcome: LifecycleOutcome | null;
+  unsupported: UnsupportedSummary | null;
   providers: readonly ProviderTransparency[];
   surface:
     | "reading"
@@ -213,7 +332,9 @@ export type FoundryExperienceModel = Readonly<{
     | "plan"
     | "building"
     | "completion"
-    | "stopped";
+    | "failed"
+    | "blocked"
+    | "cancelled";
 }>;
 
 export type ProjectQuestion = Readonly<{
@@ -221,12 +342,43 @@ export type ProjectQuestion = Readonly<{
   prompt: string;
   reason: string;
   answerOptions: readonly string[];
+  recommendation?: string;
+  recommendationReason?: string;
+  consequences?: readonly string[];
+  architectureImpact?: string;
+  scopeImpact?: string;
 }>;
 
 export type ProjectSuggestion = Readonly<{
   suggestionId: string;
   label: string;
   rationale: string;
+  value?: string;
+  impact?: string;
+  selectedByDefault?: boolean;
+  confidence?: number;
+  requiredDependencies?: readonly string[];
+}>;
+
+export type ProjectDesignAlternative = Readonly<{
+  approach: string;
+  rationale: string;
+  tradeoffs?: readonly string[];
+  whyItFits?: string;
+  layoutApproach?: string;
+  visualPersonality?: string;
+  informationDensity?: string;
+  navigationApproach?: string;
+  mobileBehavior?: string;
+  tradeoff?: string;
+  confidence?: Readonly<{ score: number; rationale: string }>;
+  preview?: Readonly<{
+    typographyCharacter: string;
+    spacingDensity: string;
+    colorMood: string;
+    hierarchy: string;
+  }>;
+  recommended: boolean;
 }>;
 
 export type VerificationCheck = Readonly<{
@@ -243,9 +395,30 @@ export type ProjectProfile = Readonly<{
   family: string;
   platform: string;
   primaryActors: readonly string[];
+  primaryJourneys: readonly string[];
   outcomes: readonly string[];
   capabilities: readonly string[];
   dataConcepts: readonly string[];
+  designDirection: Readonly<{
+    recommendedStyle: string;
+    reason: string;
+    layoutApproach: string;
+    tone: string;
+    mobilePriority: string;
+    accessibilityConsiderations: readonly string[];
+  }>;
+  includedDefaults: readonly string[];
+  assumptions: readonly string[];
+  customerContent: Readonly<{
+    supplied: readonly Readonly<{
+      kind: string;
+      value: string;
+      source: "customer-request" | "customer-answer";
+    }>[];
+    missingBeforeLaunch: readonly string[];
+  }>;
+  observations: readonly string[];
+  designAlternatives: readonly ProjectDesignAlternative[];
   constraints: readonly string[];
   architectureDecisions: readonly string[];
   openQuestions: readonly ProjectQuestion[];
@@ -279,11 +452,72 @@ export type ModelRoute = Readonly<{
   costUsd: number | null;
 }>;
 
+export type CustomerInputKind =
+  | "context"
+  | "understanding"
+  | "workflow"
+  | "feature"
+  | "design"
+  | "business-rule"
+  | "role"
+  | "integration"
+  | "limitation"
+  | "acceptance";
+
+export type DecisionSelectionKind =
+  | "design-direction"
+  | "recommendation"
+  | "decision"
+  | "customer-message"
+  | "proposal-confirmation";
+
+export type DecisionSelectionMode =
+  | "accept-recommendation"
+  | "delegate"
+  | "select-option"
+  | "other"
+  | "include"
+  | "exclude"
+  | "message"
+  | "confirm";
+
+export type DecisionSelection = Readonly<{
+  kind: DecisionSelectionKind;
+  subjectId: string;
+  mode: DecisionSelectionMode;
+  optionId: string | null;
+  value: string;
+  reason: string;
+  classification: string | null;
+  sourceProfileVersion: number;
+}>;
+
+export type CustomerFollowUpAnswer = Readonly<{
+  questionId: string;
+  answer: string;
+  selection?: DecisionSelection;
+}>;
+
+export type DiscoveryConversation = Readonly<{
+  messages: readonly Readonly<{
+    messageId: string;
+    kind: CustomerInputKind;
+    text: string;
+    profileVersion: number;
+    occurredAt: string;
+  }>[];
+  latestRevision: Readonly<{
+    profileVersion: number;
+    changedSections: readonly string[];
+  }>;
+}>;
+
 export type Mission = Readonly<{
   missionId: string;
   intent: string;
   state: string;
   profile: ProjectProfile | null;
+  proposalConfirmed: boolean;
   contract: Readonly<{
     contractVersion: number;
     obligations: readonly Readonly<{
@@ -292,6 +526,89 @@ export type Mission = Readonly<{
       origin: string;
     }>[];
   }> | null;
+  decisionHistory: readonly Readonly<{
+    questionId: string;
+    prompt: string;
+    reason: string;
+    choices: readonly string[];
+    recommendation: string;
+    answer: string;
+  }>[];
+  selectedEnhancements: readonly Readonly<{
+    suggestionId: string;
+    label: string;
+    rationale: string;
+  }>[];
+  discoveryConversation: DiscoveryConversation;
+  technicalStack: Readonly<{
+    stackId: string;
+    stackVersion: string;
+    components: Readonly<{
+      framework: string;
+      language: string;
+      database: string;
+      packageManager: string;
+      browserTesting: string;
+    }>;
+    frameworkVersion: string | null;
+    knownLimitations: readonly string[];
+  }>;
+  executionProjection: Readonly<{
+    timing: Readonly<{
+      startedAt: string | null;
+      completedAt: string | null;
+    }>;
+    phase: Readonly<{
+      currentIndex: number;
+      completedThrough: number;
+      interrupted: boolean;
+      includesDataPhase: boolean;
+    }>;
+    repair: Readonly<{
+      state:
+        | "automatic"
+        | "different-strategy"
+        | "budget-warning"
+        | "customer-action-required"
+        | "external-service"
+        | "verification-incomplete"
+        | "honest-exhaustion";
+      lines: readonly string[];
+      targetObligationIds: readonly string[];
+      affectedArea: string | null;
+      findingDetail: string | null;
+      attempts: number;
+    }> | null;
+    runtime: Readonly<{
+      status: "READY" | "STARTUP_FAILED" | "HEALTHY" | "CRASHED" | "STOPPED";
+      eventType: string;
+      previewUrl: string;
+      workspaceId: string;
+      checkpointId: string;
+      sessionId: string;
+      plainCause: string | null;
+      evidenceReferences: readonly Readonly<{
+        evidenceId: string;
+        workspaceCheckpointReference: string | null;
+      }>[];
+    }> | null;
+    workspace: Readonly<{
+      workspaceId: string | null;
+      checkpointIds: readonly string[];
+      runtimeAdapterId: string;
+    }>;
+    verification: readonly Readonly<{
+      obligationId: string;
+      statement: string;
+      result: "PENDING" | "SATISFIED" | "NOT_SATISFIED" | "UNVERIFIABLE";
+      detail: string | null;
+      evidenceReferences: readonly Readonly<{
+        evidenceId: string;
+        verificationRequestReference?: string | null;
+        workspaceCheckpointReference: string | null;
+      }>[];
+    }>[];
+  }>;
   previewUrl: string | null;
   running: boolean;
   error: string | null;
@@ -320,7 +637,27 @@ export type Provider = Readonly<{
   formatValid: boolean;
   health: string;
   available: boolean;
+  autoRoutingAvailable: boolean;
+  lastSuccessfulRefreshAt: string | null;
+  refreshStale: boolean;
+  refreshMaximumAgeMs: number;
+  nextScheduledRefreshAt: string | null;
+  lifecycleSourceStatus: string;
   reason: string;
+  connectedModels: readonly Readonly<{
+    modelId: string;
+    displayName: string;
+    purpose: string;
+    lifecycle: string;
+    releaseChannel: string;
+    validationStatus: string;
+    catalogPresence: string;
+    lastSeenAt: string | null;
+    missingSince: string | null;
+    lastValidatedAt: string | null;
+    engineeringEligible: boolean;
+    reasons: readonly string[];
+  }>[];
   models: readonly Readonly<{
     modelId: string;
     displayName: string;

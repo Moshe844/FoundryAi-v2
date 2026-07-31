@@ -152,10 +152,14 @@ export function ApplicationShell({
             ref={navigationSheetRef}
             className="mobile-navigation-sheet"
             id="mobile-navigation"
-            aria-label="Navigation"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="mobile-navigation-heading"
           >
             <div className="mobile-navigation-head">
-              <span className="t-label">Navigation</span>
+              <span className="t-label" id="mobile-navigation-heading">
+                Navigation
+              </span>
               <button
                 ref={closeButtonRef}
                 className="mobile-navigation-close"

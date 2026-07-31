@@ -14,13 +14,26 @@ import {
   WorkUnitAction,
   WorkUnitStatus,
 } from "../domain/execution.js";
-import { MissionState } from "../domain/lifecycle.js";
+import {
+  MissionState,
+  isTerminalMissionState,
+} from "../domain/lifecycle.js";
 import { ObservationKind } from "../domain/observation-evidence.js";
 import { CompletionResult } from "../domain/verification.js";
 import {
   parseBrowserResult,
   RuntimeStatus,
 } from "../domain/runtime-preview.js";
+import {
+  CONTRACT_BOUND_BUNDLE_SCHEMA,
+  approvedContractRequirementCatalogue,
+  contractBoundModelPrompt,
+  createModelTaskContract,
+  deriveContractRoutingRequirements,
+  validateContractBoundMissionPlan,
+  validateContractRequirementTrace,
+} from "../domain/contract-bound-execution.js";
+import { validateApprovedProjectContractConsistency } from "../domain/approved-project-contract.js";
 
 export const PRODUCTION_MISSION_SOURCE = "PRODUCTION_MISSION_SERVICE";
 const BROWSER_ISOLATION_RESTORE_REASON =
@@ -288,9 +301,26 @@ const browserRepairPatchSchema = Object.freeze({
   },
 });
 
+function contractTraceSchema(schema, enabled) {
+  if (!enabled) return schema;
+  return Object.freeze({
+    ...schema,
+    required: Object.freeze([...schema.required, "contractRequirementIds"]),
+    properties: Object.freeze({
+      ...schema.properties,
+      contractRequirementIds: Object.freeze({
+        type: "array",
+        minItems: 1,
+        items: Object.freeze({ type: "string", minLength: 1 }),
+      }),
+    }),
+  });
+}
+
 export function validateProjectBundleForStack(
   files,
   requiredBrowserCheckIds = [],
+  customerContent = null,
 ) {
   if (!Array.isArray(files) || files.length === 0) {
     throw new TypeError("The generated stack bundle must contain files.");
@@ -528,11 +558,75 @@ export function validateProjectBundleForStack(
     browserTests,
     requiredBrowserCheckIds,
   );
+  validateCustomerContentIntegrity(files, customerContent);
   return Object.freeze(
     files.map((file) =>
       Object.freeze({ path: file.path, content: file.content }),
     ),
   );
+}
+
+export function validateCustomerContentIntegrity(files, customerContent) {
+  if (customerContent === null || customerContent === undefined) return;
+  const suppliedKinds = new Set(
+    (customerContent.supplied ?? []).map((item) => item.kind),
+  );
+  const applicationText = files
+    .filter(
+      (file) =>
+        /^(?:src\/)?app\/|^components\/|^lib\//u.test(file.path) &&
+        /\.(?:html|js|jsx|md|mjs|ts|tsx)$/u.test(file.path),
+    )
+    .map((file) => file.content)
+    .join("\n");
+  const violations = [];
+  if (!suppliedKinds.has("contact-details")) {
+    if (
+      /\bmailto:[^"'`\s<]+|\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/iu.test(
+        applicationText,
+      )
+    ) {
+      violations.push("email address");
+    }
+    if (
+      /\btel:\+?[\d(][\d\s().-]{6,}\d|\+?\d[\d\s().-]{7,}\d/u.test(
+        applicationText,
+      )
+    ) {
+      violations.push("phone number");
+    }
+  }
+  if (
+    !suppliedKinds.has("trust-evidence") &&
+    /\b(?:testimonial|licensed(?:\s+and)?\s+insured|award[- ]winning|established\s+(?:in\s+)?\d{4}|\d+\s+years?\s+(?:of\s+)?(?:experience|serving))\b/iu.test(
+      applicationText,
+    )
+  ) {
+    violations.push("trust claim or testimonial");
+  }
+  if (
+    !suppliedKinds.has("business-hours") &&
+    /\b(?:mon(?:day)?|tue(?:sday)?|wed(?:nesday)?|thu(?:rsday)?|fri(?:day)?|sat(?:urday)?|sun(?:day)?)\s*(?:-|–|—|to|:)\s*\d{1,2}(?::\d{2})?\s*(?:am|pm)\b/iu.test(
+      applicationText,
+    )
+  ) {
+    violations.push("business hours");
+  }
+  if (
+    !suppliedKinds.has("pricing") &&
+    /(?:[$£€]\s?\d[\d,.]*|\d[\d,.]*\s?(?:USD|GBP|EUR))\b/u.test(
+      applicationText,
+    )
+  ) {
+    violations.push("price");
+  }
+  if (violations.length > 0) {
+    throw new TypeError(
+      `The generated project contains unsupported customer facts (${violations.join(
+        ", ",
+      )}). Omit them or collect them from the customer before launch.`,
+    );
+  }
 }
 
 export function validateBrowserObservationTestSource(
@@ -720,6 +814,29 @@ export function validateBrowserRepairProposal({
     );
   }
   if (repairsTestSource) {
+    const expectationCount = (content) =>
+      content.match(/\bexpect\s*\(/gu)?.length ?? 0;
+    if (expectationCount(repairedContent) < expectationCount(currentFile.content)) {
+      throw new Error(
+        "The browser repair may not remove contract assertions.",
+      );
+    }
+    const assertedLiterals = [
+      ...currentFile.content.matchAll(
+        /\bexpect\s*\([^;\n]*?(?:["'`]([^"'`]{3,})["'`]|\/([^/\n]{3,})\/[a-z]*)[^;\n]*\)/giu,
+      ),
+    ]
+      .map((match) => match[1] ?? match[2])
+      .filter(Boolean);
+    if (
+      assertedLiterals.some(
+        (literal) => !repairedContent.includes(literal),
+      )
+    ) {
+      throw new Error(
+        "The browser repair may not change or remove an asserted customer outcome.",
+      );
+    }
     validateBrowserObservationTestSource(
       repairedContent,
       requiredBrowserCheckIds,
@@ -898,7 +1015,11 @@ function bundlePrompt(profile, contract, bindings) {
     "The Playwright test must exercise every supplied browser check through the running UI. It must collect console errors and page errors and finish by writing exactly one stdout line starting FOUNDRY_BROWSER_RESULT: followed by JSON with captureProbeErrors, checks, consoleErrors, and pageErrors. Every checks key must be the exact checkId supplied and its boolean must reflect the actual assertion result.",
     "Initialize captureProbeErrors, consoleErrors, and pageErrors as arrays. Wrap browser observation work in try/finally and emit FOUNDRY_BROWSER_RESULT from the finally block so failures remain inspectable.",
     "For any credential-gated local workflow, read the runtime-only credential from FOUNDRY_RUNTIME_ACCESS_VALUE in both application code and Playwright. Do not invent a default password, persist the value, or print it.",
+    "When a credential-gated workflow passes with FOUNDRY_RUNTIME_ACCESS_VALUE but the customer's final credential is still listed in customerContent.missingBeforeLaunch, describe the runtime value as development-only. Keep the owner-facing launch checklist visible and never imply that final customer access was supplied or that the project is launch-ready.",
     "Do not use mocked APIs, mocked persistence, fake build results, screenshots as proof, or a prebuilt sample project.",
+    "Treat customerContent.supplied as the complete allowlist of customer-provided real-world facts. A model-derived project name or summary is a design proposal, not proof of a real business identity.",
+    "Never invent a phone number, email address, street or service-area location, opening date, credential, certification, award, customer identity, testimonial, price, business hours, social account, client logo, or quantitative trust claim. If a value is absent from customerContent.supplied, omit the public claim and put an honest launch-content checklist in an owner-facing area when relevant.",
+    "Do not make missing customer content look complete with realistic placeholders. Browser checks must return false if their stated customer-provided outcome is not actually supported by customerContent.supplied.",
     "Keep the bundle concise and do not include node_modules, package-lock.json, build output, binary content, or markdown fences. The Execution Engine, not the model, owns lockfile creation.",
     `ProjectProfile:\n${JSON.stringify(profile)}`,
     `Requirement Contract:\n${JSON.stringify(contract)}`,
@@ -927,6 +1048,7 @@ export function createProductionMissionService({
   orchestrator,
   understanding,
   contracts,
+  approvedContracts,
   toolchains,
   workspaces,
   models,
@@ -934,6 +1056,7 @@ export function createProductionMissionService({
   runtime,
   evidence,
   verification,
+  allowLegacyCertificationExecution = false,
 }) {
   function workFactory(missionId, workspaceId) {
     let sequence = 0;
@@ -979,7 +1102,7 @@ export function createProductionMissionService({
     };
   }
 
-  function setupStack(missionId, profile) {
+  function setupStack(missionId, profile, routingRequirements = null) {
     const registered = toolchains
       .listStacks()
       .some(
@@ -1016,8 +1139,11 @@ export function createProductionMissionService({
       stackId: CERTIFIED_STACK_ID,
       stackVersion: CERTIFIED_STACK_VERSION,
       environmentCheckId,
-      requestedPlatform: "web",
-      requiredCapabilities: profile.capabilities,
+      requestedPlatform:
+        routingRequirements?.supportedPlatform ?? "web",
+      requiredCapabilities:
+        routingRequirements?.requiredWorkloadCapabilities ??
+        profile.capabilities,
       registryEventId: `${missionId}-selection-registry`,
       eventId: `${missionId}-selection-fact`,
       causationId: `${missionId}-selection-command`,
@@ -1242,14 +1368,33 @@ export function createProductionMissionService({
       const profile = understanding.latest(missionId);
       const bindings = understanding.verificationBindings(missionId);
       const contract = contracts.getContract(missionId);
+      const approvedContract = approvedContracts.latest(missionId);
       if (profile === null || bindings === null) {
         throw new TypeError(
           "Execution requires replayable ProjectProfile verification bindings.",
         );
       }
+      if (
+        approvedContract === null &&
+        !allowLegacyCertificationExecution
+      ) {
+        throw new TypeError(
+          "Execution requires a frozen ApprovedProjectContract. Re-run project understanding and approve the plan before building.",
+        );
+      }
+      if (approvedContract !== null) {
+        validateApprovedProjectContractConsistency(approvedContract);
+      }
+      const routingRequirements =
+        approvedContract === null
+          ? null
+          : deriveContractRoutingRequirements(
+              approvedContract,
+              WEB_STACK_MANIFEST,
+            );
       let workspace;
       if (state === MissionState.CONTRACTED) {
-        setupStack(missionId, profile);
+        setupStack(missionId, profile, routingRequirements);
         orchestrator.transition({
           missionId,
           eventId: `${missionId}-provisioning`,
@@ -1277,6 +1422,77 @@ export function createProductionMissionService({
         workspace = workspaces.getWorkspace(missionId);
       }
       const work = workFactory(missionId, workspace.workspaceId);
+      const requirementCatalogue =
+        approvedContract === null
+          ? null
+          : approvedContractRequirementCatalogue(approvedContract);
+      const allImplementationRequirementIds =
+        requirementCatalogue?.implementationRequirements.map(
+          (requirement) => requirement.requirementId,
+        ) ?? [];
+      const forbiddenContractChanges = [
+        "Do not omit or reinterpret an approved workflow or customer message.",
+        "Do not add an unapproved major capability.",
+        "Do not change the approved platform, stack capability, or design direction.",
+        "Do not implement an explicit exclusion or rejected recommendation.",
+        "Do not weaken, remove, or replace an acceptance obligation.",
+      ];
+      const requestModel = (input, task = {}) => {
+        if (approvedContract === null) return models.request(input);
+        const relevantRequirementIds =
+          task.relevantRequirementIds?.length > 0
+            ? task.relevantRequirementIds
+            : allImplementationRequirementIds;
+        const currentCheckpoint = workspaces.getWorkspace(
+          missionId,
+        ).currentCheckpointId;
+        const modelTaskContract = createModelTaskContract({
+          approvedContract,
+          routingRequirements,
+          taskObjective:
+            task.taskObjective ??
+            `Complete ${input.taskClass.toLowerCase().replaceAll("_", " ")} without changing approved scope.`,
+          allowedScope:
+            task.allowedScope ?? [
+              "Implement or repair only the requirements explicitly listed in this task contract.",
+              "Use only the approved certified stack and current workspace checkpoint.",
+            ],
+          forbiddenChanges: forbiddenContractChanges,
+          relevantRequirementIds,
+          currentCheckpoint,
+          expectedOutputSchema: input.expectedStructuredOutputSchema,
+        });
+        const contractContext = {
+          kind: "approved-project-contract",
+          id: approvedContract.contentHash,
+        };
+        const contextReferences = [
+          ...input.contextReferences,
+          contractContext,
+        ].filter(
+          (reference, index, references) =>
+            references.findIndex(
+              (candidate) =>
+                candidate.kind === reference.kind &&
+                candidate.id === reference.id,
+            ) === index,
+        );
+        return models.request({
+          ...input,
+          purpose: contractBoundModelPrompt(modelTaskContract, [
+            input.purpose,
+          ]),
+          contextReferences,
+          depthLevel: Math.max(
+            input.depthLevel ?? 1,
+            routingRequirements.modelDepth,
+          ),
+          routingReason: [
+            routingRequirements.routingReason,
+            input.routingReason,
+          ].filter(Boolean).join(" "),
+        });
+      };
       const generationTargetIds = contract.obligations.map(
         (obligation) => obligation.obligationId,
       );
@@ -1284,22 +1500,33 @@ export function createProductionMissionService({
         .filter(([, binding]) => binding === "browser-check")
         .map(([obligationId]) => obligationId)
         .sort((left, right) => left.localeCompare(right));
+      const contractRequestNamespace =
+        approvedContract === null
+          ? missionId
+          : `${missionId}-contract-v${approvedContract.contractVersion}-${approvedContract.contentHash.slice(0, 12)}`;
+      const generationRequestId =
+        approvedContract === null
+          ? `${missionId}-project-generation`
+          : `${contractRequestNamespace}-project-generation`;
+      const generationCorrectionPrefix = `${generationRequestId}-correction-`;
+      const generationSchema =
+        approvedContract === null
+          ? projectBundleSchema
+          : CONTRACT_BOUND_BUNDLE_SCHEMA;
       const priorGenerationCalls = models
         .listCalls(missionId)
         .filter(
           (call) =>
-            (call.requestId === `${missionId}-project-generation` ||
-              call.requestId.startsWith(
-                `${missionId}-project-generation-correction-`,
-              )) &&
+            (call.requestId === generationRequestId ||
+              call.requestId.startsWith(generationCorrectionPrefix)) &&
             call.status === "SUCCEEDED",
         );
       let generation =
         priorGenerationCalls.length === 0
-          ? await models.request({
-              requestId: `${missionId}-project-generation`,
+          ? await requestModel({
+              requestId: generationRequestId,
               missionId,
-              workUnitId: `${missionId}-generation-plan`,
+              workUnitId: `${generationRequestId}-plan`,
               purpose: bundlePrompt(profile, contract, bindings),
               taskClass: ModelTaskClass.FILE_GENERATION,
               contextReferences: [
@@ -1309,8 +1536,16 @@ export function createProductionMissionService({
                   id: workspace.currentCheckpointId,
                 },
               ],
-              expectedStructuredOutputSchema: projectBundleSchema,
-              idempotencyKey: `${missionId}-project-generation-key`,
+              expectedStructuredOutputSchema: generationSchema,
+              structuredOutputValidator:
+                approvedContract === null
+                  ? undefined
+                  : (output) =>
+                      validateContractBoundMissionPlan(
+                        output,
+                        approvedContract,
+                      ),
+              idempotencyKey: `${generationRequestId}-key`,
               sensitiveValues: [],
             })
           : {
@@ -1323,18 +1558,23 @@ export function createProductionMissionService({
       let validatedFiles;
       for (;;) {
         try {
+          if (approvedContract !== null) {
+            validateContractBoundMissionPlan(
+              generation.structuredOutput,
+              approvedContract,
+            );
+          }
           validatedFiles = validateProjectBundleForStack(
             generation.structuredOutput.files,
             requiredBrowserCheckIds,
+            profile.customerContent,
           );
           break;
         } catch (error) {
           const correctionCount = models
             .listCalls(missionId)
             .filter((call) =>
-              call.requestId.startsWith(
-                `${missionId}-project-generation-correction-`,
-              ),
+              call.requestId.startsWith(generationCorrectionPrefix),
             ).length;
           if (correctionCount >= 3) {
             throw new Error(
@@ -1342,8 +1582,8 @@ export function createProductionMissionService({
             );
           }
           const correctionSequence = correctionCount + 1;
-          const requestId = `${missionId}-project-generation-correction-${correctionSequence}`;
-          generation = await models.request({
+          const requestId = `${generationCorrectionPrefix}${correctionSequence}`;
+          generation = await requestModel({
             requestId,
             missionId,
             workUnitId: `${requestId}-plan`,
@@ -1362,7 +1602,15 @@ export function createProductionMissionService({
                 id: workspace.currentCheckpointId,
               },
             ],
-            expectedStructuredOutputSchema: projectBundleSchema,
+            expectedStructuredOutputSchema: generationSchema,
+            structuredOutputValidator:
+              approvedContract === null
+                ? undefined
+                : (output) =>
+                    validateContractBoundMissionPlan(
+                      output,
+                      approvedContract,
+                    ),
             idempotencyKey: `${requestId}-key`,
             sensitiveValues: [],
           });
@@ -1607,14 +1855,16 @@ export function createProductionMissionService({
                 relativePath: file.path,
               }),
             }));
-          const repairPrefix = `${missionId}-${safeName(procedureName)}-repair-`;
+          const repairPrefix = `${contractRequestNamespace}-${safeName(procedureName)}-repair-`;
           const repairSequence =
             models
               .listCalls(missionId)
               .filter((call) => call.requestId.startsWith(repairPrefix))
               .length + 1;
           const repairRequestId = `${repairPrefix}${repairSequence}`;
-          const repairFileSchema = {
+          const repairRequirementIds =
+            targets.length > 0 ? targets : generationTargetIds;
+          const repairFileSchema = contractTraceSchema({
             type: "object",
             additionalProperties: false,
             required: ["path", "content"],
@@ -1625,8 +1875,8 @@ export function createProductionMissionService({
               },
               content: { type: "string", minLength: 8 },
             },
-          };
-          const repair = await models.request({
+          }, approvedContract !== null);
+          const repair = await requestModel({
             requestId: repairRequestId,
             missionId,
             workUnitId: `${repairRequestId}-plan`,
@@ -1673,9 +1923,19 @@ export function createProductionMissionService({
                   )
                   .map((call) => call.structuredOutput),
               });
+              if (approvedContract !== null) {
+                validateContractRequirementTrace(
+                  output.contractRequirementIds,
+                  approvedContract,
+                  repairRequirementIds,
+                );
+              }
             },
             idempotencyKey: `${repairRequestId}-key`,
             sensitiveValues: [],
+          }, {
+            relevantRequirementIds: repairRequirementIds,
+            taskObjective: `Repair the observed ${procedureName} failure while preserving the approved project contract.`,
           });
           const repairMode = validateGeneratedRepairPath(
             repair.structuredOutput.path,
@@ -1706,8 +1966,11 @@ export function createProductionMissionService({
             repairMode === "replace"
               ? WorkUnitAction.REPLACE_FILE
               : WorkUnitAction.WRITE_FILE,
-            repair.structuredOutput,
-            targets.length > 0 ? targets : generationTargetIds,
+            {
+              path: repair.structuredOutput.path,
+              content: repair.structuredOutput.content,
+            },
+            repairRequirementIds,
             `repair-${procedureName}-${repair.structuredOutput.path}`,
           );
           if (changed.status !== WorkUnitStatus.SUCCEEDED) {
@@ -1719,6 +1982,12 @@ export function createProductionMissionService({
             bundle.files.push({
               path: repair.structuredOutput.path,
               content: repair.structuredOutput.content,
+              ...(approvedContract === null
+                ? {}
+                : {
+                    contractRequirementIds:
+                      repair.structuredOutput.contractRequirementIds,
+                  }),
             });
           }
         }
@@ -2156,7 +2425,7 @@ export function createProductionMissionService({
           .listCalls(missionId)
           .filter(
             (call) =>
-              call.requestId.startsWith(`${missionId}-browser-repair-`) &&
+              call.requestId.startsWith(`${contractRequestNamespace}-browser-repair-`) &&
               call.status === "SUCCEEDED",
           )
           .reverse();
@@ -2190,7 +2459,7 @@ export function createProductionMissionService({
             path: file.path,
             content: file.content,
           }));
-        const repairPrefix = `${missionId}-browser-repair-`;
+        const repairPrefix = `${contractRequestNamespace}-browser-repair-`;
         if (priorRepairCalls.length >= 6) {
           orchestrator.transition({
             missionId,
@@ -2229,7 +2498,15 @@ export function createProductionMissionService({
               .filter((call) => call.requestId.startsWith(repairPrefix))
               .length + 1;
           const repairRequestId = `${repairPrefix}${repairSequence}`;
-          return models.request({
+          const browserRepairRequirementIds =
+            browserTargets.length > 0
+              ? browserTargets
+              : generationTargetIds;
+          const browserRepairSchema = contractTraceSchema(
+            browserRepairPatchSchema,
+            approvedContract !== null,
+          );
+          return requestModel({
           requestId: repairRequestId,
           missionId,
           workUnitId: `${repairRequestId}-plan`,
@@ -2296,7 +2573,7 @@ export function createProductionMissionService({
               id: workspaces.getWorkspace(missionId).currentCheckpointId,
             },
           ],
-          expectedStructuredOutputSchema: browserRepairPatchSchema,
+          expectedStructuredOutputSchema: browserRepairSchema,
           structuredOutputValidator(output) {
             validateBrowserRepairProposal({
               structuredOutput: output,
@@ -2306,9 +2583,20 @@ export function createProductionMissionService({
                 (call) => call.structuredOutput,
               ),
             });
+            if (approvedContract !== null) {
+              validateContractRequirementTrace(
+                output.contractRequirementIds,
+                approvedContract,
+                browserRepairRequirementIds,
+              );
+            }
           },
           idempotencyKey: `${repairRequestId}-key`,
           sensitiveValues: [],
+          }, {
+            relevantRequirementIds: browserRepairRequirementIds,
+            taskObjective:
+              "Repair the failed browser verification without changing any approved behavior or verification obligation.",
           });
         }
 
@@ -2350,6 +2638,15 @@ export function createProductionMissionService({
               ),
               allowPriorReplay: isPriorReplay,
             });
+            if (approvedContract !== null) {
+              validateContractRequirementTrace(
+                repair.structuredOutput.contractRequirementIds,
+                approvedContract,
+                browserTargets.length > 0
+                  ? browserTargets
+                  : generationTargetIds,
+              );
+            }
           } catch (error) {
             semanticRejection = String(error?.message ?? error);
             repair = null;
@@ -2456,8 +2753,10 @@ export function createProductionMissionService({
     async stop(missionId) {
       const sessionId = runtime.listSessions(missionId).at(-1)?.sessionId;
       if (sessionId === undefined) {
-        throw new TypeError("Mission has no runtime session to stop.");
+        return null;
       }
+      const latest = runtime.getSession(missionId, sessionId);
+      if (latest.status === "STOPPED") return latest;
       return runtime.stop({
         missionId,
         sessionId,
@@ -2465,6 +2764,52 @@ export function createProductionMissionService({
         evidenceId: `${sessionId}-stop-evidence`,
         causationId: `${missionId}-runtime-stop-command`,
         idempotencyKey: `${sessionId}-stop-key`,
+      });
+    },
+
+    async cancel(missionId) {
+      const before = ledger.projectState(missionId);
+      if (isTerminalMissionState(before.state)) {
+        return Object.freeze({
+          missionId,
+          state: before.state,
+          runtime: null,
+        });
+      }
+
+      const sessionId = runtime.listSessions(missionId).at(-1)?.sessionId;
+      let stoppedRuntime = null;
+      if (sessionId !== undefined) {
+        const latest = runtime.getSession(missionId, sessionId);
+        stoppedRuntime =
+          latest.status === "STOPPED"
+            ? latest
+            : await runtime.stop({
+                missionId,
+                sessionId,
+                observationId: `${sessionId}-stop`,
+                evidenceId: `${sessionId}-stop-evidence`,
+                causationId: `${missionId}-runtime-stop-command`,
+                idempotencyKey: `${sessionId}-stop-key`,
+              });
+      }
+
+      const afterRuntimeStop = ledger.projectState(missionId);
+      if (!isTerminalMissionState(afterRuntimeStop.state)) {
+        orchestrator.transition({
+          missionId,
+          eventId: `${missionId}-cancelled`,
+          causationId: afterRuntimeStop.lastEventId,
+          to: MissionState.CANCELLED,
+          reason:
+            "The customer stopped this build. The recorded plan and workspace were preserved.",
+        });
+      }
+
+      return Object.freeze({
+        missionId,
+        state: ledger.projectState(missionId).state,
+        runtime: stoppedRuntime,
       });
     },
   });

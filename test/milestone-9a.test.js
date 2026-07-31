@@ -29,6 +29,7 @@ import {
   normalizeProviderError,
   openMissionControl,
 } from "../src/index.js";
+import { rankRoutesByPersistedTaskHistory } from "../src/work-plane/model-gateway.js";
 
 const clock = () => "2026-07-29T12:00:00.000Z";
 const validEnvironment = Object.freeze({
@@ -779,6 +780,177 @@ test("restart detects persisted AI registry tampering", (t) => {
   );
 });
 
+function phaseOneUnderstandingOutput(legacy) {
+  const actors = legacy.audiences ?? legacy.primaryActors;
+  const primaryJourney = legacy.primaryJourneys[0];
+  const primaryCapability = legacy.proposedFeatures[0];
+  return {
+    name: legacy.name,
+    family: legacy.family,
+    platform: legacy.platform,
+    projectIntent: {
+      customerOutcome: `${legacy.summary} Customers can complete the intended account workflow confidently.`,
+      businessContext: "The business needs customers to understand sensitive account activity without support staff explaining every update.",
+      intendedUsers: actors,
+      primaryGoal: "Let customers review recent account activity and understand what changed without contacting support.",
+      secondaryGoals: ["Reduce avoidable account-status support questions."],
+      successDefinition: "A customer can sign in, identify the newest activity, and understand its status without assistance.",
+      constraints: legacy.constraints,
+      confidence: { score: 0.86, rationale: "The requested audience and account-review outcome are explicit." },
+    },
+    userExperiencePlan: {
+      primaryJourneys: legacy.primaryJourneys,
+      secondaryJourneys: ["A customer returns later to compare newer account activity."],
+      criticalMoments: ["The customer first sees whether recent activity needs attention."],
+      failureStates: ["Access is refused clearly when customer details do not match."],
+      trustMoments: ["Sensitive activity is explained without exposing another customer's records."],
+      repeatedTasks: ["Review the newest account activity."],
+      adminResponsibilities: ["Maintain accurate customer activity records."],
+    },
+    productProposal: {
+      essentialCapabilities: legacy.proposedFeatures,
+      recommendedCapabilities: legacy.includedDefaults,
+      intentionallyExcludedCapabilities: ["Staff account administration is outside this customer-facing first version."],
+      futureCapabilities: ["Customer-controlled notification preferences."],
+      rationale: "The first version centers the recurring account-review task and avoids unrelated administration work.",
+      dependencies: ["A reliable source of customer account activity."],
+      scopeImpact: "This keeps the first release focused on trustworthy customer self-service.",
+    },
+    designDirection: {
+      visualPersonality: legacy.designDirection.recommendedStyle,
+      tone: legacy.designDirection.tone,
+      layoutStrategy: legacy.designDirection.layoutApproach,
+      informationDensity: "Show the newest activity first with details available on demand.",
+      navigationApproach: "Keep account overview and activity history within one predictable customer path.",
+      responsivePriority: legacy.designDirection.mobilePriority,
+      accessibilityNeeds: legacy.designDirection.accessibilityConsiderations,
+      contentStrategy: "Use plain status language and explain the consequence of each account event.",
+      interactionStyle: "Prefer direct review actions with immediate, reassuring feedback.",
+      rationale: legacy.designDirection.reason,
+    },
+    designAlternatives: [
+      {
+        name: legacy.designDirection.recommendedStyle,
+        description: "A calm account workspace leads customers from recent activity to the next appropriate action.",
+        whyItFits: "Customers reviewing sensitive account activity need clarity and trust before taking the next action.",
+        layoutApproach: "A focused account overview with the newest activity and status first.",
+        visualPersonality: legacy.designDirection.recommendedStyle,
+        informationDensity: "Moderate density with details available on demand",
+        navigationApproach: "A shallow path from account overview to activity detail",
+        mobileBehavior: "Recent activity and its status remain first on small screens",
+        tradeoff: "Uses less decorative storytelling to preserve fast account comprehension.",
+        confidence: { score: 0.92, rationale: "The recurring account review workflow strongly favors calm evidence-led presentation." },
+        recommended: true,
+        preview: {
+          typographyCharacter: "Measured and highly legible",
+          spacingDensity: "Balanced account-review spacing",
+          colorMood: "Quiet trustworthy neutrals",
+          hierarchy: "Recent activity first, status second, evidence third",
+        },
+      },
+      {
+        name: "Guided account explanation",
+        description: "A stepwise account journey explains each recent activity item before presenting available actions.",
+        whyItFits: "Customers unfamiliar with account events may need additional explanation before trusting a recorded status.",
+        layoutApproach: "A guided sequence from account summary through dated activity evidence.",
+        visualPersonality: "Guided, reassuring, and explanatory",
+        informationDensity: "Low density with progressive explanation",
+        navigationApproach: "A stepwise path through each account activity explanation",
+        mobileBehavior: "Explanations become a focused vertical reading sequence",
+        tradeoff: "Experienced customers take longer to reach repeated review actions.",
+        confidence: { score: 0.78, rationale: "First-time account review benefits from explicit status explanation." },
+        recommended: false,
+        preview: {
+          typographyCharacter: "Friendly explanatory headings",
+          spacingDensity: "Open guided spacing",
+          colorMood: "Warm reassuring neutrals",
+          hierarchy: "Explanation first, evidence second, action third",
+        },
+      },
+      {
+        name: "Dense account activity desk",
+        description: "A compact account workspace places several recent activity records into one scannable operational view.",
+        whyItFits: "Frequent customers comparing several account events can identify changes without unnecessary navigation or explanation.",
+        layoutApproach: "A compact comparison workspace grouped by account activity status.",
+        visualPersonality: "Dense, efficient, and operational",
+        informationDensity: "High density with scannable activity rows",
+        navigationApproach: "Activity-first navigation across related account records",
+        mobileBehavior: "Comparison rows collapse into prioritized activity summaries",
+        tradeoff: "The denser presentation requires greater familiarity from first-time customers.",
+        confidence: { score: 0.7, rationale: "Frequent account review may reward faster comparison." },
+        recommended: false,
+        preview: {
+          typographyCharacter: "Compact utilitarian labels",
+          spacingDensity: "Tight operational spacing",
+          colorMood: "Cool focused neutrals",
+          hierarchy: "Activity list first, change second, action third",
+        },
+      },
+    ],
+    foundryInsights: {
+      observations: legacy.observations,
+      opportunities: ["Explain unusual account events before they become support calls."],
+      risks: ["Customers may distrust activity that lacks a date, source, or clear status."],
+      ambiguities: legacy.importantDecisions.map((decision) => decision.prompt),
+      assumptions: legacy.assumptions,
+      confidence: { score: 0.82, rationale: "The main review journey is clear while access choice may still need confirmation." },
+    },
+    decisions: legacy.importantDecisions.map((decision) => ({
+      customerFriendlyQuestion: decision.prompt,
+      whyItMatters: decision.reason,
+      recommendation: decision.answerOptions[0],
+      recommendationReason: "It gives customers a familiar access path while keeping recovery understandable.",
+      alternatives: [...decision.answerOptions, "Staff-assisted account access"].slice(0, 3),
+      consequenceOfEachChoice: [...decision.answerOptions, "Staff-assisted account access"].slice(0, 3).map((option) => `${option} changes how customers receive and recover account access.`),
+      canFoundryDecide: false,
+      architectureImpact: "The access choice changes identity and recovery responsibilities.",
+      scopeImpact: "The choice changes initial setup and account-support work.",
+    })),
+    recommendations: [
+      {
+        title: legacy.recommendations[0]?.label ?? "Account activity timeline",
+        specificValue: `${legacy.recommendations[0]?.rationale ?? "Makes recent customer activity easy to review."} It keeps the newest account activity easy to identify.`,
+        whyThisProjectNeedsIt: "Customers reviewing sensitive account activity need chronology and status context to trust what they see.",
+        impact: "Adds focused interface scope without a new external integration.",
+        selectedByDefault: true,
+        confidence: { score: 0.9, rationale: "The recurring review journey directly benefits from chronological context." },
+        requiredDependencies: ["Customer account activity records"],
+      },
+      {
+        title: "Explain unusual account events",
+        specificValue: "Highlights an unusual account event and explains its likely consequence before the customer asks for help.",
+        whyThisProjectNeedsIt: "Customers reviewing sensitive account activity need unfamiliar events explained before they can trust the current status.",
+        impact: "Adds bounded explanation content using existing account activity records.",
+        selectedByDefault: true,
+        confidence: { score: 0.86, rationale: "Unfamiliar account events are a predictable source of support questions." },
+        requiredDependencies: ["Customer account activity records"],
+      },
+      {
+        title: "Show the responsible support owner",
+        specificValue: "Names who can resolve an account activity exception when the customer cannot continue through self-service.",
+        whyThisProjectNeedsIt: "Customers need a trustworthy next step when an account activity exception cannot be resolved in the portal.",
+        impact: "Adds clear ownership content without expanding account administration scope.",
+        selectedByDefault: true,
+        confidence: { score: 0.84, rationale: "The bounded exception path needs visible ownership." },
+        requiredDependencies: ["Customer support ownership records"],
+      },
+    ],
+    verificationPlan: legacy.obligations.map((obligation) => ({
+      observableOutcome: `${primaryCapability} ${obligation.statement}`,
+      acceptanceMethod: obligation.verificationMode,
+      evidenceRequired: ["Recorded verification evidence for the observable customer outcome"],
+      sourceRequirement: "customer-intent-1",
+      origin: obligation.origin,
+      dependencyIndexes: obligation.dependencyIndexes,
+    })),
+    capabilities: legacy.capabilities,
+    dataConcepts: legacy.dataConcepts,
+    architectureDecisions: legacy.architectureDecisions,
+    customerSuppliedContent: legacy.customerSuppliedContent,
+    missingCustomerContent: legacy.missingCustomerContent,
+  };
+}
+
 test("project understanding records a canonical model call and replays safely", async (t) => {
   const fixture = createDeterministicLocalModelProvider({
     providerId: ProviderId.OPENAI,
@@ -786,17 +958,60 @@ test("project understanding records a canonical model call and replays safely", 
     modelId: "understanding-fixture",
     handler() {
       return {
-        output: {
+        output: phaseOneUnderstandingOutput({
           name: "Customer portal",
           summary: "A secure portal for customers to review account activity.",
           family: "web-application",
           platform: "web",
+          audiences: ["Customer"],
+          primaryJourneys: [
+            "A customer signs in and reviews recent account activity.",
+          ],
+          designDirection: {
+            recommendedStyle: "Calm and trustworthy",
+            reason:
+              "Customers need to understand sensitive account activity without distraction.",
+            layoutApproach:
+              "A focused account overview with the newest activity first.",
+            tone: "Clear and reassuring",
+            mobilePriority:
+              "Keep the activity overview readable on smaller screens.",
+            accessibilityConsiderations: [
+              "Use visible focus, readable contrast, and clear activity labels.",
+            ],
+          },
+          proposedFeatures: [
+            "Customers can review their account activity.",
+          ],
+          includedDefaults: [
+            "Clear loading, empty, and error states",
+          ],
+          recommendations: [
+            {
+              label: "Account activity timeline",
+              rationale: "Makes recent customer activity easy to review.",
+            },
+          ],
+          importantDecisions: [
+            {
+              prompt: "How should customers sign in?",
+              reason: "This changes how customers get and recover access.",
+              answerOptions: ["Email and password", "Single sign-on"],
+            },
+          ],
+          assumptions: [
+            "Customers should see their newest account activity first.",
+          ],
           primaryActors: ["Customer"],
           outcomes: ["Customers can review their account activity."],
           capabilities: ["web-application", "typescript"],
           dataConcepts: ["Customer account"],
           constraints: ["Use the certified web stack."],
           architectureDecisions: ["Use server-rendered authenticated pages."],
+          observations: [
+            "Customers need to understand recent account activity at a glance.",
+          ],
+          designAlternatives: [],
           openQuestions: [
             {
               prompt: "How should customers authenticate?",
@@ -810,15 +1025,23 @@ test("project understanding records a canonical model call and replays safely", 
               rationale: "Makes recent customer activity easy to review.",
             },
           ],
+          customerSuppliedContent: [
+            {
+              kind: "other",
+              value: "customer portal",
+            },
+          ],
+          missingCustomerContent: [],
           obligations: [
             {
               statement: "The application builds successfully.",
               origin: "foundry-derived",
               verificationMode: "production-build",
               dependencyIndexes: [],
+              outcomeIndexes: [1],
             },
           ],
-        },
+        }),
         usage: { inputTokens: 20, outputTokens: 40, costUsd: 0 },
       };
     },
@@ -896,25 +1119,60 @@ test("project understanding records a canonical model call and replays safely", 
   // router assertion above proves that a live multi-model provider selects
   // the FAST candidate.
   assert.equal(call.modelId, "understanding-fixture");
-  assert.equal(call.depthLevel, TaskDepth.STANDARD_CODING);
-  assert.equal(call.modelTier, "STANDARD_ENGINEERING");
+  assert.equal(call.depthLevel, TaskDepth.ARCHITECTURE);
+  assert.equal(call.modelTier, "ARCHITECTURE");
 });
 
-test("project understanding fails over when structured output is only superficially valid", async (t) => {
+test("project understanding corrects superficially valid output before provider failover", async (t) => {
   let firstInvalidAttempts = 0;
   let secondInvalidAttempts = 0;
   let validAttempts = 0;
-  const output = (primaryActors) => ({
+  const output = (primaryActors) => phaseOneUnderstandingOutput({
     name: "Customer portal",
     summary: "A secure portal for customers to review account activity.",
     family: "web-application",
     platform: "web",
+    audiences: primaryActors,
+    primaryJourneys: [
+      "A customer signs in and reviews recent account activity.",
+    ],
+    designDirection: {
+      recommendedStyle: "Calm and trustworthy",
+      reason:
+        "Customers need to understand sensitive account activity without distraction.",
+      layoutApproach:
+        "A focused account overview with the newest activity first.",
+      tone: "Clear and reassuring",
+      mobilePriority:
+        "Keep the activity overview readable on smaller screens.",
+      accessibilityConsiderations: [
+        "Use visible focus, readable contrast, and clear activity labels.",
+      ],
+    },
+    proposedFeatures: [
+      "Customers can review their account activity.",
+    ],
+    includedDefaults: ["Clear loading, empty, and error states"],
+    recommendations: [
+      {
+        label: "Account activity timeline",
+        rationale: "Makes recent customer activity easy to review.",
+      },
+    ],
+    importantDecisions: [],
+    assumptions: [
+      "Customers should see their newest account activity first.",
+    ],
     primaryActors,
     outcomes: ["Customers can review their account activity."],
     capabilities: ["web-application", "typescript"],
     dataConcepts: ["Customer account"],
     constraints: ["Use the certified web stack."],
     architectureDecisions: ["Use server-rendered authenticated pages."],
+    observations: [
+      "Customers need to understand recent account activity at a glance.",
+    ],
+    designAlternatives: [],
     openQuestions: [],
     contextualSuggestions: [
       {
@@ -922,12 +1180,20 @@ test("project understanding fails over when structured output is only superficia
         rationale: "Makes recent customer activity easy to review.",
       },
     ],
+    customerSuppliedContent: [
+      {
+        kind: "other",
+        value: "Customer portal",
+      },
+    ],
+    missingCustomerContent: [],
     obligations: [
       {
         statement: "The application builds successfully.",
         origin: "foundry-derived",
         verificationMode: "production-build",
         dependencyIndexes: [],
+        outcomeIndexes: [1],
       },
     ],
   });
@@ -1029,8 +1295,8 @@ test("project understanding fails over when structured output is only superficia
     causationId: "understanding-domain-failover-intent",
   });
 
-  assert.equal(firstInvalidAttempts, 1);
-  assert.equal(secondInvalidAttempts, 1);
+  assert.equal(firstInvalidAttempts, 3);
+  assert.equal(secondInvalidAttempts, 3);
   assert.equal(validAttempts, 1);
   assert.equal(
     control.models.listCalls("understanding-domain-failover")[0].modelId,
@@ -1078,5 +1344,53 @@ test("permanent model rejection is classified and removed from future routes", (
       ],
     ).map((route) => route.modelId),
     ["gpt-current"],
+  );
+});
+
+test("a background-only API agent is excluded from synchronous model work", () => {
+  const error = new Error(
+    "google-gemini request failed: background=true is required for agent interactions.",
+  );
+  error.status = 400;
+
+  assert.deepEqual(classifyModelRouteFailure(error), {
+    category: "MODEL_UNAVAILABLE",
+    retryable: false,
+  });
+});
+
+test("persisted routing outcomes demote the failed model, not every model from its provider", () => {
+  const routes = [
+    {
+      providerId: ProviderId.ANTHROPIC,
+      modelId: "new-model-that-timed-out",
+    },
+    {
+      providerId: ProviderId.ANTHROPIC,
+      modelId: "other-live-model",
+    },
+    {
+      providerId: ProviderId.OPENAI,
+      modelId: "openai-live-model",
+    },
+  ];
+  const ranked = rankRoutesByPersistedTaskHistory(
+    routes,
+    [
+      {
+        kind: "failure",
+        requestId: "request-1",
+        providerId: ProviderId.ANTHROPIC,
+        modelId: "new-model-that-timed-out",
+        taskClass: ModelTaskClass.PROJECT_UNDERSTANDING,
+      },
+    ],
+    ModelTaskClass.PROJECT_UNDERSTANDING,
+  );
+
+  assert.equal(ranked.at(-1).modelId, "new-model-that-timed-out");
+  assert.deepEqual(
+    ranked.slice(0, 2).map((route) => route.modelId),
+    ["other-live-model", "openai-live-model"],
   );
 });

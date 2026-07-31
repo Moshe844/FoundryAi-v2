@@ -9,6 +9,7 @@ import {
   unlinkSync,
   writeFileSync,
   fsyncSync,
+  statSync,
 } from "node:fs";
 import { createHash, randomUUID } from "node:crypto";
 import { resolve } from "node:path";
@@ -56,6 +57,7 @@ import { createVerificationAuthority } from "../truth-plane/verification-authori
 import { createRequirementContractService } from "../understanding-plane/requirement-contract-service.js";
 import { createProjectProfileService } from "../understanding-plane/project-profile-service.js";
 import { createProjectUnderstandingService } from "../understanding-plane/project-understanding-service.js";
+import { createApprovedProjectContractService } from "../understanding-plane/approved-project-contract-service.js";
 import {
   createWorkspaceLedgerValidator,
   createWorkspaceService,
@@ -2154,7 +2156,7 @@ export function openMissionControl({
     providers: aiRegistry.providers,
     models: aiRegistry.models,
     capabilities: aiRegistry.capabilities,
-    router: createModelRouter({ registry: aiRegistry }),
+    router: createModelRouter({ registry: aiRegistry, clock }),
     prompts: createPromptBuilder(),
     context: createContextBuilder(),
     responses: createModelResponseValidator(),
@@ -2278,6 +2280,11 @@ export function openMissionControl({
     }),
     clock,
   );
+  const approvedContracts = createApprovedProjectContractService({
+    ledger: internalLedger.publicLedger,
+    facts,
+    clock,
+  });
   const executionFacts = createResultFactService(
     Object.freeze({
       appendResultFact: internalLedger.appendResultFact,
@@ -2313,12 +2320,24 @@ export function openMissionControl({
     toolProbe,
     allowDeterministicCertificationFixtures,
   });
+  const persistedModelRouteFileCache = new Map();
   function persistedModelRouteHistory() {
-    return readdirSync(ledgerDirectory)
-      .filter((name) => name.endsWith(".jsonl"))
-      .flatMap((name) => {
+    const names = readdirSync(ledgerDirectory)
+      .filter((name) => name.endsWith(".jsonl"));
+    const currentNames = new Set(names);
+    for (const cachedName of persistedModelRouteFileCache.keys()) {
+      if (!currentNames.has(cachedName)) {
+        persistedModelRouteFileCache.delete(cachedName);
+      }
+    }
+    return names.flatMap((name) => {
+        const file = resolve(ledgerDirectory, name);
+        const statistics = statSync(file);
+        const signature = `${statistics.size}:${statistics.mtimeMs}`;
+        const cached = persistedModelRouteFileCache.get(name);
+        if (cached?.signature === signature) return cached.history;
         const missionId = name.slice(0, -6);
-        return internalLedger.publicLedger
+        const history = internalLedger.publicLedger
           .reportEvents(missionId)
           .flatMap((record) => {
             const route = record.fact?.metadata?.modelRouteStart;
@@ -2331,8 +2350,9 @@ export function openMissionControl({
                     separator === -1
                       ? record.eventId
                       : record.eventId.slice(0, separator),
-                  providerId: route.provider,
-                  taskClass: route.taskClass,
+                   providerId: route.provider,
+                   modelId: route.modelId,
+                   taskClass: route.taskClass,
                   routeAttempt: route.routeAttempt,
                 },
               ];
@@ -2345,7 +2365,8 @@ export function openMissionControl({
               };
               if (
                 typeof disposition.category !== "string" ||
-                typeof disposition.retryable !== "boolean"
+                typeof disposition.retryable !== "boolean" ||
+                disposition.category === "TRANSIENT_PROVIDER_FAILURE"
               ) {
                 const evidenceId =
                   record.fact?.evidenceReferences?.[0]?.evidenceId;
@@ -2359,7 +2380,16 @@ export function openMissionControl({
                     detail = "";
                   }
                 }
-                disposition = classifyModelRouteFailure(detail);
+                const currentDisposition =
+                  classifyModelRouteFailure(detail);
+                if (
+                  typeof disposition.category !== "string" ||
+                  typeof disposition.retryable !== "boolean" ||
+                  currentDisposition.category !==
+                    "TRANSIENT_PROVIDER_FAILURE"
+                ) {
+                  disposition = currentDisposition;
+                }
               }
               return [
                 {
@@ -2381,12 +2411,15 @@ export function openMissionControl({
                   {
                     kind: "result",
                     requestId: result.requestId,
-                    providerId: result.provider,
-                    taskClass: result.taskClass,
+                     providerId: result.provider,
+                     modelId: result.modelId,
+                     taskClass: result.taskClass,
                     status: result.status,
                   },
-                ];
+                  ];
           });
+        persistedModelRouteFileCache.set(name, { signature, history });
+        return history;
       });
   }
   const models = createModelGateway({
@@ -2436,6 +2469,7 @@ export function openMissionControl({
     orchestrator,
     profiles,
     contracts,
+    approvedContracts,
     evidence,
     facts,
     modelFacts: executionFacts,
@@ -2449,6 +2483,7 @@ export function openMissionControl({
     orchestrator,
     understanding,
     contracts,
+    approvedContracts,
     toolchains,
     workspaces,
     models,
@@ -2456,6 +2491,8 @@ export function openMissionControl({
     runtime,
     evidence,
     verification,
+    allowLegacyCertificationExecution:
+      allowDeterministicCertificationFixtures,
   });
   const catalogue = Object.freeze({
     listMissionIds() {
@@ -2478,6 +2515,7 @@ export function openMissionControl({
     ledger: internalLedger.publicLedger,
     orchestrator,
     contracts,
+    approvedContracts,
     profiles,
     understanding,
     production,

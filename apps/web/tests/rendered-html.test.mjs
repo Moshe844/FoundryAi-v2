@@ -36,37 +36,61 @@ test("server-renders the domain-agnostic live Foundry home", async () => {
   const html = await response.text();
   assert.match(html, /<title>Foundry — Software, thoughtfully made<\/title>/i);
   assert.match(html, /What should I build for you\?/);
-  assert.match(html, /A sentence is enough/);
-  // The capability boundary is stated on the home screen.
-  assert.match(html, /Web work only/);
-  assert.match(html, /tell you honestly rather than substitute/);
+  assert.match(html, /Tell Foundry what outcome you want/);
+  assert.doesNotMatch(html, /A website for my business/);
+  // The approved capability boundary remains explicit without starter content.
+  assert.match(html, /I build for the web today/);
+  assert.match(html, /tell you honestly instead of substituting/);
   assert.match(html, /https:\/\/foundry\.example\/og\.png/);
   assert.match(html, /href="\/favicon\.svg"/);
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton/i);
 });
 
 test("the production experience consumes replayed ProjectProfile data", async () => {
-  const source = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const selectors = await readFile(
+    new URL("../experience/selectors.ts", import.meta.url),
+    "utf8",
+  );
+  const componentNames = [
+    "project-understanding",
+    "foundry-proposal",
+    "design-direction",
+    "foundry-recommendations",
+    "clarification-questions",
+    "customer-input-composer",
+    "project-discovery",
+    "decision-brief",
+    "start-building-transition",
+    "active-execution",
+    "phase-spine",
+    "preview-dock",
+    "engineering-details",
+  ];
+  const components = await Promise.all(
+    componentNames.map((name) =>
+      readFile(new URL(`../app/components/${name}.tsx`, import.meta.url), "utf8"),
+    ),
+  );
+  const source = [page, selectors, ...components].join("\n");
   for (const requiredExperience of [
     // Foundry proposes before it interrogates.
-    "Here's what I'm thinking",
-    "Here&rsquo;s what I&rsquo;d build",
-    "The calls I made, and why",
-    "What I&rsquo;ve deliberately left out",
+    "Here&rsquo;s what I think you need",
+    "What I&rsquo;d build",
+    "Choose how this project should feel",
+    "What I&rsquo;d include automatically",
     "I&rsquo;d also recommend",
-    "If this became Version 2",
-    "Built in as standard",
-    "only you can decide",
-    "Does this sound right?",
-    // Every question offers all four affordances.
-    "I recommend ",
-    "My recommendation",
-    "Something else",
-    "Skip for now",
-    "like Foundry to keep in mind",
-    "Why I",
+    "decisions that actually matter",
+    "Anything else?",
+    "Continue with Foundry&rsquo;s recommendations",
+    // Every question offers a recommendation, generated options, and custom input.
+    "Let Foundry choose",
+    "Recommended",
+    "Something else&hellip;",
+    "Tell Foundry anything else",
+    "Why I&rsquo;m asking",
     // Ideas, plan, build, delivery, engineering proof.
-    "Here&rsquo;s the plan",
+    "The plan",
     "Technical shape",
     "Engineering details",
     "Reading your request",
@@ -75,6 +99,8 @@ test("the production experience consumes replayed ProjectProfile data", async ()
     "profile.architectureDecisions",
     "profile.verificationPlan.checks",
     "profile.contextualSuggestions",
+    "profile.observations",
+    "profile.designAlternatives",
     "mission.modelRouting",
     "mission.executionMetrics",
     "customerPhase",
@@ -86,58 +112,73 @@ test("the production experience consumes replayed ProjectProfile data", async ()
       ),
     );
   }
-  assert.match(source, /\/missions\/\$\{current\.missionId\}\/clarify/);
-  assert.match(source, /\/missions\/\$\{current\.missionId\}\/understand/);
-  assert.match(source, /\/missions\/\$\{current\.missionId\}\/start/);
-  assert.match(source, /AbortSignal\.timeout\(30_000\)/);
+  assert.match(page, /\/missions\/\$\{missionId\}\/clarify/);
+  assert.match(page, /\/missions\/\$\{current\.missionId\}\/understand/);
+  assert.match(page, /\/missions\/\$\{current\.missionId\}\/start/);
+  assert.match(page, /AbortSignal\.timeout\(30_000\)/);
   // The preview frame is bound to the mission's real readiness-observed URL.
-  assert.match(source, /const url = mission\.previewUrl/);
+  assert.match(source, /const url = preview\.readinessUrl\.value/);
   assert.match(source, /src=\{url\}/);
-  assert.doesNotMatch(
-    source,
-    /interpretProjectDescription|localStorage|setTimeout/,
-  );
+  assert.doesNotMatch(source, /interpretProjectDescription/);
+  assert.match(source, /foundry:preview-width:/);
+  assert.match(source, /foundry:engineering-details:/);
   assert.doesNotMatch(source, /About 7 minutes|functionally equivalent/);
   assert.doesNotMatch(source, /GPT-5|Claude Sonnet|Gemini Pro/);
 });
 
 test("Foundry proposes before it asks", async () => {
-  const source = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const discovery = await readFile(
+    new URL("../app/components/project-discovery.tsx", import.meta.url),
+    "utf8",
+  );
+  const questionsSource = await readFile(
+    new URL("../app/components/clarification-questions.tsx", import.meta.url),
+    "utf8",
+  );
   // Order is the whole point: the proposal, its reasoning, and the curated
   // recommendations must all precede anything the customer has to answer.
   // Scope to TheRead's render body — component definitions appear earlier in
   // the file than the JSX that renders them, so whole-file offsets lie.
-  const start = source.indexOf("function TheRead(");
-  assert.ok(start > -1, "TheRead is missing");
-  const body = source.slice(start);
-
-  const proposal = body.indexOf("Here&rsquo;s what I&rsquo;d build");
-  const reasoning = body.indexOf("The calls I made, and why");
-  const recommend = body.indexOf("<Suggestions");
-  const questions = body.indexOf("only you can decide");
-  const confirm = body.indexOf("Does this sound right?");
+  const proposal = discovery.indexOf("<FoundryProposal");
+  const design = discovery.indexOf("<DesignDirection", proposal + 1);
+  const recommend = discovery.indexOf("<FoundryRecommendations");
+  const questions = discovery.indexOf("<ClarificationQuestions");
+  const optional = discovery.indexOf("Anything else?");
+  const confirm = discovery.indexOf("Ready when you are");
   for (const [name, index] of Object.entries({
-    proposal, reasoning, recommend, questions, confirm,
+    proposal, design, recommend, questions, optional, confirm,
   })) {
-    assert.ok(index > -1, `${name} section is missing from TheRead`);
+    assert.ok(index > -1, `${name} section is missing from ProjectDiscovery`);
   }
-  assert.ok(proposal < reasoning, "reasoning must follow the proposal");
-  assert.ok(reasoning < recommend, "recommendations must follow the reasoning");
-  assert.ok(recommend < questions, "questions must come last");
-  assert.ok(questions < confirm, "the confirmation closes the surface");
+  assert.ok(proposal < design, "design direction must follow the proposal");
+  assert.ok(design < recommend, "recommendations must follow design direction");
+  assert.ok(recommend < questions, "decisions must follow recommendations");
+  assert.ok(questions < optional, "the optional note must follow decisions");
+  assert.ok(optional < confirm, "the confirmation closes the surface");
   // The question's reason is shown, not hidden behind a disclosure.
-  assert.match(source, /className="t-body-m question-reason">\{question\.reason\}/);
+  assert.match(questionsSource, /<details className="why">/);
+  assert.match(questionsSource, /Why I&rsquo;m asking/);
 });
 
 test("clarification never blocks the customer on a decision", async () => {
-  const source = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+  const discovery = await readFile(
+    new URL("../app/components/project-discovery.tsx", import.meta.url),
+    "utf8",
+  );
+  const questions = await readFile(
+    new URL("../app/components/clarification-questions.tsx", import.meta.url),
+    "utf8",
+  );
+  const source = `${discovery}\n${questions}`;
   // Unanswered questions are submitted as Foundry's professional default,
   // so Continue is never disabled by an unanswered decision.
   assert.match(source, /Foundry decides\. Recommended: \$\{recommended\}/);
-  assert.match(source, /Skipped by the customer\. Use your professional judgement\./);
   assert.match(source, /left to me/);
   // Selected ideas still travel through the existing clarification contract.
-  assert.match(source, /Include this project idea: \$\{suggestion\.label\}/);
+  assert.match(
+    source,
+    /kind: "recommendation"/,
+  );
   // The old forced-answer gate and native dialogs are gone.
   assert.doesNotMatch(source, /unresolved\.some\(/);
   assert.doesNotMatch(source, /window\.(confirm|alert|prompt)/);
@@ -149,7 +190,11 @@ test("the browser shell delegates intelligence and execution to the local produc
     new URL("../app/components/application-shell.tsx", import.meta.url),
     "utf8",
   );
-  const experienceSource = `${page}\n${applicationShell}`;
+  const discovery = await readFile(
+    new URL("../app/components/project-discovery.tsx", import.meta.url),
+    "utf8",
+  );
+  const experienceSource = `${page}\n${applicationShell}\n${discovery}`;
   const server = await readFile(
     new URL("../local-api/server.mjs", import.meta.url),
     "utf8",
@@ -191,7 +236,7 @@ test("the browser shell delegates intelligence and execution to the local produc
   assert.match(understanding, /project-understanding-route-dispatch/);
   assert.match(understanding, /project-understanding-route-failure/);
   assert.match(experienceSource, /Checking providers/);
-  assert.match(page, /selected\[suggestion\.suggestionId\]/);
+  assert.match(discovery, /selected\[recommendation\.id\]/);
   // Live missions poll every second; a recorded failure backs off to three.
   assert.match(page, /1000 : 3000/);
   assert.doesNotMatch(

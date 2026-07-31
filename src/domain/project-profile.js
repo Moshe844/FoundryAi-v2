@@ -26,22 +26,48 @@ const PROFILE_KEYS = Object.freeze([
   "architectureDecisions",
   "capabilities",
   "constraints",
+  "customerContent",
   "contextualSuggestions",
   "dataConcepts",
+  "designDirection",
+  "designAlternatives",
   "family",
+  "includedDefaults",
   "missionId",
   "name",
+  "observations",
   "openQuestions",
   "outcomes",
   "platform",
   "primaryActors",
+  "primaryJourneys",
   "profileVersion",
   "requirementContractVersion",
   "runtimeAdapterId",
   "selectedStack",
   "sourceRequirementIds",
   "summary",
+  "assumptions",
   "verificationPlan",
+]);
+
+const CUSTOMER_CONTENT_KINDS = new Set([
+  "business-name",
+  "offerings",
+  "service-area",
+  "contact-details",
+  "brand-assets",
+  "trust-evidence",
+  "business-copy",
+  "business-hours",
+  "pricing",
+  "policies",
+  "other",
+]);
+
+const CUSTOMER_CONTENT_SOURCES = new Set([
+  "customer-request",
+  "customer-answer",
 ]);
 
 function fail(message) {
@@ -68,6 +94,20 @@ function exactKeys(value, expected, label) {
     actual.some((key, index) => key !== keys[index])
   ) {
     fail(`${label} must contain exactly: ${keys.join(", ")}.`);
+  }
+}
+
+function keysWithOptional(value, required, optional, label) {
+  plainObject(value, label);
+  const allowed = new Set([...required, ...optional]);
+  const missing = required.filter((key) => !Object.hasOwn(value, key));
+  const unexpected = Object.keys(value).filter((key) => !allowed.has(key));
+  if (missing.length > 0 || unexpected.length > 0) {
+    fail(
+      `${label} must contain ${required.join(", ")}${
+        optional.length > 0 ? `; optional: ${optional.join(", ")}` : ""
+      }.`,
+    );
   }
 }
 
@@ -137,12 +177,19 @@ function uniqueMeaningfulTextList(
 }
 
 function normalizeQuestion(question, index) {
-  exactKeys(
+  keysWithOptional(
     question,
     ["answerOptions", "questionId", "prompt", "reason"],
+    [
+      "recommendation",
+      "recommendationReason",
+      "consequences",
+      "architectureImpact",
+      "scopeImpact",
+    ],
     `openQuestions[${index}]`,
   );
-  return {
+  const normalized = {
     questionId: identifier(
       question.questionId,
       `openQuestions[${index}].questionId`,
@@ -161,15 +208,48 @@ function normalizeQuestion(question, index) {
       { allowEmpty: false },
     ),
   };
+  for (const field of [
+    "recommendation",
+    "recommendationReason",
+    "architectureImpact",
+    "scopeImpact",
+  ]) {
+    if (question[field] !== undefined) {
+      normalized[field] = meaningfulText(
+        question[field],
+        `openQuestions[${index}].${field}`,
+      );
+    }
+  }
+  if (question.consequences !== undefined) {
+    normalized.consequences = uniqueMeaningfulTextList(
+      question.consequences,
+      `openQuestions[${index}].consequences`,
+      { allowEmpty: false },
+    );
+    if (normalized.consequences.length !== normalized.answerOptions.length) {
+      fail(
+        `openQuestions[${index}].consequences must match answerOptions length.`,
+      );
+    }
+  }
+  return normalized;
 }
 
 function normalizeSuggestion(suggestion, index) {
-  exactKeys(
+  keysWithOptional(
     suggestion,
     ["label", "rationale", "suggestionId"],
+    [
+      "confidence",
+      "impact",
+      "requiredDependencies",
+      "selectedByDefault",
+      "value",
+    ],
     `contextualSuggestions[${index}]`,
   );
-  return {
+  const normalized = {
     suggestionId: identifier(
       suggestion.suggestionId,
       `contextualSuggestions[${index}].suggestionId`,
@@ -181,6 +261,221 @@ function normalizeSuggestion(suggestion, index) {
     rationale: meaningfulText(
       suggestion.rationale,
       `contextualSuggestions[${index}].rationale`,
+    ),
+  };
+  if (suggestion.value !== undefined) {
+    normalized.value = meaningfulText(
+      suggestion.value,
+      `contextualSuggestions[${index}].value`,
+    );
+  }
+  if (suggestion.impact !== undefined) {
+    normalized.impact = meaningfulText(
+      suggestion.impact,
+      `contextualSuggestions[${index}].impact`,
+    );
+  }
+  if (suggestion.selectedByDefault !== undefined) {
+    if (typeof suggestion.selectedByDefault !== "boolean") {
+      fail(`contextualSuggestions[${index}].selectedByDefault must be a boolean.`);
+    }
+    normalized.selectedByDefault = suggestion.selectedByDefault;
+  }
+  if (suggestion.confidence !== undefined) {
+    if (
+      typeof suggestion.confidence !== "number" ||
+      !Number.isFinite(suggestion.confidence) ||
+      suggestion.confidence < 0 ||
+      suggestion.confidence > 1
+    ) {
+      fail(`contextualSuggestions[${index}].confidence must be between 0 and 1.`);
+    }
+    normalized.confidence = suggestion.confidence;
+  }
+  if (suggestion.requiredDependencies !== undefined) {
+    normalized.requiredDependencies = uniqueMeaningfulTextList(
+      suggestion.requiredDependencies,
+      `contextualSuggestions[${index}].requiredDependencies`,
+    );
+  }
+  return normalized;
+}
+
+function normalizeDesignAlternative(alternative, index) {
+  keysWithOptional(
+    alternative,
+    ["approach", "rationale", "recommended"],
+    [
+      "whyItFits",
+      "layoutApproach",
+      "visualPersonality",
+      "informationDensity",
+      "navigationApproach",
+      "mobileBehavior",
+      "tradeoff",
+      "confidence",
+      "preview",
+      "tradeoffs",
+    ],
+    `designAlternatives[${index}]`,
+  );
+  if (typeof alternative.recommended !== "boolean") {
+    fail(`designAlternatives[${index}].recommended must be a boolean.`);
+  }
+  const normalized = {
+    approach: meaningfulText(
+      alternative.approach,
+      `designAlternatives[${index}].approach`,
+    ),
+    rationale: meaningfulText(
+      alternative.rationale,
+      `designAlternatives[${index}].rationale`,
+    ),
+    recommended: alternative.recommended,
+  };
+  if (alternative.tradeoffs !== undefined) {
+    normalized.tradeoffs = uniqueMeaningfulTextList(
+      alternative.tradeoffs,
+      `designAlternatives[${index}].tradeoffs`,
+      { allowEmpty: false },
+    );
+  }
+  for (const field of [
+    "whyItFits",
+    "layoutApproach",
+    "visualPersonality",
+    "informationDensity",
+    "navigationApproach",
+    "mobileBehavior",
+    "tradeoff",
+  ]) {
+    if (alternative[field] !== undefined) {
+      normalized[field] = meaningfulText(
+        alternative[field],
+        `designAlternatives[${index}].${field}`,
+      );
+    }
+  }
+  if (alternative.confidence !== undefined) {
+    exactKeys(
+      alternative.confidence,
+      ["rationale", "score"],
+      `designAlternatives[${index}].confidence`,
+    );
+    if (
+      typeof alternative.confidence.score !== "number" ||
+      !Number.isFinite(alternative.confidence.score) ||
+      alternative.confidence.score < 0 ||
+      alternative.confidence.score > 1
+    ) {
+      fail(
+        `designAlternatives[${index}].confidence.score must be between 0 and 1.`,
+      );
+    }
+    normalized.confidence = {
+      score: alternative.confidence.score,
+      rationale: meaningfulText(
+        alternative.confidence.rationale,
+        `designAlternatives[${index}].confidence.rationale`,
+      ),
+    };
+  }
+  if (alternative.preview !== undefined) {
+    exactKeys(
+      alternative.preview,
+      ["colorMood", "hierarchy", "spacingDensity", "typographyCharacter"],
+      `designAlternatives[${index}].preview`,
+    );
+    normalized.preview = Object.fromEntries(
+      Object.entries(alternative.preview).map(([field, value]) => [
+        field,
+        meaningfulText(
+          value,
+          `designAlternatives[${index}].preview.${field}`,
+        ),
+      ]),
+    );
+  }
+  return normalized;
+}
+
+function normalizeDesignDirection(direction) {
+  exactKeys(
+    direction,
+    [
+      "accessibilityConsiderations",
+      "layoutApproach",
+      "mobilePriority",
+      "reason",
+      "recommendedStyle",
+      "tone",
+    ],
+    "designDirection",
+  );
+  return {
+    recommendedStyle: meaningfulText(
+      direction.recommendedStyle,
+      "designDirection.recommendedStyle",
+    ),
+    reason: meaningfulText(direction.reason, "designDirection.reason"),
+    layoutApproach: meaningfulText(
+      direction.layoutApproach,
+      "designDirection.layoutApproach",
+    ),
+    tone: meaningfulText(direction.tone, "designDirection.tone"),
+    mobilePriority: meaningfulText(
+      direction.mobilePriority,
+      "designDirection.mobilePriority",
+    ),
+    accessibilityConsiderations: uniqueMeaningfulTextList(
+      direction.accessibilityConsiderations,
+      "designDirection.accessibilityConsiderations",
+      { allowEmpty: false },
+    ),
+  };
+}
+
+function normalizeCustomerContent(content) {
+  exactKeys(
+    content,
+    ["missingBeforeLaunch", "supplied"],
+    "customerContent",
+  );
+  if (!Array.isArray(content.supplied)) {
+    fail("customerContent.supplied must be an array.");
+  }
+  const supplied = content.supplied.map((item, index) => {
+    exactKeys(
+      item,
+      ["kind", "source", "value"],
+      `customerContent.supplied[${index}]`,
+    );
+    if (!CUSTOMER_CONTENT_KINDS.has(item.kind)) {
+      fail(`customerContent.supplied[${index}].kind is invalid.`);
+    }
+    if (!CUSTOMER_CONTENT_SOURCES.has(item.source)) {
+      fail(`customerContent.supplied[${index}].source is invalid.`);
+    }
+    return {
+      kind: item.kind,
+      value: meaningfulText(
+        item.value,
+        `customerContent.supplied[${index}].value`,
+      ),
+      source: item.source,
+    };
+  });
+  const identities = supplied.map(
+    (item) => `${item.kind}\u0000${item.value.toLowerCase()}`,
+  );
+  if (new Set(identities).size !== identities.length) {
+    fail("customerContent.supplied contains duplicate values.");
+  }
+  return {
+    supplied,
+    missingBeforeLaunch: uniqueMeaningfulTextList(
+      content.missingBeforeLaunch,
+      "customerContent.missingBeforeLaunch",
     ),
   };
 }
@@ -279,7 +574,8 @@ function deepFreeze(value) {
   return value;
 }
 
-export function normalizeProjectProfile(input) {
+export function normalizeProjectProfile(rawInput) {
+  const input = rawInput;
   exactKeys(input, PROFILE_KEYS, "ProjectProfile");
   if (!Number.isSafeInteger(input.profileVersion) || input.profileVersion < 1) {
     fail("profileVersion must be a positive integer.");
@@ -307,6 +603,18 @@ export function normalizeProjectProfile(input) {
   if (new Set(suggestionIds).size !== suggestionIds.length) {
     fail("contextualSuggestions contains duplicate suggestion IDs.");
   }
+  if (!Array.isArray(input.designAlternatives)) {
+    fail("designAlternatives must be an array.");
+  }
+  const designAlternatives = input.designAlternatives.map(
+    normalizeDesignAlternative,
+  );
+  if (
+    designAlternatives.filter((alternative) => alternative.recommended)
+      .length > 1
+  ) {
+    fail("designAlternatives may contain at most one recommended approach.");
+  }
 
   return deepFreeze({
     missionId: identifier(input.missionId, "missionId"),
@@ -318,12 +626,29 @@ export function normalizeProjectProfile(input) {
     primaryActors: uniqueMeaningfulTextList(input.primaryActors, "primaryActors", {
       allowEmpty: false,
     }),
+    primaryJourneys: uniqueMeaningfulTextList(
+      input.primaryJourneys,
+      "primaryJourneys",
+      { allowEmpty: false },
+    ),
     outcomes: uniqueMeaningfulTextList(input.outcomes, "outcomes", {
       allowEmpty: false,
     }),
     capabilities: uniqueTextList(input.capabilities, "capabilities"),
     dataConcepts: uniqueMeaningfulTextList(input.dataConcepts, "dataConcepts"),
+    observations: uniqueMeaningfulTextList(
+      input.observations,
+      "observations",
+    ),
+    designDirection: normalizeDesignDirection(input.designDirection),
+    designAlternatives,
+    includedDefaults: uniqueMeaningfulTextList(
+      input.includedDefaults,
+      "includedDefaults",
+    ),
     constraints: uniqueMeaningfulTextList(input.constraints, "constraints"),
+    assumptions: uniqueMeaningfulTextList(input.assumptions, "assumptions"),
+    customerContent: normalizeCustomerContent(input.customerContent),
     architectureDecisions: uniqueMeaningfulTextList(
       input.architectureDecisions,
       "architectureDecisions",

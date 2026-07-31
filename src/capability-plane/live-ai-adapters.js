@@ -7,6 +7,7 @@ import {
   cloneAiValue,
 } from "../domain/ai-registry.js";
 import { ModelProviderError } from "../domain/errors.js";
+import { governProviderCatalog } from "../domain/model-governance.js";
 
 const endpoints = Object.freeze({
   [ProviderId.OPENAI]: "https://api.openai.com/v1",
@@ -17,12 +18,11 @@ const endpoints = Object.freeze({
 
 function modelRequestTimeoutMs(request) {
   if (request.taskClass === "FILE_GENERATION") return 300_000;
-  if (request.taskClass === "PROJECT_UNDERSTANDING") return 45_000;
   return 120_000;
 }
 
-function modelMaxOutputTokens(request) {
-  return request.taskClass === "PROJECT_UNDERSTANDING" ? 3_500 : 16_000;
+function modelMaxOutputTokens() {
+  return 16_000;
 }
 
 function scores(values = {}) {
@@ -92,6 +92,27 @@ function usage(inputTokens, outputTokens) {
   };
 }
 
+function withoutJsonSchemaKeyword(value, keyword) {
+  if (Array.isArray(value)) {
+    return value.map((item) => withoutJsonSchemaKeyword(item, keyword));
+  }
+  if (value === null || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([key]) => key !== keyword)
+      .map(([key, item]) => [
+        key,
+        withoutJsonSchemaKeyword(item, keyword),
+      ]),
+  );
+}
+
+function unsupportedJsonSchemaKeyword(message) {
+  return /property ['"](?<keyword>[A-Za-z][A-Za-z0-9]*)['"] is not supported/iu.exec(
+    String(message),
+  )?.groups?.keyword ?? null;
+}
+
 function textModelId(id) {
   return (
     typeof id === "string" &&
@@ -108,15 +129,16 @@ function discoveredCapabilities({
   reasoning,
   vision,
   largeContext,
+  qualityScore = DISCOVERED_TEXT_SCORE,
 }) {
   if (!eligible) return scores();
   return scores({
     [ModelCapability.REASONING]:
-      reasoning ? DISCOVERED_TEXT_SCORE : 0,
-    [ModelCapability.CODING]: DISCOVERED_TEXT_SCORE,
-    [ModelCapability.ARCHITECTURE]: DISCOVERED_TEXT_SCORE,
-    [ModelCapability.PLANNING]: DISCOVERED_TEXT_SCORE,
-    [ModelCapability.DEBUGGING]: DISCOVERED_TEXT_SCORE,
+      reasoning ? qualityScore : 0,
+    [ModelCapability.CODING]: qualityScore,
+    [ModelCapability.ARCHITECTURE]: qualityScore,
+    [ModelCapability.PLANNING]: qualityScore,
+    [ModelCapability.DEBUGGING]: qualityScore,
     [ModelCapability.VISION]: vision ? DISCOVERED_TEXT_SCORE : 0,
     [ModelCapability.STRUCTURED_OUTPUT]:
       structured ? DISCOVERED_TEXT_SCORE : 0,
@@ -128,7 +150,40 @@ function discoveredCapabilities({
   });
 }
 
-function openAiManifest(model) {
+function catalogueRankScore(index, total) {
+  if (total <= 1) return 100;
+  return Math.round(100 - (20 * index) / (total - 1));
+}
+
+function catalogueCapacityScore(model, maximums) {
+  const inputRatio =
+    Math.max(1, model.inputTokenLimit ?? 1) / maximums.inputTokenLimit;
+  const outputRatio =
+    Math.max(1, model.outputTokenLimit ?? 1) / maximums.outputTokenLimit;
+  return Math.round(
+    80 + 20 * (Math.sqrt(inputRatio) * 0.75 + Math.sqrt(outputRatio) * 0.25),
+  );
+}
+
+function catalogueReleaseValue(model) {
+  const version = String(model.version ?? "");
+  if (/\blatest\b/iu.test(version)) return Number.POSITIVE_INFINITY;
+  const fullDate = version.match(/\b(\d{4})-(\d{2})-(\d{2})\b/u);
+  if (fullDate) {
+    return Date.UTC(
+      Number(fullDate[1]),
+      Number(fullDate[2]) - 1,
+      Number(fullDate[3]),
+    );
+  }
+  const monthYear = version.match(/\b(\d{2})-(\d{4})\b/u);
+  if (monthYear) {
+    return Date.UTC(Number(monthYear[2]), Number(monthYear[1]) - 1, 1);
+  }
+  return 0;
+}
+
+function openAiManifest(model, qualityScore = DISCOVERED_TEXT_SCORE) {
   const eligible = textModelId(model.id);
   return {
     modelId: model.id,
@@ -153,11 +208,12 @@ function openAiManifest(model) {
       reasoning: eligible,
       vision: false,
       largeContext: false,
+      qualityScore,
     }),
   };
 }
 
-function anthropicManifest(model) {
+function anthropicManifest(model, qualityScore = DISCOVERED_TEXT_SCORE) {
   const structured =
     model.capabilities?.structured_outputs?.supported === true;
   const reasoning = model.capabilities?.thinking?.supported === true;
@@ -186,11 +242,12 @@ function anthropicManifest(model) {
       reasoning,
       vision,
       largeContext: (model.max_input_tokens ?? 0) >= 100_000,
+      qualityScore,
     }),
   };
 }
 
-function geminiManifest(model) {
+function geminiManifest(model, qualityScore = DISCOVERED_TEXT_SCORE) {
   const methods =
     model.supportedGenerationMethods ?? model.supportedActions ?? [];
   const lifecycleStage = String(
@@ -229,8 +286,51 @@ function geminiManifest(model) {
       reasoning,
       vision: false,
       largeContext: (model.inputTokenLimit ?? 0) >= 100_000,
+      qualityScore,
     }),
   };
+}
+
+function manifestsByRelease(models, manifest, releasedAt) {
+  const ordered = [...models].sort(
+    (left, right) => releasedAt(right) - releasedAt(left),
+  );
+  return ordered.map((model, index) =>
+    manifest(model, catalogueRankScore(index, ordered.length)),
+  );
+}
+
+function geminiManifests(models) {
+  const maximums = {
+    inputTokenLimit: Math.max(
+      1,
+      ...models.map((model) => model.inputTokenLimit ?? 1),
+    ),
+    outputTokenLimit: Math.max(
+      1,
+      ...models.map((model) => model.outputTokenLimit ?? 1),
+    ),
+  };
+  const dated = models
+    .map(catalogueReleaseValue)
+    .filter((value) => Number.isFinite(value) && value > 0)
+    .sort((left, right) => right - left);
+  return models.map((model) => {
+    const releaseValue = catalogueReleaseValue(model);
+    const releaseScore =
+      releaseValue === Number.POSITIVE_INFINITY
+        ? 100
+        : releaseValue === 0
+          ? 80
+          : catalogueRankScore(
+              dated.findIndex((value) => value === releaseValue),
+              dated.length,
+            );
+    const qualityScore = Math.round(
+      (catalogueCapacityScore(model, maximums) + releaseScore) / 2,
+    );
+    return geminiManifest(model, qualityScore);
+  });
 }
 
 function chooseDiscoveredModels(manifests, configuredModel) {
@@ -258,6 +358,22 @@ function chooseDiscoveredModels(manifests, configuredModel) {
     );
   }
   return eligible;
+}
+
+function governedCatalog(providerId, rawModels, configuredModel, lifecycleEvidence) {
+  const snapshot = governProviderCatalog({ providerId, rawModels, lifecycleEvidence });
+  if (!configuredModel) return snapshot;
+  if (!snapshot.engineeringEligibleModels.some((model) => model.modelId === configuredModel)) {
+    throw new ModelProviderError(
+      `Configured model "${configuredModel}" was discovered but did not pass engineering governance.`,
+    );
+  }
+  return cloneAiValue({
+    ...snapshot,
+    engineeringEligibleModels: snapshot.engineeringEligibleModels.filter(
+      (model) => model.modelId === configuredModel,
+    ),
+  });
 }
 
 async function discoverAnthropicCatalog(credential) {
@@ -315,14 +431,28 @@ async function discoverGeminiCatalog(credential) {
 }
 
 function parseJson(providerId, value) {
-  try {
-    return JSON.parse(value);
-  } catch (cause) {
-    throw new ModelProviderError(
-      `${providerId} returned malformed structured output.`,
-      { cause },
-    );
+  const text = String(value ?? "").trim();
+  const candidates = [text];
+  const fenced = /^```(?:json)?\s*(?<json>[\s\S]*?)\s*```$/iu.exec(text)
+    ?.groups?.json;
+  if (fenced !== undefined) candidates.push(fenced.trim());
+  const firstBrace = text.indexOf("{");
+  const lastBrace = text.lastIndexOf("}");
+  if (firstBrace >= 0 && lastBrace > firstBrace) {
+    candidates.push(text.slice(firstBrace, lastBrace + 1));
   }
+  let cause;
+  for (const candidate of [...new Set(candidates)]) {
+    try {
+      return JSON.parse(candidate);
+    } catch (error) {
+      cause = error;
+    }
+  }
+  throw new ModelProviderError(
+    `${providerId} returned malformed structured output (${text.length} characters; object start ${firstBrace === 0 ? "present" : "absent"}; object end ${lastBrace === text.length - 1 ? "present" : "absent"}).`,
+    { cause },
+  );
 }
 
 function openAiText(body) {
@@ -336,6 +466,30 @@ function openAiText(body) {
     }
   }
   throw new ModelProviderError("OpenAI returned no output text.");
+}
+
+function interactionText(body) {
+  if (typeof body.output_text === "string" && body.output_text !== "") {
+    return body.output_text;
+  }
+  const text = (body.steps ?? [])
+    .filter((step) => step.type === "model_output")
+    .flatMap((step) => step.content ?? [])
+    .filter((content) => content.type === "text")
+    .map((content) => content.text ?? "")
+    .join("");
+  if (text !== "") return text;
+  throw new ModelProviderError(
+    "Google Gemini Interactions API returned no output text.",
+  );
+}
+
+function modalityTokens(values) {
+  return (values ?? []).reduce(
+    (total, value) =>
+      total + (Number.isSafeInteger(value.tokens) ? value.tokens : 0),
+    0,
+  );
 }
 
 function providerRequest(request) {
@@ -357,7 +511,7 @@ function providerRequest(request) {
         {
           role: "system",
           content:
-            "You are Foundry's project engineering model. Follow the requested architecture and return only output that conforms to the supplied schema. Never substitute a canned project or omit required files.",
+            "You are Foundry's project engineering model. Follow the requested architecture and return exactly one JSON object that conforms to the supplied schema. Never substitute a canned project or omit required files.",
         },
         { role: "user", content: request.purpose },
       ],
@@ -372,37 +526,72 @@ function providerRequest(request) {
   );
 }
 
-export function createLiveAiAdapters({ environment = process.env } = {}) {
+export function createLiveAiAdapters({
+  environment = process.env,
+  lifecycleSourceService = null,
+} = {}) {
+  const lifecycleEvidence = async (providerId) =>
+    lifecycleSourceService === null
+      ? null
+      : lifecycleSourceService.forProvider(providerId);
   const discoveryAdapters = {
     [ProviderId.OPENAI]: {
+      async discoverCatalog({ credential }) {
+        const body = await jsonRequest(
+          ProviderId.OPENAI,
+          `${endpoints[ProviderId.OPENAI]}/models`,
+          { headers: { authorization: `Bearer ${credential}` } },
+        );
+        return governedCatalog(
+          ProviderId.OPENAI,
+          body.data ?? [],
+          environment.OPENAI_MODEL,
+          await lifecycleEvidence(ProviderId.OPENAI),
+        );
+      },
       async discoverModels({ credential }) {
         const body = await jsonRequest(
           ProviderId.OPENAI,
           `${endpoints[ProviderId.OPENAI]}/models`,
           { headers: { authorization: `Bearer ${credential}` } },
         );
-        const candidates = (body.data ?? [])
-          .sort((left, right) => (right.created ?? 0) - (left.created ?? 0))
-          .map(openAiManifest);
-        return chooseDiscoveredModels(candidates, environment.OPENAI_MODEL);
+        return chooseDiscoveredModels(
+          manifestsByRelease(body.data ?? [], openAiManifest, (model) => model.created ?? 0),
+          environment.OPENAI_MODEL,
+        );
       },
     },
     [ProviderId.ANTHROPIC]: {
+      async discoverCatalog({ credential }) {
+        const models = await discoverAnthropicCatalog(credential);
+        return governedCatalog(
+          ProviderId.ANTHROPIC,
+          models,
+          environment.ANTHROPIC_MODEL,
+          await lifecycleEvidence(ProviderId.ANTHROPIC),
+        );
+      },
       async discoverModels({ credential }) {
         const models = await discoverAnthropicCatalog(credential);
         return chooseDiscoveredModels(
-          models.map(anthropicManifest),
+          manifestsByRelease(models, anthropicManifest, (model) => Date.parse(model.created_at ?? "") || 0),
           environment.ANTHROPIC_MODEL,
         );
       },
     },
     [ProviderId.GOOGLE_GEMINI]: {
+      async discoverCatalog({ credential }) {
+        const models = await discoverGeminiCatalog(credential);
+        return governedCatalog(
+          ProviderId.GOOGLE_GEMINI,
+          models,
+          environment.GOOGLE_MODEL,
+          await lifecycleEvidence(ProviderId.GOOGLE_GEMINI),
+        );
+      },
       async discoverModels({ credential }) {
         const models = await discoverGeminiCatalog(credential);
-        return chooseDiscoveredModels(
-          models.map(geminiManifest),
-          environment.GOOGLE_MODEL,
-        );
+        return chooseDiscoveredModels(geminiManifests(models), environment.GOOGLE_MODEL);
       },
     },
   };
@@ -412,34 +601,100 @@ export function createLiveAiAdapters({ environment = process.env } = {}) {
       providerId: ProviderId.OPENAI,
       providerFamily: "GPT",
       live: true,
-       async generate({ credential, modelId, request }) {
+      async generate({ credential, modelId, request }) {
         const normalizedRequest = providerRequest(request);
-        const body = await jsonRequest(
-          ProviderId.OPENAI,
-          `${endpoints[ProviderId.OPENAI]}/responses`,
-          {
-            method: "POST",
-            headers: {
-              authorization: `Bearer ${credential}`,
-              "content-type": "application/json",
-            },
+        const url = `${endpoints[ProviderId.OPENAI]}/responses`;
+        const options = (format, reasoningEffort = "low") => ({
+          method: "POST",
+          headers: {
+            authorization: `Bearer ${credential}`,
+            "content-type": "application/json",
+          },
            body: JSON.stringify({
-              model: modelId,
-              store: false,
-              max_output_tokens: modelMaxOutputTokens(request),
-              input: normalizedRequest.messages,
-              text: {
-                format: {
+             model: modelId,
+             store: false,
+             max_output_tokens: modelMaxOutputTokens(request),
+             ...(request.taskClass === "PROJECT_UNDERSTANDING"
+               ? {
+                   ...(reasoningEffort !== null
+                     ? { reasoning: { effort: reasoningEffort } }
+                     : {}),
+                   text: {
+                     format,
+                     verbosity: reasoningEffort ?? "low",
+                   },
+                 }
+               : { text: { format } }),
+             input:
+              format.type === "json_object"
+                ? [
+                    ...normalizedRequest.messages,
+                    {
+                      role: "system",
+                      content: `The selected model supports JSON mode rather than schema-constrained output. Return one JSON object that matches this exact schema, including every required property: ${JSON.stringify(normalizedRequest.schema)}`,
+                    },
+                  ]
+                : normalizedRequest.messages,
+           }),
+          requestTimeoutMs: modelRequestTimeoutMs(request),
+        });
+        let body;
+        try {
+          body = await jsonRequest(
+            ProviderId.OPENAI,
+            url,
+            options({
+              type: "json_schema",
+              name: normalizedRequest.schemaName,
+              strict: true,
+              schema: normalizedRequest.schema,
+            }),
+          );
+        } catch (error) {
+          const message = String(error.message);
+          if (
+            /unsupported value:[\s\S]*low[\s\S]*not supported[\s\S]*supported values/iu.test(
+              message,
+            ) ||
+            /(?:reasoning|effort)[\s\S]*low[\s\S]*not supported/iu.test(
+              message,
+            )
+          ) {
+            const supportedValuesText =
+              /supported values (?:are|include):(?<values>[^.]+)/iu.exec(
+                message,
+              )?.groups?.values ?? "";
+            const negotiatedEffort =
+              [...supportedValuesText.matchAll(/['"](?<value>[a-z]+)['"]/giu)]
+                .map((match) => match.groups?.value)
+                .find(Boolean) ?? null;
+            body = await jsonRequest(
+              ProviderId.OPENAI,
+              url,
+              options(
+                {
                   type: "json_schema",
                   name: normalizedRequest.schemaName,
                   strict: true,
                   schema: normalizedRequest.schema,
                 },
-              },
-             }),
-            requestTimeoutMs: modelRequestTimeoutMs(request),
-           },
-        );
+                negotiatedEffort,
+              ),
+            );
+          } else if (
+            !/text\.format[\s\S]*json_schema[\s\S]*not supported/iu.test(
+              message,
+            )
+          ) {
+            throw error;
+          } else {
+            body = await jsonRequest(
+              ProviderId.OPENAI,
+              url,
+              options({ type: "json_object" }),
+            );
+          }
+        }
         return cloneAiValue({
           output: parseJson(ProviderId.OPENAI, openAiText(body)),
           usage: usage(body.usage?.input_tokens, body.usage?.output_tokens),
@@ -450,40 +705,74 @@ export function createLiveAiAdapters({ environment = process.env } = {}) {
       providerId: ProviderId.ANTHROPIC,
       providerFamily: "Claude",
       live: true,
-       async generate({ credential, modelId, request }) {
+      async generate({ credential, modelId, request }) {
         const normalizedRequest = providerRequest(request);
-        const system = normalizedRequest.messages
+        const baseSystem = normalizedRequest.messages
           .filter((message) => message.role === "system")
           .map((message) => message.content)
           .join("\n\n");
         const messages = normalizedRequest.messages.filter(
           (message) => message.role !== "system",
         );
-        const body = await jsonRequest(
-          ProviderId.ANTHROPIC,
-          `${endpoints[ProviderId.ANTHROPIC]}/messages`,
-          {
+        const options = (schema) => ({
             method: "POST",
             headers: {
               "anthropic-version": "2023-06-01",
               "content-type": "application/json",
               "x-api-key": credential,
             },
-             body: JSON.stringify({
+            body: JSON.stringify({
               model: modelId,
               max_tokens: modelMaxOutputTokens(request),
-              system,
+              system: schema !== null
+                ? baseSystem
+                : `${baseSystem}\n\nThe live provider cannot compile this schema as a strict grammar. Return exactly one JSON object with every required property and no prose. It must validate against this exact schema: ${JSON.stringify(normalizedRequest.schema)}`,
               messages,
-              output_config: {
-                format: {
-                  type: "json_schema",
-                  schema: normalizedRequest.schema,
-                },
-               },
-             }),
+              ...(schema !== null
+                ? {
+                    output_config: {
+                      format: {
+                        type: "json_schema",
+                        schema,
+                      },
+                    },
+                  }
+                : {}),
+            }),
             requestTimeoutMs: modelRequestTimeoutMs(request),
-           },
-        );
+        });
+        const url = `${endpoints[ProviderId.ANTHROPIC]}/messages`;
+        let body;
+        let providerSchema = normalizedRequest.schema;
+        for (let negotiationAttempt = 0; negotiationAttempt < 4; negotiationAttempt += 1) {
+          try {
+            body = await jsonRequest(
+              ProviderId.ANTHROPIC,
+              url,
+              options(providerSchema),
+            );
+            break;
+          } catch (error) {
+            const message = String(error.message);
+            const unsupportedKeyword = unsupportedJsonSchemaKeyword(message);
+            if (unsupportedKeyword !== null && negotiationAttempt < 3) {
+              providerSchema = withoutJsonSchemaKeyword(
+                providerSchema,
+                unsupportedKeyword,
+              );
+              continue;
+            }
+            if (!/compiled grammar is too large/iu.test(message)) {
+              throw error;
+            }
+            body = await jsonRequest(
+              ProviderId.ANTHROPIC,
+              url,
+              options(null),
+            );
+            break;
+          }
+        }
         const text = (body.content ?? [])
           .filter((block) => block.type === "text")
           .map((block) => block.text)
@@ -498,7 +787,7 @@ export function createLiveAiAdapters({ environment = process.env } = {}) {
       providerId: ProviderId.GOOGLE_GEMINI,
       providerFamily: "Gemini",
       live: true,
-       async generate({ credential, modelId, request }) {
+      async generate({ credential, modelId, request }) {
         const normalizedRequest = providerRequest(request);
         const system = normalizedRequest.messages
           .filter((message) => message.role === "system")
@@ -508,24 +797,80 @@ export function createLiveAiAdapters({ environment = process.env } = {}) {
           .filter((message) => message.role !== "system")
           .map((message) => message.content)
           .join("\n\n");
-        const body = await jsonRequest(
-          ProviderId.GOOGLE_GEMINI,
-          `${endpoints[ProviderId.GOOGLE_GEMINI]}/models/${encodeURIComponent(modelId)}:generateContent?key=${encodeURIComponent(credential)}`,
-          {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-             body: JSON.stringify({
-              systemInstruction: { parts: [{ text: system }] },
-              contents: [{ role: "user", parts: [{ text: prompt }] }],
-              generationConfig: {
-                responseMimeType: "application/json",
-                responseJsonSchema: normalizedRequest.schema,
-                maxOutputTokens: modelMaxOutputTokens(request),
-               },
-             }),
-            requestTimeoutMs: modelRequestTimeoutMs(request),
-           },
-        );
+        const generateContentOptions = (strictSchema) => ({
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            systemInstruction: {
+              parts: [{
+                text: strictSchema
+                  ? system
+                  : `${system}\n\nReturn exactly one JSON object with every required property and no prose. It must validate against this exact schema: ${JSON.stringify(normalizedRequest.schema)}`,
+              }],
+            },
+            contents: [{ role: "user", parts: [{ text: prompt }] }],
+            generationConfig: {
+              responseMimeType: "application/json",
+              ...(strictSchema
+                ? { responseJsonSchema: normalizedRequest.schema }
+                : {}),
+              maxOutputTokens: modelMaxOutputTokens(request),
+            },
+          }),
+          requestTimeoutMs: modelRequestTimeoutMs(request),
+        });
+        const generateContentUrl = `${endpoints[ProviderId.GOOGLE_GEMINI]}/models/${encodeURIComponent(modelId)}:generateContent?key=${encodeURIComponent(credential)}`;
+        let body;
+        try {
+          body = await jsonRequest(
+            ProviderId.GOOGLE_GEMINI,
+            generateContentUrl,
+            generateContentOptions(true),
+          );
+        } catch (error) {
+          const message = String(error.message);
+          if (/(?:invalid argument|responseJsonSchema[\s\S]*(?:not supported|unsupported))/iu.test(message)) {
+            body = await jsonRequest(
+              ProviderId.GOOGLE_GEMINI,
+              generateContentUrl,
+              generateContentOptions(false),
+            );
+          } else if (!/only supports Interactions API/iu.test(message)) {
+            throw error;
+          } else {
+            const interaction = await jsonRequest(
+              ProviderId.GOOGLE_GEMINI,
+              `${endpoints[ProviderId.GOOGLE_GEMINI]}/interactions?key=${encodeURIComponent(credential)}`,
+              {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({
+                  agent: modelId,
+                  input: prompt,
+                  system_instruction: system,
+                  response_format: {
+                    type: "text",
+                    mime_type: "application/json",
+                    schema: normalizedRequest.schema,
+                  },
+                  store: false,
+                  background: false,
+                }),
+                requestTimeoutMs: modelRequestTimeoutMs(request),
+              },
+            );
+            return cloneAiValue({
+              output: parseJson(
+                ProviderId.GOOGLE_GEMINI,
+                interactionText(interaction),
+              ),
+              usage: usage(
+                modalityTokens(interaction.usage?.input_tokens_by_modality),
+                modalityTokens(interaction.usage?.output_tokens_by_modality),
+              ),
+            });
+          }
+        }
         const text = (body.candidates?.[0]?.content?.parts ?? [])
           .map((part) => part.text ?? "")
           .join("");
@@ -539,5 +884,10 @@ export function createLiveAiAdapters({ environment = process.env } = {}) {
       },
     },
   ];
-  return Object.freeze({ discoveryAdapters, executionAdapters });
+  return Object.freeze({
+    discoveryAdapters,
+    executionAdapters,
+    refreshLifecycleSources: ({ force = false } = {}) =>
+      lifecycleSourceService?.refresh({ force }) ?? Promise.resolve({}),
+  });
 }

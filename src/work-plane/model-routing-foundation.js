@@ -9,6 +9,7 @@ import {
   cloneAiValue,
   isPlainObject,
 } from "../domain/ai-registry.js";
+import { ModelLifecycleState } from "../domain/model-governance.js";
 
 export const RoutingPriority = Object.freeze({
   BALANCED: "BALANCED",
@@ -140,8 +141,8 @@ function compareCandidates(priority, preferredLatencyProfile) {
         return (
           latencyRank[left.model.latencyProfile] -
             latencyRank[right.model.latencyProfile] ||
-          left.totalCost - right.totalCost ||
           right.quality - left.quality ||
+          left.totalCost - right.totalCost ||
           left.model.modelId.localeCompare(right.model.modelId)
         );
       case RoutingPriority.CAPABILITY:
@@ -164,7 +165,7 @@ function compareCandidates(priority, preferredLatencyProfile) {
   };
 }
 
-export function createModelRouter({ registry }) {
+export function createModelRouter({ registry, clock = () => new Date().toISOString() }) {
   if (
     registry === null ||
     typeof registry !== "object" ||
@@ -179,6 +180,7 @@ export function createModelRouter({ registry }) {
   return Object.freeze({
     classifyTaskDepth,
     select({
+      taskClass = null,
       taskDepth,
       requiredCapabilities,
       costConstraints,
@@ -199,11 +201,27 @@ export function createModelRouter({ registry }) {
       const costs = normalizeCostConstraints(costConstraints);
       const preferences = normalizePreferences(userPreferences);
       const reasoningMinimum = (taskDepth - 1) * 20;
+      const requestedAlias =
+        preferences.priority === RoutingPriority.FAST_RESPONSE
+          ? "MODEL_FAST"
+          : preferences.priority === RoutingPriority.CAPABILITY
+            ? "MODEL_CAPABLE"
+            : "MODEL_BALANCED";
       const rejections = [];
       const candidates = [];
+      const providersById = new Map(
+        registry.providers
+          .list()
+          .map((provider) => [provider.providerId, provider]),
+      );
 
       for (const model of registry.models.list()) {
-        const provider = registry.providers.get(model.providerId);
+        const provider = providersById.get(model.providerId);
+        if (provider === undefined) {
+          throw new ModelGatewayValidationError(
+            `Model "${model.modelId}" references an unregistered provider.`,
+          );
+        }
         const totalCost =
           model.costProfile.inputPerMillionTokensUsd +
           model.costProfile.outputPerMillionTokensUsd;
@@ -216,6 +234,47 @@ export function createModelRouter({ registry }) {
         }
         if (model.status !== ModelStatus.AVAILABLE) {
           reasons.push(`model status ${model.status}`);
+        }
+        if (
+          model.governance !== undefined &&
+          taskClass !== null &&
+          !model.governance.allowedTaskClasses.includes(taskClass)
+        ) {
+          reasons.push(`task class ${taskClass} is not approved`);
+        }
+        if (
+          model.governance !== undefined &&
+          !model.governance.capabilityAliases.includes(requestedAlias)
+        ) {
+          reasons.push(`does not satisfy capability alias ${requestedAlias}`);
+        }
+        if (model.governance?.validation !== null && model.governance?.validation !== undefined) {
+          const validation = model.governance.validation;
+          if (validation.validationStatus !== "VALIDATED") {
+            reasons.push(`validation status ${validation.validationStatus}`);
+          }
+          if (validation.registryState !== ModelLifecycleState.ACTIVE_STABLE) {
+            reasons.push(`lifecycle state ${validation.registryState ?? ModelLifecycleState.UNVERIFIED}`);
+          }
+          if (
+            Date.parse(validation.validatedAt) + validation.maximumValidationAgeMs <
+            Date.parse(clock())
+          ) {
+            reasons.push("lifecycle validation is stale");
+          }
+          if (
+            !Number.isFinite(Date.parse(validation.catalogObservedAt)) ||
+            Date.parse(validation.catalogObservedAt) + validation.maximumCatalogAgeMs <
+              Date.parse(clock())
+          ) {
+            reasons.push("provider catalog metadata is stale");
+          }
+        }
+        if (
+          costs.maximumTotalPerMillionTokensUsd !== null &&
+          model.governance?.pricing?.known === false
+        ) {
+          reasons.push("cost is unknown");
         }
         if (
           model.capabilities[ModelCapability.REASONING] <
@@ -268,6 +327,7 @@ export function createModelRouter({ registry }) {
         );
       }
       const selected = candidates[0];
+      const selectedAlias = requestedAlias;
       return cloneAiValue({
         selectedModel: selected.model,
         taskDepth,
@@ -275,7 +335,9 @@ export function createModelRouter({ registry }) {
         totalCostPerMillionTokensUsd: selected.totalCost,
         rationale: [
           "provider credential, enablement, and health are eligible",
-          "model is enabled and AVAILABLE",
+          "model passed discovery, lifecycle validation, and engineering eligibility",
+          ...(selected.model.governance?.eligibilityReasons ?? []),
+          `resolved dynamic capability alias ${selectedAlias}`,
           `reasoning score satisfies task depth ${taskDepth}`,
           "all required capability thresholds are satisfied",
           "cost constraint is satisfied",
@@ -285,6 +347,7 @@ export function createModelRouter({ registry }) {
           (candidate) => candidate.model.modelId,
         ),
         rejectedModels: rejections,
+        selectedAlias,
       });
     },
   });

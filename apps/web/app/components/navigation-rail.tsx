@@ -88,6 +88,8 @@ export function NavigationRail({
           className={
             activeDestination === "home" ? "nav-item active" : "nav-item"
           }
+          aria-label="Home"
+          data-label="Home"
           onClick={() => navigate("home")}
           aria-current={activeDestination === "home" ? "page" : undefined}
         >
@@ -98,6 +100,8 @@ export function NavigationRail({
           className={
             activeDestination === "projects" ? "nav-item active" : "nav-item"
           }
+          aria-label="Projects"
+          data-label="Projects"
           onClick={() => navigate("projects")}
           aria-current={activeDestination === "projects" ? "page" : undefined}
         >
@@ -107,7 +111,12 @@ export function NavigationRail({
       </div>
       <div className="rail-spacer" />
       <div className="rail-foot">
-        <button className="provider-chip" onClick={onOpenProviders}>
+        <button
+          className="provider-chip"
+          aria-label={providerLabel}
+          data-label={providerLabel}
+          onClick={onOpenProviders}
+        >
           <span
             className={providersReady ? "orb" : "orb offline"}
             aria-hidden="true"

@@ -6,6 +6,7 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
+  statSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -23,6 +24,8 @@ import {
   normalizeProviderHealth,
   normalizeProviderMetadata,
 } from "../domain/ai-registry.js";
+import { ModelLifecycleState } from "../domain/model-governance.js";
+import { MODEL_GOVERNANCE_POLICY } from "../config/model-governance-policy.js";
 
 const operations = new Set(Object.values(RegistryOperation));
 const recordKeys = Object.freeze([
@@ -57,10 +60,39 @@ function assertTimestamp(value, label = "occurredAt") {
   }
 }
 
+function projectedLifecycleState(validation) {
+  if (Object.values(ModelLifecycleState).includes(validation.registryState)) {
+    return validation.registryState;
+  }
+  if (validation.lifecycle === "RETIRED" || validation.lifecycle === "SHUTDOWN") {
+    return ModelLifecycleState.SHUTDOWN;
+  }
+  if (validation.lifecycle === "DEPRECATED") {
+    return ModelLifecycleState.DEPRECATED;
+  }
+  if (validation.validationStatus === "VALIDATED") {
+    if (validation.releaseChannel === "PREVIEW") return ModelLifecycleState.ACTIVE_PREVIEW;
+    if (validation.releaseChannel === "EXPERIMENTAL") return ModelLifecycleState.EXPERIMENTAL;
+    if (validation.releaseChannel === "STABLE" || validation.releaseChannel === "SNAPSHOT") {
+      return ModelLifecycleState.ACTIVE_STABLE;
+    }
+  }
+  if (validation.validationStatus === "QUARANTINED") {
+    return ModelLifecycleState.QUARANTINED;
+  }
+  return ModelLifecycleState.UNVERIFIED;
+}
+
 function project(records) {
   const providers = new Map();
   const models = new Map();
+  const discoveredModels = new Map();
+  const validatedModels = new Map();
+  const engineeringEligibleModels = new Map();
+  const modelRefreshes = new Map();
   const discoveries = new Set();
+
+  const governanceKey = (providerId, modelId) => `${providerId}:${modelId}`;
 
   for (const record of records) {
     switch (record.operation) {
@@ -239,6 +271,137 @@ function project(records) {
         }
         break;
       }
+      case RegistryOperation.MODEL_GOVERNANCE_REFRESHED: {
+        const payload = record.payload;
+        if (
+          !exactKeys(payload, [
+            "discoveryId",
+            "providerId",
+            "discoveredModels",
+            "validatedModels",
+            "engineeringEligibleModels",
+          ]) ||
+          !Array.isArray(payload.discoveredModels) ||
+          !Array.isArray(payload.validatedModels) ||
+          !Array.isArray(payload.engineeringEligibleModels)
+        ) {
+          throw new ModelGatewayValidationError(
+            "Model governance refresh event is malformed.",
+          );
+        }
+        assertAiIdentifier(payload.discoveryId, "discoveryId");
+        assertAiIdentifier(payload.providerId, "providerId");
+        if (!providers.has(payload.providerId)) {
+          throw new ModelGatewayValidationError(
+            `Provider "${payload.providerId}" is not registered.`,
+          );
+        }
+        if (discoveries.has(payload.discoveryId)) {
+          throw new ModelGatewayValidationError(
+            `Model discovery "${payload.discoveryId}" is duplicated.`,
+          );
+        }
+        discoveries.add(payload.discoveryId);
+        modelRefreshes.set(payload.providerId, {
+          providerId: payload.providerId,
+          discoveryId: payload.discoveryId,
+          refreshEventId: record.eventId,
+          lastSuccessfulRefreshAt: record.occurredAt,
+        });
+        for (const [modelId, model] of models) {
+          if (model.providerId === payload.providerId) models.delete(modelId);
+        }
+        for (const map of [discoveredModels, validatedModels, engineeringEligibleModels]) {
+          for (const [key, model] of map) {
+            if (model.providerId === payload.providerId) map.delete(key);
+          }
+        }
+        for (const discovered of payload.discoveredModels) {
+          assertAiIdentifier(discovered.modelId, "discovered modelId");
+          if (discovered.providerId !== payload.providerId) {
+            throw new ModelGatewayValidationError("Discovered model belongs to another provider.");
+          }
+          discoveredModels.set(
+            governanceKey(payload.providerId, discovered.modelId),
+            cloneAiValue({
+              ...discovered,
+              discoveryId: payload.discoveryId,
+              discoveryEventId: record.eventId,
+              discoveredAt: record.occurredAt,
+            }),
+          );
+        }
+        for (const validated of payload.validatedModels) {
+          assertAiIdentifier(validated.modelId, "validated modelId");
+          if (validated.providerId !== payload.providerId) {
+            throw new ModelGatewayValidationError("Validated model belongs to another provider.");
+          }
+          const registryState = projectedLifecycleState(validated);
+          validatedModels.set(
+            governanceKey(payload.providerId, validated.modelId),
+            cloneAiValue({
+              ...validated,
+              lifecycle: validated.lifecycle === "RETIRED" ? "SHUTDOWN" : validated.lifecycle,
+              registryState,
+              catalogObservedAt: validated.catalogObservedAt ?? record.occurredAt,
+              maximumCatalogAgeMs:
+                validated.maximumCatalogAgeMs ?? MODEL_GOVERNANCE_POLICY.maximumCatalogAgeMs,
+              stateHistory: validated.stateHistory ?? [
+                ModelLifecycleState.DISCOVERED,
+                ModelLifecycleState.VALIDATING,
+                registryState,
+              ],
+              validationEventId: record.eventId,
+            }),
+          );
+        }
+        for (const eligible of payload.engineeringEligibleModels) {
+          assertAiIdentifier(eligible.modelId, "engineering modelId");
+          if (eligible.providerId !== payload.providerId) {
+            throw new ModelGatewayValidationError("Engineering model belongs to another provider.");
+          }
+          const manifest = normalizeModelManifest(eligible.manifest);
+          if (manifest.modelId !== eligible.modelId || manifest.providerId !== eligible.providerId) {
+            throw new ModelGatewayValidationError("Engineering manifest identity is inconsistent.");
+          }
+          const key = governanceKey(payload.providerId, eligible.modelId);
+          const discovered = discoveredModels.get(key);
+          const validation = validatedModels.get(key);
+          if (discovered === undefined || validation === undefined) {
+            throw new ModelGatewayValidationError(
+              "Engineering eligibility requires matching discovered and validated records.",
+            );
+          }
+          if (
+            validation.validationStatus !== "VALIDATED" ||
+            validation.registryState !== ModelLifecycleState.ACTIVE_STABLE
+          ) {
+            throw new ModelGatewayValidationError(
+              `Engineering model "${eligible.modelId}" is not ACTIVE_STABLE and validated.`,
+            );
+          }
+          engineeringEligibleModels.set(key, cloneAiValue(eligible));
+          if (models.has(manifest.modelId)) {
+            throw new ModelGatewayValidationError(
+              `Engineering model "${manifest.modelId}" conflicts with another provider.`,
+            );
+          }
+          models.set(manifest.modelId, cloneAiValue({
+            ...manifest,
+            discoveryId: payload.discoveryId,
+            discoveredAt: record.occurredAt,
+            discoveryEventId: record.eventId,
+            governance: {
+              allowedTaskClasses: eligible.allowedTaskClasses,
+              capabilityAliases: eligible.capabilityAliases,
+              eligibilityReasons: eligible.eligibilityReasons,
+              pricing: eligible.pricing,
+              validation,
+            },
+          }));
+        }
+        break;
+      }
       default:
         throw new ModelGatewayValidationError(
           `AI registry operation "${record.operation}" is unsupported.`,
@@ -252,6 +415,18 @@ function project(records) {
     ),
     models: new Map(
       [...models].map(([key, value]) => [key, cloneAiValue(value)]),
+    ),
+    discoveredModels: new Map(
+      [...discoveredModels].map(([key, value]) => [key, cloneAiValue(value)]),
+    ),
+    validatedModels: new Map(
+      [...validatedModels].map(([key, value]) => [key, cloneAiValue(value)]),
+    ),
+    engineeringEligibleModels: new Map(
+      [...engineeringEligibleModels].map(([key, value]) => [key, cloneAiValue(value)]),
+    ),
+    modelRefreshes: new Map(
+      [...modelRefreshes].map(([key, value]) => [key, cloneAiValue(value)]),
     ),
   };
 }
@@ -280,6 +455,39 @@ export function createAiRegistryStore({ registryDirectory, clock }) {
   }
   const root = resolve(registryDirectory);
   const path = resolve(root, "ai-registry-events.jsonl");
+  let cachedProjection = null;
+
+  function projectionSignature() {
+    if (!existsSync(path)) return "missing";
+    const statistics = statSync(path);
+    return `${statistics.size}:${statistics.mtimeMs}`;
+  }
+
+  function cloneProjection(value) {
+    return {
+      providers: new Map(
+        [...value.providers].map(([key, provider]) => [
+          key,
+          cloneAiValue(provider),
+        ]),
+      ),
+      models: new Map(
+        [...value.models].map(([key, model]) => [key, cloneAiValue(model)]),
+      ),
+      discoveredModels: new Map(
+        [...value.discoveredModels].map(([key, model]) => [key, cloneAiValue(model)]),
+      ),
+      validatedModels: new Map(
+        [...value.validatedModels].map(([key, model]) => [key, cloneAiValue(model)]),
+      ),
+      engineeringEligibleModels: new Map(
+        [...value.engineeringEligibleModels].map(([key, model]) => [key, cloneAiValue(model)]),
+      ),
+      modelRefreshes: new Map(
+        [...value.modelRefreshes].map(([key, refresh]) => [key, cloneAiValue(refresh)]),
+      ),
+    };
+  }
   const lockPath = `${path}.lock`;
 
   function readRecords() {
@@ -431,6 +639,7 @@ export function createAiRegistryStore({ registryDirectory, clock }) {
       } finally {
         closeSync(descriptor);
       }
+      cachedProjection = null;
       return cloneAiValue(record);
     } finally {
       if (existsSync(lockPath)) {
@@ -445,7 +654,14 @@ export function createAiRegistryStore({ registryDirectory, clock }) {
       return cloneAiValue(readRecords());
     },
     projection() {
-      return project(readRecords());
+      const signature = projectionSignature();
+      if (cachedProjection?.signature !== signature) {
+        cachedProjection = {
+          signature,
+          value: project(readRecords()),
+        };
+      }
+      return cloneProjection(cachedProjection.value);
     },
     path,
   });

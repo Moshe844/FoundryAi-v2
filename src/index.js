@@ -94,7 +94,35 @@ export {
   ExternalBlockerRejectedError,
   RepairExhaustionRejectedError,
   ProjectProfileValidationError,
+  ProjectDesignValidationError,
+  ProjectDesignQualityError,
+  ApprovedProjectContractValidationError,
+  ContractBindingValidationError,
 } from "./domain/errors.js";
+export {
+  CONTRACT_BOUND_BUNDLE_SCHEMA,
+  approvedContractRequirementCatalogue,
+  approvedDesignDirectionHash,
+  contractBoundModelPrompt,
+  createModelTaskContract,
+  deriveContractRoutingRequirements,
+  validateContractBoundMissionPlan,
+  validateContractRequirementTrace,
+} from "./domain/contract-bound-execution.js";
+export {
+  PROJECT_DESIGN_SCHEMA,
+  normalizeProjectDesign,
+  validateProjectDesignQuality,
+} from "./domain/project-design.js";
+export {
+  APPROVED_PROJECT_CONTRACT_SCHEMA_VERSION,
+  APPROVED_PROJECT_CONTRACT_SOURCE,
+  computeApprovedProjectContractHash,
+  createApprovedProjectContract,
+  normalizeApprovedProjectContract,
+  validateApprovedProjectContractConsistency,
+} from "./domain/approved-project-contract.js";
+export { createApprovedProjectContractService } from "./understanding-plane/approved-project-contract-service.js";
 export {
   CONTRACT_AMENDED_EVENT,
   CONTRACT_CREATED_EVENT,
@@ -219,6 +247,22 @@ export {
 export { createEnvironmentService } from "./capability-plane/environment-service.js";
 export { createAiProviderRegistry } from "./capability-plane/ai-provider-registry.js";
 export { createLiveAiAdapters } from "./capability-plane/live-ai-adapters.js";
+export {
+  createModelLifecycleSourceService,
+  parseLifecycleNotices,
+} from "./capability-plane/model-lifecycle-source.js";
+export {
+  MODEL_GOVERNANCE_POLICY,
+  MODEL_GOVERNANCE_POLICY_VERSION,
+} from "./config/model-governance-policy.js";
+export {
+  EngineeringModelAlias,
+  ModelLifecycle,
+  ModelLifecycleState,
+  ModelPurpose,
+  ModelReleaseChannel,
+  governProviderCatalog,
+} from "./domain/model-governance.js";
 export { createAiRegistryStore } from "./truth-plane/ai-registry-store.js";
 export {
   RoutingPriority,
@@ -241,7 +285,9 @@ export {
 export { createProjectProfileService } from "./understanding-plane/project-profile-service.js";
 export {
   PROJECT_UNDERSTANDING_SOURCE,
+  cumulativeCustomerFollowUpAnswers,
   createProjectUnderstandingService,
+  normalizeCustomerFollowUpAnswers,
 } from "./understanding-plane/project-understanding-service.js";
 export {
   PRODUCTION_MISSION_SOURCE,

@@ -34,6 +34,7 @@ import {
   validateBrowserRepairProposal,
   validateBrowserObservationTestSource,
   validateProjectBundleForStack,
+  validateCustomerContentIntegrity,
 } from "../src/work-plane/production-mission-service.js";
 import {
   certificationProjectFixtures,
@@ -191,6 +192,8 @@ test("browser recovery keeps Runtime Service authoritative and budgets repairs a
 
   assert.match(source, /must not declare webServer/u);
   assert.match(source, /FOUNDRY_PREVIEW_URL/u);
+  assert.match(source, /describe the runtime value as development-only/u);
+  assert.match(source, /never imply that final customer access was supplied/u);
   assert.match(source, /channel\\s\*:\\s\*\["'\]chrome/u);
   assert.match(source, /\^playwright\\\.config/u);
   assert.match(source, /latestPriorBrowserWorkUnit\.preWorkCheckpointId/u);
@@ -710,6 +713,63 @@ test("browser repair admission rejects repeated or inapplicable replacements bef
   );
 });
 
+test("generated customer facts require recorded customer provenance", () => {
+  const files = [
+    {
+      path: "app/page.tsx",
+      content:
+        "export default function Page(){return <main><a href='mailto:invented@example.com'>Email</a><p>Licensed and insured</p></main>}",
+    },
+  ];
+  assert.throws(
+    () =>
+      validateCustomerContentIntegrity(files, {
+        supplied: [],
+        missingBeforeLaunch: ["Contact details", "Trust evidence"],
+      }),
+    /unsupported customer facts/u,
+  );
+  assert.doesNotThrow(() =>
+    validateCustomerContentIntegrity(files, {
+      supplied: [
+        {
+          kind: "contact-details",
+          value: "invented@example.com",
+          source: "customer-request",
+        },
+        {
+          kind: "trust-evidence",
+          value: "Licensed and insured",
+          source: "customer-request",
+        },
+      ],
+      missingBeforeLaunch: [],
+    }),
+  );
+});
+
+test("browser repair cannot rewrite an asserted customer outcome", () => {
+  const source =
+    "const captureProbeErrors = []; const consoleErrors = []; const pageErrors = []; const checks = {'check-visible': false}; try { expect(page.getByText('Original promise')).toBeVisible(); } finally { console.log('FOUNDRY_BROWSER_RESULT:' + JSON.stringify({captureProbeErrors, checks, consoleErrors, pageErrors})); }";
+  assert.throws(
+    () =>
+      validateBrowserRepairProposal({
+        structuredOutput: {
+          path: "tests/workflow.spec.ts",
+          replacements: [
+            {
+              oldText: "Original promise",
+              newText: "Different implementation",
+            },
+          ],
+        },
+        currentFiles: [{ path: "tests/workflow.spec.ts", content: source }],
+        requiredBrowserCheckIds: ["check-visible"],
+      }),
+    /asserted customer outcome/u,
+  );
+});
+
 test("ProjectProfile drives wording, architecture, contracts, and verification without core changes", () => {
   const profiles = createProjectProfileService();
   const workloads = certificationProjectFixtures.map((fixture, index) =>
@@ -756,6 +816,41 @@ test("ProjectProfile rejects punctuation-only and placeholder completion claims"
   assert.throws(
     () => normalizeProjectProfile(placeholderCheck),
     /real project-specific value/u,
+  );
+});
+
+test("ProjectProfiles require explicit observations and validate alternatives", () => {
+  const legacyProfile = marketingWebsiteFixture("legacy-profile");
+  const missingUnderstanding = { ...legacyProfile };
+  delete missingUnderstanding.observations;
+  assert.throws(
+    () => normalizeProjectProfile(missingUnderstanding),
+    /must contain exactly/u,
+  );
+
+  const normalized = normalizeProjectProfile(legacyProfile);
+  assert(normalized.observations.length > 0);
+  assert.deepEqual(normalized.designAlternatives, []);
+
+  assert.throws(
+    () =>
+      normalizeProjectProfile({
+        ...legacyProfile,
+        observations: ["The request serves two distinct audiences."],
+        designAlternatives: [
+          {
+            approach: "A guided journey",
+            rationale: "Optimises for first-time visitors.",
+            recommended: true,
+          },
+          {
+            approach: "A compact dashboard",
+            rationale: "Optimises for frequent returning visitors.",
+            recommended: true,
+          },
+        ],
+      }),
+    /at most one recommended/u,
   );
 });
 

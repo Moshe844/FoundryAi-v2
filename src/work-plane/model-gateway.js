@@ -112,67 +112,88 @@ export function rankRoutesByPersistedTaskHistory(
   taskClass,
 ) {
   if (!Array.isArray(routes) || !Array.isArray(history)) return routes;
-  const results = new Map(
-    history
-      .filter(
-        (entry) =>
-          entry?.kind === "result" &&
-          entry.taskClass === taskClass &&
-          typeof entry.requestId === "string",
-      )
-      .map((entry) => [entry.requestId, entry]),
-  );
-  const statistics = new Map();
-  function observe(providerId, succeeded) {
+  const results = new Map();
+  const attemptsByRequest = new Map();
+  const failures = [];
+  for (const entry of history) {
+    if (entry?.taskClass !== taskClass) continue;
+    if (entry.kind === "result" && typeof entry.requestId === "string") {
+      results.set(entry.requestId, entry);
+      continue;
+    }
+    if (entry.kind === "route" && typeof entry.requestId === "string") {
+      const attempts = attemptsByRequest.get(entry.requestId) ?? [];
+      attempts.push(entry);
+      attemptsByRequest.set(entry.requestId, attempts);
+      continue;
+    }
+    if (entry.kind === "failure" && typeof entry.providerId === "string") {
+      failures.push(entry);
+    }
+  }
+  const providerStatistics = new Map();
+  const modelStatistics = new Map();
+  function observe(providerId, modelId, succeeded) {
     if (typeof providerId !== "string") return;
-    const current = statistics.get(providerId) ?? {
+    const statistics =
+      typeof modelId === "string" ? modelStatistics : providerStatistics;
+    const key =
+      typeof modelId === "string"
+        ? `${providerId}\u0000${modelId}`
+        : providerId;
+    const record = statistics.get(key) ?? {
       succeeded: 0,
       failed: 0,
     };
-    current[succeeded ? "succeeded" : "failed"] += 1;
-    statistics.set(providerId, current);
+    record[succeeded ? "succeeded" : "failed"] += 1;
+    statistics.set(key, record);
   }
   for (const result of results.values()) {
-    const attempts = history
-      .filter(
-        (entry) =>
-          entry?.kind === "route" &&
-          entry.requestId === result.requestId &&
-          entry.taskClass === taskClass,
-      )
+    const attempts = [...(attemptsByRequest.get(result.requestId) ?? [])]
       .sort((left, right) => left.routeAttempt - right.routeAttempt);
     attempts.forEach((attempt, index) => {
       const isFinal = index === attempts.length - 1;
       observe(
         attempt.providerId,
+        attempt.modelId,
         isFinal &&
           result.status === "SUCCEEDED" &&
-          attempt.providerId === result.providerId,
+          attempt.providerId === result.providerId &&
+          (typeof result.modelId !== "string" ||
+            typeof attempt.modelId !== "string" ||
+            attempt.modelId === result.modelId),
       );
     });
   }
-  for (const failure of history.filter(
-    (entry) =>
-      entry?.kind === "failure" &&
-      entry.taskClass === taskClass &&
-      typeof entry.providerId === "string" &&
-      !results.has(entry.requestId),
+  for (const failure of failures.filter(
+    (entry) => !results.has(entry.requestId),
   )) {
-    observe(failure.providerId, false);
+    observe(failure.providerId, failure.modelId, false);
+  }
+  function observedFailureRate(statistics, key) {
+    const record = statistics.get(key) ?? {
+      succeeded: 0,
+      failed: 0,
+    };
+    return (
+      (record.failed * 2 + 1) /
+      (record.succeeded + record.failed * 2 + 2)
+    );
   }
   return routes
     .map((route, baseIndex) => ({ route, baseIndex }))
     .sort((left, right) => {
-      function observedFailureRate(providerId) {
-        const record = statistics.get(providerId) ?? {
-          succeeded: 0,
-          failed: 0,
-        };
-        return (record.failed + 1) / (record.succeeded + record.failed + 2);
-      }
+      const leftModelKey = `${left.route.providerId}\u0000${left.route.modelId}`;
+      const rightModelKey = `${right.route.providerId}\u0000${right.route.modelId}`;
+      const leftStatistics = modelStatistics.has(leftModelKey)
+        ? [modelStatistics, leftModelKey]
+        : [providerStatistics, left.route.providerId];
+      const rightStatistics = modelStatistics.has(rightModelKey)
+        ? [modelStatistics, rightModelKey]
+        : [providerStatistics, right.route.providerId];
       return (
-        observedFailureRate(left.route.providerId) -
-          observedFailureRate(right.route.providerId) ||
+        observedFailureRate(...leftStatistics) -
+          observedFailureRate(...rightStatistics) ||
         left.baseIndex - right.baseIndex
       );
     })
@@ -187,7 +208,7 @@ export function classifyModelRouteFailure(errorOrMessage) {
     ? errorOrMessage.status
     : null;
   const permanentlyUnavailable =
-    /(?:no longer available|model (?:is )?(?:unavailable|deprecated|retired)|unknown model|model .* not found|unsupported model|does not exist)/u.test(
+    /(?:no longer available|model (?:is )?(?:unavailable|deprecated|retired)|unknown (?:model|agent)|model(?: .*?)? not found|unsupported model|does not exist|background=true is required for agent interactions|requires the use of .{0,80} tool)/u.test(
       message,
     ) &&
     (status === null || [400, 404, 410, 422].includes(status));
@@ -480,7 +501,11 @@ export function createModelGateway({
         "taskClass",
         "workUnitId",
       ];
-      const optional = ["structuredOutputValidator"];
+      const optional = [
+        "structuredOutputValidator",
+        "depthLevel",
+        "routingReason",
+      ];
       const repairRequest = repairTaskClasses.has(input.taskClass);
       const requiredKeys = repairRequest
         ? [...allowed, "depthLevel", "routingReason"]
@@ -525,10 +550,12 @@ export function createModelGateway({
           "Model purpose or taskClass is invalid.",
         );
       }
-      const depthLevel = repairRequest ? input.depthLevel : null;
-      const routingReason = repairRequest ? input.routingReason : null;
+      const explicitRouting =
+        input.depthLevel !== undefined || input.routingReason !== undefined;
+      const depthLevel = explicitRouting ? input.depthLevel : null;
+      const routingReason = explicitRouting ? input.routingReason : null;
       if (
-        repairRequest &&
+        (repairRequest || explicitRouting) &&
         (!Number.isSafeInteger(depthLevel) ||
           depthLevel < 1 ||
           depthLevel > 5 ||
@@ -536,7 +563,7 @@ export function createModelGateway({
           routingReason.trim() === "")
       ) {
         throw new ModelGatewayValidationError(
-          "Repair model requests require depth 1-5 and a technical routing reason.",
+          "Explicit model routing requires depth 1-5 and a technical routing reason.",
         );
       }
       if (

@@ -117,6 +117,12 @@
   max-width: var(--content-max);
 }
 
+.content:has(> .execution-workspace),
+.content:has(> .completion-workspace),
+.content:has(> .lifecycle-workspace) {
+  max-width: 1360px;
+}
+
 .mobile-topbar,
 .mobile-navigation-layer {
   display: none;
@@ -142,6 +148,34 @@
     justify-content: center;
     padding: 0;
     width: 40px;
+    position: relative;
+  }
+  .rail-desktop .provider-chip {
+    position: relative;
+  }
+  .rail-desktop .nav-item::after,
+  .rail-desktop .provider-chip::after {
+    content: attr(data-label);
+    display: none;
+    position: absolute;
+    z-index: 20;
+    left: calc(100% + var(--space-2));
+    top: 50%;
+    margin-top: -16px;
+    min-width: max-content;
+    padding: var(--space-1) var(--space-2);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: var(--surface-ink);
+    color: var(--ink-inverse);
+    box-shadow: var(--shadow-2);
+    font: 500 13px/22px var(--font-text);
+  }
+  .rail-desktop .nav-item:hover::after,
+  .rail-desktop .nav-item:focus-visible::after,
+  .rail-desktop .provider-chip:hover::after,
+  .rail-desktop .provider-chip:focus-visible::after {
+    display: block;
   }
   .main {
     padding: var(--space-14) var(--space-6);

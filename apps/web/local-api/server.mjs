@@ -8,10 +8,17 @@ import { randomUUID } from "node:crypto";
 import {
   ProviderHealth,
   ProviderId,
+  MODEL_GOVERNANCE_POLICY,
+  WEB_STACK_MANIFEST,
   createLiveAiAdapters,
+  createModelLifecycleSourceService,
   openMissionControl,
   projectRequirementContract,
+  normalizeCustomerFollowUpAnswers,
 } from "../../../src/index.js";
+import { projectDecisionHistory } from "./decision-history.mjs";
+import { projectDiscoveryConversation } from "./discovery-conversation.mjs";
+import { projectExecutionProjection } from "./execution-projection.mjs";
 import {
   projectIsDeleted,
   recordProjectDeletion,
@@ -59,10 +66,14 @@ if (
   configuredEnvironment.GOOGLE_API_KEY =
     configuredEnvironment.GEMINI_API_KEY;
 }
+mkdirSync(stateRoot, { recursive: true });
+const lifecycleSourceService = createModelLifecycleSourceService({
+  cachePath: resolve(stateRoot, "registry/ai/model-lifecycle-source-cache.json"),
+});
 const liveAdapters = createLiveAiAdapters({
   environment: configuredEnvironment,
+  lifecycleSourceService,
 });
-mkdirSync(stateRoot, { recursive: true });
 const control = openMissionControl({
   ledgerDirectory: resolve(stateRoot, "ledger"),
   evidenceDirectory: resolve(stateRoot, "evidence"),
@@ -75,6 +86,10 @@ const control = openMissionControl({
 });
 const activeJobs = new Map();
 const activeUnderstandingJobs = new Map();
+
+// Build the persisted route index before serving requests. Subsequent reads
+// reparse only ledger files that changed, keeping project creation responsive.
+control.catalogue.modelRouteHistory();
 
 function startUnderstandingJob({
   missionId,
@@ -154,7 +169,8 @@ const providerDefinitions = Object.freeze([
   [ProviderId.GOOGLE_GEMINI, "Google Gemini"],
 ]);
 
-async function bootstrapProviders() {
+async function performProviderRefresh({ forceLifecycleSources = false, trigger = "manual" } = {}) {
+  await liveAdapters.refreshLifecycleSources({ force: forceLifecycleSources });
   const registered = new Set(
     control.ai.providers.list().map((provider) => provider.providerId),
   );
@@ -178,8 +194,10 @@ async function bootstrapProviders() {
         },
       });
     }
+  }
+  for (const [providerId] of providerDefinitions) {
     const inspection = control.ai.providers.validateCredential(providerId);
-    const suffix = `${Date.now()}-${providerId}`;
+    const suffix = `${trigger}-${Date.now()}-${randomUUID().slice(0, 8)}-${providerId}`;
     if (!inspection.valid) {
       control.ai.providers.recordHealth({
         eventId: `provider-health-${suffix}`,
@@ -227,41 +245,88 @@ async function bootstrapProviders() {
   }
 }
 
+let providerRefreshPromise = null;
+function refreshProviders(options = {}) {
+  if (providerRefreshPromise === null) {
+    providerRefreshPromise = performProviderRefresh(options).finally(() => {
+      providerRefreshPromise = null;
+    });
+  }
+  return providerRefreshPromise;
+}
+
+function bootstrapProviders() {
+  return refreshProviders({
+    forceLifecycleSources: true,
+    trigger: "startup",
+  });
+}
+
 function providerView() {
-  const rejectedModelIds = new Set(
-    control.catalogue
-      .modelRouteHistory()
-      .filter(
-        (entry) =>
-          entry.kind === "failure" &&
-          entry.failureCategory === "MODEL_UNAVAILABLE" &&
-          entry.retryable === false,
-      )
-      .map((entry) => entry.modelId),
-  );
-  return control.ai.providers.list().map((provider) => ({
+  return control.ai.providers.list().map((provider) => {
+    const discovered = control.ai.models.listDiscovered({ providerId: provider.providerId });
+    const validated = new Map(
+      control.ai.models.listValidated({ providerId: provider.providerId })
+        .map((model) => [model.modelId, model]),
+    );
+    const approved = control.ai.models.list({ providerId: provider.providerId });
+    const approvedIds = new Set(approved.map((model) => model.modelId));
+    const refresh = control.ai.models.refreshStatus(provider.providerId);
+    const validationSources = [...new Set([...validated.values()]
+      .map((model) => model.lifecycleSourceStatus)
+      .filter((status) => typeof status === "string"))];
+    const connectedModels = discovered.map((model) => {
+      const validation = validated.get(model.modelId);
+      return {
+        modelId: model.modelId,
+        displayName: model.displayName,
+        purpose: validation?.purpose ?? "UNKNOWN",
+        lifecycle: validation?.registryState ?? "UNVERIFIED",
+        releaseChannel: validation?.releaseChannel ?? "UNKNOWN",
+        validationStatus: validation?.validationStatus ?? "UNVALIDATED",
+        catalogPresence: model.catalogPresence ?? "PRESENT",
+        lastSeenAt: model.lastSeenAt ?? model.observedAt ?? null,
+        missingSince: model.missingSince ?? null,
+        lastValidatedAt: validation?.validatedAt ?? null,
+        engineeringEligible: approvedIds.has(model.modelId),
+        reasons: validation?.validationReasons ?? ["No governance validation is recorded."],
+      };
+    });
+    return {
     providerId: provider.providerId,
     displayName: provider.displayName,
     configured: provider.credential.configured,
     formatValid: provider.credential.valid,
     health: provider.health,
     available: provider.availability.available,
+    autoRoutingAvailable:
+      provider.availability.available && approved.length > 0 && !refresh.stale,
+    lastSuccessfulRefreshAt: refresh.lastSuccessfulRefreshAt,
+    refreshStale: refresh.stale,
+    refreshMaximumAgeMs: refresh.maximumAgeMs,
+    nextScheduledRefreshAt:
+      refresh.lastSuccessfulRefreshAt === null
+        ? null
+        : new Date(
+            Date.parse(refresh.lastSuccessfulRefreshAt) +
+              modelRefreshIntervalMs,
+          ).toISOString(),
+    lifecycleSourceStatus:
+      validationSources.length === 0 ? "UNAVAILABLE" : validationSources.join(", "),
     reason: provider.availability.available
-      ? "Live provider and model discovery are available."
+      ? "Account access and live catalog discovery are available. Engineering approval is evaluated separately."
       : provider.credential.valid
         ? provider.availability.reasons.join(", ")
         : provider.credential.reason,
-    models: control.ai.models
-      .list({ providerId: provider.providerId })
-      .filter((model) => model.enabled)
+    connectedModels,
+    models: approved
       .map((model) => ({
         modelId: model.modelId,
         displayName: model.displayName,
-        status: rejectedModelIds.has(model.modelId)
-          ? "UNAVAILABLE"
-          : model.status,
+        status: model.status,
       })),
-  }));
+    };
+  });
 }
 
 function missionIntent(events) {
@@ -550,14 +615,25 @@ function modelRouting(events) {
 
 async function missionView(missionId) {
   const events = control.ledger.reportEvents(missionId);
+  const decisionHistory = projectDecisionHistory(events);
   const state = events
     .filter((record) => record.type === "MISSION_TRANSITION")
     .at(-1)?.transition.to;
-  const recordedProfile =
+  const recordedProfileRecord =
     events
-      .map((record) => record.fact?.metadata?.projectProfile)
-      .filter(Boolean)
+      .filter(
+        (record) => record.fact?.metadata?.projectProfile !== undefined,
+      )
       .at(-1) ?? null;
+  const recordedProfile =
+    recordedProfileRecord?.fact.metadata.projectProfile ?? null;
+  const projectDesign =
+    recordedProfileRecord?.fact.metadata.projectDesign ?? null;
+  const proposalConfirmed =
+    recordedProfileRecord?.fact.metadata.clarificationAnswers?.some(
+      (answer) =>
+        answer?.questionId === "customer-proposal-confirmation",
+    ) === true;
   let profile = recordedProfile;
   let experience = null;
   let recordedProfileError = null;
@@ -574,6 +650,14 @@ async function missionView(missionId) {
     }
   }
   const contract = projectRequirementContract(events, missionId);
+  const executionProjection = projectExecutionProjection({
+    contract,
+    events,
+    profile,
+    projectDesign,
+    approvedProjectContract:
+      control.approvedContracts.latest(missionId),
+  });
   let previewUrl = null;
   const persistedRuntime = events
     .map((record) => record.fact?.metadata?.runtimeRecord)
@@ -606,8 +690,23 @@ async function missionView(missionId) {
     intent: missionIntent(events),
     state,
     profile,
+    proposalConfirmed,
     experience,
     contract,
+    decisionHistory: decisionHistory.decisions,
+    selectedEnhancements: decisionHistory.selectedEnhancements,
+    discoveryConversation: projectDiscoveryConversation(events),
+    technicalStack: {
+      stackId: WEB_STACK_MANIFEST.stackId,
+      stackVersion: WEB_STACK_MANIFEST.stackVersion,
+      components: WEB_STACK_MANIFEST.components,
+      frameworkVersion:
+        WEB_STACK_MANIFEST.requiredTools
+          .find((tool) => tool.toolId === "nextjs")
+          ?.versionRange.replace(/^=/u, "") ?? null,
+      knownLimitations: WEB_STACK_MANIFEST.knownLimitations,
+    },
+    executionProjection,
     previewUrl,
     running:
       (job !== undefined && job.error === null && !job.completed) ||
@@ -629,14 +728,23 @@ async function missionView(missionId) {
 
 function missionSummary(missionId) {
   const events = control.ledger.reportEvents(missionId);
+  const decisionHistory = projectDecisionHistory(events);
   const state = events
     .filter((record) => record.type === "MISSION_TRANSITION")
     .at(-1)?.transition.to;
-  const recordedProfile =
+  const recordedProfileRecord =
     events
-      .map((record) => record.fact?.metadata?.projectProfile)
-      .filter(Boolean)
+      .filter(
+        (record) => record.fact?.metadata?.projectProfile !== undefined,
+      )
       .at(-1) ?? null;
+  const recordedProfile =
+    recordedProfileRecord?.fact.metadata.projectProfile ?? null;
+  const proposalConfirmed =
+    recordedProfileRecord?.fact.metadata.clarificationAnswers?.some(
+      (answer) =>
+        answer?.questionId === "customer-proposal-confirmation",
+    ) === true;
   let profile = recordedProfile;
   let recordedProfileError = null;
   if (recordedProfile !== null) {
@@ -650,12 +758,32 @@ function missionSummary(missionId) {
   }
   const job = activeJobs.get(missionId);
   const understandingJob = activeUnderstandingJobs.get(missionId);
+  const executionProjection = projectExecutionProjection({
+    contract: projectRequirementContract(events, missionId),
+    events,
+    profile,
+  });
   return {
     missionId,
     intent: missionIntent(events),
     state,
     profile,
+    proposalConfirmed,
     contract: null,
+    decisionHistory: decisionHistory.decisions,
+    selectedEnhancements: decisionHistory.selectedEnhancements,
+    discoveryConversation: projectDiscoveryConversation(events),
+    technicalStack: {
+      stackId: WEB_STACK_MANIFEST.stackId,
+      stackVersion: WEB_STACK_MANIFEST.stackVersion,
+      components: WEB_STACK_MANIFEST.components,
+      frameworkVersion:
+        WEB_STACK_MANIFEST.requiredTools
+          .find((tool) => tool.toolId === "nextjs")
+          ?.versionRange.replace(/^=/u, "") ?? null,
+      knownLimitations: WEB_STACK_MANIFEST.knownLimitations,
+    },
+    executionProjection,
     previewUrl: null,
     running:
       (job !== undefined && job.error === null) ||
@@ -691,6 +819,10 @@ async function listMissions(query = "") {
         mission.profile?.name,
         mission.profile?.summary,
         ...(mission.profile?.outcomes ?? []),
+        ...(mission.profile?.observations ?? []),
+        ...(mission.profile?.designAlternatives ?? []).flatMap(
+          (alternative) => [alternative.approach, alternative.rationale],
+        ),
         ...(mission.profile?.architectureDecisions ?? []),
         ...mission.searchEvents
           .flatMap((record) => [
@@ -730,11 +862,11 @@ function isProjectDeleted(missionId) {
   return projectIsDeleted(control.ledger.reportEvents(missionId));
 }
 
-async function stopMissionWork(missionId) {
+async function stopMissionWork(missionId, { cancel = false } = {}) {
   const job = activeJobs.get(missionId);
   if (job !== undefined && job.child.connected && job.child.exitCode === null) {
     await new Promise((resolve) => {
-      job.child.send({ type: "stop" }, () => resolve());
+      job.child.send({ type: cancel ? "stop" : "shutdown" }, () => resolve());
     });
     await Promise.race([
       new Promise((resolve) => job.child.once("exit", resolve)),
@@ -742,7 +874,11 @@ async function stopMissionWork(missionId) {
     ]);
   } else {
     try {
-      await control.production.stop(missionId);
+      if (cancel) {
+        await control.production.cancel(missionId);
+      } else {
+        await control.production.stop(missionId);
+      }
     } catch {}
   }
   activeJobs.delete(missionId);
@@ -781,7 +917,32 @@ function routeMission(pathname) {
     : { missionId: match[1], action: match[2] ?? null };
 }
 
-await bootstrapProviders();
+void bootstrapProviders().catch((error) => {
+  process.stderr.write(
+    `${new Date().toISOString()} provider bootstrap failed: ${String(
+      error?.stack ?? error,
+    ).slice(0, 4_000)}\n`,
+  );
+});
+
+const configuredRefreshInterval = Number(
+  configuredEnvironment.FOUNDRY_MODEL_REFRESH_INTERVAL_MS ??
+    MODEL_GOVERNANCE_POLICY.scheduledRefreshIntervalMs,
+);
+const modelRefreshIntervalMs =
+  Number.isFinite(configuredRefreshInterval) && configuredRefreshInterval >= 60_000
+    ? configuredRefreshInterval
+    : MODEL_GOVERNANCE_POLICY.scheduledRefreshIntervalMs;
+const modelRefreshTimer = setInterval(() => {
+  void refreshProviders({ forceLifecycleSources: true, trigger: "scheduled" }).catch((error) => {
+    process.stderr.write(
+      `${new Date().toISOString()} scheduled provider refresh failed: ${String(
+        error?.stack ?? error,
+      ).slice(0, 4_000)}\n`,
+    );
+  });
+}, modelRefreshIntervalMs);
+modelRefreshTimer.unref();
 
 for (const missionId of control.catalogue.listMissionIds()) {
   const events = control.ledger.reportEvents(missionId);
@@ -833,7 +994,7 @@ const server = createServer(async (request, response) => {
       return json(response, 200, { providers: providerView() });
     }
     if (request.method === "POST" && url.pathname === "/providers/refresh") {
-      await bootstrapProviders();
+      await refreshProviders({ forceLifecycleSources: true, trigger: "manual" });
       return json(response, 200, { providers: providerView() });
     }
     if (request.method === "GET" && url.pathname === "/missions") {
@@ -894,12 +1055,25 @@ const server = createServer(async (request, response) => {
       missionRoute?.action === "clarify"
     ) {
       const input = await body(request);
+      if (activeUnderstandingJobs.get(missionRoute.missionId)?.active === true) {
+        return json(response, 409, {
+          error: "Foundry is already revising this project. Wait for the current revision to finish.",
+        });
+      }
+      let answers;
+      try {
+        answers = normalizeCustomerFollowUpAnswers(input.answers);
+      } catch (error) {
+        return json(response, 400, {
+          error: String(error?.message ?? error).slice(0, 500),
+        });
+      }
       const prior = await missionView(missionRoute.missionId);
       const nextProfileVersion = (prior.profile?.profileVersion ?? 0) + 1;
       startUnderstandingJob({
         missionId: missionRoute.missionId,
         intent: prior.intent,
-        answers: Array.isArray(input.answers) ? input.answers : [],
+        answers,
         profileVersion: nextProfileVersion,
         causationId: `${missionRoute.missionId}-clarification`,
       });
@@ -943,7 +1117,7 @@ const server = createServer(async (request, response) => {
       });
     }
     if (request.method === "POST" && missionRoute?.action === "stop") {
-      await stopMissionWork(missionRoute.missionId);
+      await stopMissionWork(missionRoute.missionId, { cancel: true });
       return json(response, 200, await missionView(missionRoute.missionId));
     }
     return json(response, 404, { error: "Not found." });
@@ -964,6 +1138,7 @@ server.listen(port, "127.0.0.1", () => {
 });
 
 async function shutdown() {
+  clearInterval(modelRefreshTimer);
   for (const job of activeJobs.values()) {
     try {
       job.child.send({ type: "stop" });

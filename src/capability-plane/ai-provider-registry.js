@@ -11,6 +11,8 @@ import {
   normalizeProviderHealth,
   normalizeProviderMetadata,
 } from "../domain/ai-registry.js";
+import { ModelLifecycleState } from "../domain/model-governance.js";
+import { MODEL_GOVERNANCE_POLICY } from "../config/model-governance-policy.js";
 
 function providerAvailability(provider, environmentInspection) {
   const reasons = [];
@@ -71,10 +73,11 @@ export function createAiProviderRegistry({
     if (
       adapter === null ||
       typeof adapter !== "object" ||
-      typeof adapter.discoverModels !== "function"
+      typeof adapter.discoverModels !== "function" &&
+      typeof adapter.discoverCatalog !== "function"
     ) {
       throw new ModelGatewayValidationError(
-        `Discovery adapter "${providerId}" must expose discoverModels().`,
+        `Discovery adapter "${providerId}" must expose discoverModels() or discoverCatalog().`,
       );
     }
   }
@@ -149,6 +152,46 @@ export function createAiProviderRegistry({
 
   function append(eventId, operation, payload, occurredAt = clock()) {
     return store.append({ eventId, operation, payload, occurredAt });
+  }
+
+  function preserveMissingCatalogModels(providerId, snapshot, missingSince) {
+    const projection = store.projection();
+    const currentIds = new Set(snapshot.discoveredModels.map((model) => model.modelId));
+    const discoveredModels = snapshot.discoveredModels.map((model) => ({
+      ...model,
+      catalogPresence: "PRESENT",
+      lastSeenAt: model.observedAt,
+      missingSince: null,
+    }));
+    const validatedModels = snapshot.validatedModels.map((model) => cloneAiValue(model));
+    for (const previous of projection.discoveredModels.values()) {
+      if (previous.providerId !== providerId || currentIds.has(previous.modelId)) continue;
+      const key = `${providerId}:${previous.modelId}`;
+      const validation = projection.validatedModels.get(key);
+      discoveredModels.push({
+        ...previous,
+        accountAccessible: false,
+        catalogPresence: "MISSING",
+        lastSeenAt: previous.lastSeenAt ?? previous.observedAt ?? previous.discoveredAt,
+        missingSince: previous.missingSince ?? missingSince,
+      });
+      if (validation !== undefined) {
+        const reason = "provider catalog no longer reports this model; pending validation";
+        validatedModels.push({
+          ...validation,
+          registryState: ModelLifecycleState.QUARANTINED,
+          validationStatus: ModelLifecycleState.QUARANTINED,
+          validationReasons: [...new Set([...(validation.validationReasons ?? []), reason])],
+          stateHistory: [...(validation.stateHistory ?? []), ModelLifecycleState.QUARANTINED],
+          missingSince: previous.missingSince ?? missingSince,
+        });
+      }
+    }
+    return cloneAiValue({
+      discoveredModels: discoveredModels.sort((left, right) => left.modelId.localeCompare(right.modelId)),
+      validatedModels: validatedModels.sort((left, right) => left.modelId.localeCompare(right.modelId)),
+      engineeringEligibleModels: snapshot.engineeringEligibleModels,
+    });
   }
 
   const providers = Object.freeze({
@@ -246,15 +289,30 @@ export function createAiProviderRegistry({
       const discoveredModels = await environment.withCredential(
         providerId,
         (credential) =>
-          adapter.discoverModels({
+          (adapter.discoverCatalog ?? adapter.discoverModels)({
             credential,
             provider: cloneAiValue(provider),
           }),
       );
       if (!Array.isArray(discoveredModels)) {
-        throw new ModelGatewayValidationError(
-          "Provider model probe returned an invalid result.",
-        );
+        if (
+          discoveredModels === null ||
+          typeof discoveredModels !== "object" ||
+          !Array.isArray(discoveredModels.discoveredModels) ||
+          !Array.isArray(discoveredModels.validatedModels) ||
+          !Array.isArray(discoveredModels.engineeringEligibleModels)
+        ) {
+          throw new ModelGatewayValidationError(
+            "Provider model probe returned an invalid governance snapshot.",
+          );
+        }
+        return cloneAiValue({
+          discoveredModels: discoveredModels.discoveredModels,
+          validatedModels: discoveredModels.validatedModels,
+          engineeringEligibleModels: discoveredModels.engineeringEligibleModels.map(
+            (model) => ({ ...model, manifest: normalizeModelManifest(model.manifest) }),
+          ),
+        });
       }
       return cloneAiValue(
         discoveredModels.map((model) => normalizeModelManifest(model)),
@@ -306,6 +364,19 @@ export function createAiProviderRegistry({
         );
       }
       const discoveredModels = await models.probe(providerId);
+      if (!Array.isArray(discoveredModels)) {
+        const governedSnapshot = preserveMissingCatalogModels(
+          providerId,
+          discoveredModels,
+          occurredAt,
+        );
+        return append(
+          eventId,
+          RegistryOperation.MODEL_GOVERNANCE_REFRESHED,
+          { discoveryId, providerId, ...governedSnapshot },
+          occurredAt,
+        );
+      }
       return models.registerDiscovery({
         eventId,
         discoveryId,
@@ -321,6 +392,19 @@ export function createAiProviderRegistry({
       occurredAt = clock(),
     }) {
       const discoveredModels = await models.probe(providerId);
+      if (!Array.isArray(discoveredModels)) {
+        const governedSnapshot = preserveMissingCatalogModels(
+          providerId,
+          discoveredModels,
+          occurredAt,
+        );
+        return append(
+          eventId,
+          RegistryOperation.MODEL_GOVERNANCE_REFRESHED,
+          { discoveryId, providerId, ...governedSnapshot },
+          occurredAt,
+        );
+      }
       return append(
         eventId,
         RegistryOperation.MODEL_CATALOG_REFRESHED,
@@ -354,6 +438,46 @@ export function createAiProviderRegistry({
           )
           .sort((left, right) => left.modelId.localeCompare(right.modelId)),
       );
+    },
+    listDiscovered({ providerId = null } = {}) {
+      if (providerId !== null) getRawProvider(providerId);
+      return cloneAiValue(
+        [...store.projection().discoveredModels.values()]
+          .filter((model) => providerId === null || model.providerId === providerId)
+          .sort((left, right) => left.modelId.localeCompare(right.modelId)),
+      );
+    },
+    listValidated({ providerId = null } = {}) {
+      if (providerId !== null) getRawProvider(providerId);
+      return cloneAiValue(
+        [...store.projection().validatedModels.values()]
+          .filter((model) => providerId === null || model.providerId === providerId)
+          .sort((left, right) => left.modelId.localeCompare(right.modelId)),
+      );
+    },
+    listEngineeringEligible({ providerId = null } = {}) {
+      if (providerId !== null) getRawProvider(providerId);
+      return cloneAiValue(
+        [...store.projection().engineeringEligibleModels.values()]
+          .filter((model) => providerId === null || model.providerId === providerId)
+          .sort((left, right) => left.modelId.localeCompare(right.modelId)),
+      );
+    },
+    refreshStatus(providerId) {
+      getRawProvider(providerId);
+      const refresh = store.projection().modelRefreshes.get(providerId) ?? null;
+      const now = clock();
+      const ageMs = refresh === null
+        ? null
+        : Math.max(0, Date.parse(now) - Date.parse(refresh.lastSuccessfulRefreshAt));
+      return cloneAiValue({
+        providerId,
+        lastSuccessfulRefreshAt: refresh?.lastSuccessfulRefreshAt ?? null,
+        discoveryId: refresh?.discoveryId ?? null,
+        ageMs,
+        maximumAgeMs: MODEL_GOVERNANCE_POLICY.maximumCatalogAgeMs,
+        stale: refresh === null || ageMs > MODEL_GOVERNANCE_POLICY.maximumCatalogAgeMs,
+      });
     },
   });
 
@@ -466,13 +590,25 @@ export function createAiProviderRegistry({
           `Model "${selectedModelId}" is not an eligible execution model for provider "${providerId}".`,
         );
       }
-      return environment.withCredential(providerId, (credential) =>
+      const result = await environment.withCredential(providerId, (credential) =>
         adapter.generate({
           credential,
           modelId: selectedModelId,
           request: cloneAiValue(request),
         }),
       );
+      const inputRate = selectedModel.costProfile.inputPerMillionTokensUsd;
+      const outputRate = selectedModel.costProfile.outputPerMillionTokensUsd;
+      const inputTokens = result.usage?.inputTokens ?? 0;
+      const outputTokens = result.usage?.outputTokens ?? 0;
+      return cloneAiValue({
+        ...result,
+        usage: {
+          ...result.usage,
+          costUsd:
+            (inputTokens * inputRate + outputTokens * outputRate) / 1_000_000,
+        },
+      });
     },
   });
 
