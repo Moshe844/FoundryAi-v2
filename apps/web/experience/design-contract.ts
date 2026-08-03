@@ -89,15 +89,15 @@ export function buildApprovedDesignContract({
       ? text(customValue, "Custom customer direction")
       : text(selected?.name.value, direction.recommendedStyle.value);
 
-  return {
-    schemaVersion: 1,
+  const contract = {
+    schemaVersion: 1 as const,
     sourceProfileVersion,
     selectionMode:
       mode === "other"
-        ? "custom"
+        ? ("custom" as const)
         : mode === "alternative"
-          ? "alternative"
-          : "recommended",
+          ? ("alternative" as const)
+          : ("recommended" as const),
     selectedDirectionId: selected?.id ?? null,
     selectedDirectionName,
     rationale:
@@ -150,4 +150,16 @@ export function buildApprovedDesignContract({
     tradeoff: selected?.tradeoff.value ?? null,
     confidence: selected?.confidence.value ?? null,
   };
+
+  // The local UX can inspect this contract immediately. The current strict
+  // clarification API accepts only the canonical DecisionSelection fields, so
+  // JSON transport intentionally omits this duplicate browser-side projection.
+  // The authoritative backend Product Blueprint independently reconstructs the
+  // same approved design from the canonical selection and generated design data.
+  Object.defineProperty(contract, "toJSON", {
+    value: () => undefined,
+    enumerable: false,
+  });
+
+  return contract;
 }
