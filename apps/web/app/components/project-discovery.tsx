@@ -9,6 +9,10 @@ import type {
   ProjectUnderstanding as ProjectUnderstandingModel,
 } from "../../experience/contracts";
 import {
+  buildApprovedDesignContract,
+  type StructuredCustomerFollowUpAnswer,
+} from "../../experience/design-contract";
+import {
   answerIsExplicit,
   type ClarificationAnswer,
   clarificationAnswerPayload,
@@ -108,9 +112,7 @@ export function ProjectDiscovery({
   conversation: DiscoveryConversation;
   decisions: readonly ClarificationDecision[];
   missionRunning: boolean;
-  onClarify: (
-    answers: CustomerFollowUpAnswer[],
-  ) => Promise<boolean>;
+  onClarify: (answers: CustomerFollowUpAnswer[]) => Promise<boolean>;
   profileVersion: number;
   understanding: ProjectUnderstandingModel;
 }>) {
@@ -138,7 +140,7 @@ export function ProjectDiscovery({
     proposal.recommendations.map((recommendation) => [
       recommendation.id,
       selected[recommendation.id] ??
-        (recommendation.selectedByDefault.value === true),
+        recommendation.selectedByDefault.value === true,
     ]),
   );
   const selectedRecommendations = proposal.recommendations.filter(
@@ -188,7 +190,7 @@ export function ProjectDiscovery({
     await onClarify([answer]);
   }
 
-  function designFollowUp(): CustomerFollowUpAnswer {
+  function designFollowUp(): StructuredCustomerFollowUpAnswer {
     const selectedDirection = proposal.alternatives.find(
       (alternative) =>
         alternative.id === designChoice.optionId ||
@@ -204,13 +206,21 @@ export function ProjectDiscovery({
         : designChoice.mode === "alternative"
           ? "select-option"
           : "accept-recommendation";
+    const designContract = buildApprovedDesignContract({
+      alternatives: proposal.alternatives,
+      direction: proposal.designDirection,
+      mode: designChoice.mode,
+      optionId: designChoice.optionId,
+      customValue: designChoice.value,
+      sourceProfileVersion: profileVersion,
+    });
 
     return {
       questionId: "customer-design-direction",
       answer:
         mode === "other"
-          ? `Customer-approved custom design direction: ${value}.`
-          : `Customer-approved design direction: ${value}.`,
+          ? `Customer-approved custom design direction: ${value}. Preserve the attached structured design contract during generation and verification.`
+          : `Customer-approved design direction: ${value}. Preserve the attached structured design contract during generation and verification.`,
       selection: {
         kind: "design-direction",
         subjectId: "design-direction",
@@ -222,6 +232,7 @@ export function ProjectDiscovery({
           proposal.designDirection.reason.value,
         classification: "design preference",
         sourceProfileVersion: profileVersion,
+        designContract,
       },
     };
   }
@@ -583,9 +594,9 @@ export function ProjectDiscovery({
                 </div>
               </dl>
               <p className="t-body-s ink-secondary">
-                Leaving an item unchanged means Foundry will use its current
-                recommendation and record that decision in the plan before
-                execution.
+                The approved design is now recorded as structured composition,
+                navigation, typography, color, mobile, and accessibility rules —
+                not only as a design name.
               </p>
               <div className="continue-row">
                 <button
