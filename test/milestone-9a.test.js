@@ -1123,7 +1123,7 @@ test("project understanding records a canonical model call and replays safely", 
   assert.equal(call.modelTier, "ARCHITECTURE");
 });
 
-test("project understanding corrects superficially valid output before provider failover", async (t) => {
+test("project understanding rejects an invalid first response without paid correction or failover", async (t) => {
   let firstInvalidAttempts = 0;
   let secondInvalidAttempts = 0;
   let validAttempts = 0;
@@ -1287,21 +1287,19 @@ test("project understanding corrects superficially valid output before provider 
     reason: "Customer requested: Build a customer portal",
   });
 
-  await control.understanding.understand({
-    missionId: "understanding-domain-failover",
-    intent: "Build a customer portal",
-    requestId: "understanding-domain-failover-request",
-    eventId: "understanding-domain-failover-profile",
-    causationId: "understanding-domain-failover-intent",
-  });
-
-  assert.equal(firstInvalidAttempts, 3);
-  assert.equal(secondInvalidAttempts, 3);
-  assert.equal(validAttempts, 1);
-  assert.equal(
-    control.models.listCalls("understanding-domain-failover")[0].modelId,
-    "c-valid-understanding",
+  await assert.rejects(
+    control.understanding.understand({
+      missionId: "understanding-domain-failover",
+      intent: "Build a customer portal",
+      requestId: "understanding-domain-failover-request",
+      eventId: "understanding-domain-failover-profile",
+      causationId: "understanding-domain-failover-intent",
+    }),
+    /primaryActors\[0\]/u,
   );
+  assert.equal(firstInvalidAttempts, 1);
+  assert.equal(secondInvalidAttempts, 0);
+  assert.equal(validAttempts, 0);
   assert.equal(
     control.evidence
       .findByMission("understanding-domain-failover")

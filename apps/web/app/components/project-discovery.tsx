@@ -49,7 +49,7 @@ export function ProjectDiscovery({
   missionRunning: boolean;
   onClarify: (
     answers: CustomerFollowUpAnswer[],
-  ) => Promise<void>;
+  ) => Promise<boolean>;
   profileVersion: number;
   understanding: ProjectUnderstandingModel;
 }>) {
@@ -106,7 +106,9 @@ export function ProjectDiscovery({
         (designChoice.mode === "recommended" && alternative.recommended.value),
     );
     const value =
-      designChoice.value?.trim() || proposal.designDirection.recommendedStyle.value;
+      designChoice.value?.trim() ||
+      selectedDirection?.name.value ||
+      proposal.designDirection.recommendedStyle.value;
     const mode =
       designChoice.mode === "other"
         ? "other"
@@ -135,8 +137,20 @@ export function ProjectDiscovery({
 
   async function continueFromDesign() {
     if (designChoice.mode === "other" && !designChoice.value?.trim()) return;
-    await onClarify([designFollowUp()]);
-    moveTo(3);
+    if (await onClarify([designFollowUp()])) moveTo(3);
+  }
+
+  async function toggleRecommendation(id: string) {
+    const include = !effectiveSelected[id];
+    const recommendation = proposal.recommendations.find(
+      (item) => item.id === id,
+    );
+    if (
+      recommendation !== undefined &&
+      (await onClarify([recommendationFollowUp(recommendation, include)]))
+    ) {
+      setSelected((current) => ({ ...current, [id]: include }));
+    }
   }
 
   function recommendationFollowUp(
@@ -176,7 +190,7 @@ export function ProjectDiscovery({
           effectiveSelected[recommendation.id] === true,
         ),
     );
-    await onClarify([
+    const recorded = await onClarify([
       ...decisionAnswers,
       ...recommendationAnswers,
       designFollowUp(),
@@ -196,6 +210,7 @@ export function ProjectDiscovery({
         },
       },
     ]);
+    if (!recorded) return;
     setAnswers({});
     setSelected(
       Object.fromEntries(
@@ -311,20 +326,7 @@ export function ProjectDiscovery({
               <FoundryRecommendations
                 recommendations={proposal.recommendations.slice(0, 5)}
                 selected={effectiveSelected}
-                onToggle={(id) =>
-                  setSelected((current) => {
-                    const include = !effectiveSelected[id];
-                    const recommendation = proposal.recommendations.find(
-                      (item) => item.id === id,
-                    );
-                    if (recommendation !== undefined) {
-                      void onClarify([
-                        recommendationFollowUp(recommendation, include),
-                      ]);
-                    }
-                    return { ...current, [id]: include };
-                  })
-                }
+                onToggle={(id) => void toggleRecommendation(id)}
               />
               <div className="stage-actions">
                 <button className="btn btn-primary" onClick={() => moveTo(4)}>

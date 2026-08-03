@@ -19,6 +19,11 @@ import { MissionState } from "../domain/lifecycle.js";
 import { ObservationKind } from "../domain/observation-evidence.js";
 import { LatencyProfile } from "../domain/ai-registry.js";
 import { validateModelResponse } from "./model-response-validator.js";
+import { rankRoutesByPersistedTaskHistory } from "./model-route-reliability.js";
+import { modelTaskCapabilityContract } from "../config/model-task-capability-policy.js";
+import { RoutingPriority } from "./model-routing-foundation.js";
+
+export { rankRoutesByPersistedTaskHistory } from "./model-route-reliability.js";
 
 const taskTier = Object.freeze({
   [ModelTaskClass.FILE_GENERATION]: ModelTier.STANDARD_ENGINEERING,
@@ -106,98 +111,20 @@ function rankTaskRoutes(providers, modelTier) {
   return providerDiverse;
 }
 
-export function rankRoutesByPersistedTaskHistory(
-  routes,
-  history,
-  taskClass,
-) {
-  if (!Array.isArray(routes) || !Array.isArray(history)) return routes;
-  const results = new Map();
-  const attemptsByRequest = new Map();
-  const failures = [];
-  for (const entry of history) {
-    if (entry?.taskClass !== taskClass) continue;
-    if (entry.kind === "result" && typeof entry.requestId === "string") {
-      results.set(entry.requestId, entry);
-      continue;
-    }
-    if (entry.kind === "route" && typeof entry.requestId === "string") {
-      const attempts = attemptsByRequest.get(entry.requestId) ?? [];
-      attempts.push(entry);
-      attemptsByRequest.set(entry.requestId, attempts);
-      continue;
-    }
-    if (entry.kind === "failure" && typeof entry.providerId === "string") {
-      failures.push(entry);
-    }
-  }
-  const providerStatistics = new Map();
-  const modelStatistics = new Map();
-  function observe(providerId, modelId, succeeded) {
-    if (typeof providerId !== "string") return;
-    const statistics =
-      typeof modelId === "string" ? modelStatistics : providerStatistics;
-    const key =
-      typeof modelId === "string"
-        ? `${providerId}\u0000${modelId}`
-        : providerId;
-    const record = statistics.get(key) ?? {
-      succeeded: 0,
-      failed: 0,
-    };
-    record[succeeded ? "succeeded" : "failed"] += 1;
-    statistics.set(key, record);
-  }
-  for (const result of results.values()) {
-    const attempts = [...(attemptsByRequest.get(result.requestId) ?? [])]
-      .sort((left, right) => left.routeAttempt - right.routeAttempt);
-    attempts.forEach((attempt, index) => {
-      const isFinal = index === attempts.length - 1;
-      observe(
-        attempt.providerId,
-        attempt.modelId,
-        isFinal &&
-          result.status === "SUCCEEDED" &&
-          attempt.providerId === result.providerId &&
-          (typeof result.modelId !== "string" ||
-            typeof attempt.modelId !== "string" ||
-            attempt.modelId === result.modelId),
-      );
-    });
-  }
-  for (const failure of failures.filter(
-    (entry) => !results.has(entry.requestId),
-  )) {
-    observe(failure.providerId, failure.modelId, false);
-  }
-  function observedFailureRate(statistics, key) {
-    const record = statistics.get(key) ?? {
-      succeeded: 0,
-      failed: 0,
-    };
-    return (
-      (record.failed * 2 + 1) /
-      (record.succeeded + record.failed * 2 + 2)
+export function diversifyProviderRoutes(routes) {
+  const remaining = [...routes];
+  const diversified = [];
+  const usedProviders = new Set();
+  while (remaining.length > 0) {
+    const unseenProviderIndex = remaining.findIndex(
+      (route) => !usedProviders.has(route.providerId),
     );
+    const index = unseenProviderIndex === -1 ? 0 : unseenProviderIndex;
+    const [route] = remaining.splice(index, 1);
+    diversified.push(route);
+    usedProviders.add(route.providerId);
   }
-  return routes
-    .map((route, baseIndex) => ({ route, baseIndex }))
-    .sort((left, right) => {
-      const leftModelKey = `${left.route.providerId}\u0000${left.route.modelId}`;
-      const rightModelKey = `${right.route.providerId}\u0000${right.route.modelId}`;
-      const leftStatistics = modelStatistics.has(leftModelKey)
-        ? [modelStatistics, leftModelKey]
-        : [providerStatistics, left.route.providerId];
-      const rightStatistics = modelStatistics.has(rightModelKey)
-        ? [modelStatistics, rightModelKey]
-        : [providerStatistics, right.route.providerId];
-      return (
-        observedFailureRate(...leftStatistics) -
-          observedFailureRate(...rightStatistics) ||
-        left.baseIndex - right.baseIndex
-      );
-    })
-    .map(({ route }) => route);
+  return diversified;
 }
 
 export function classifyModelRouteFailure(errorOrMessage) {
@@ -408,6 +335,7 @@ export function createModelGateway({
   facts,
   workspaces,
   providerRegistry,
+  modelRouter = null,
   routeHistory = () => [],
   maxProviderAttempts = 2,
   clock,
@@ -424,6 +352,11 @@ export function createModelGateway({
   }
   if (typeof routeHistory !== "function") {
     throw new ModelGatewayValidationError("routeHistory must be a function.");
+  }
+  if (modelRouter !== null && typeof modelRouter.select !== "function") {
+    throw new ModelGatewayValidationError(
+      "modelRouter must expose select() when supplied.",
+    );
   }
   const configuredProviders = providerRegistry.list();
   if (
@@ -469,10 +402,10 @@ export function createModelGateway({
   if (
     !Number.isSafeInteger(maxProviderAttempts) ||
     maxProviderAttempts < 1 ||
-    maxProviderAttempts > 3
+    maxProviderAttempts > 4
   ) {
     throw new ModelGatewayValidationError(
-      "maxProviderAttempts must be from 1 through 3.",
+      "maxProviderAttempts must be from 1 through 4.",
     );
   }
 
@@ -660,6 +593,9 @@ export function createModelGateway({
         ).length;
       const providers = providerRegistry.list();
       const selectedTier = routeTier(input.taskClass, depthLevel);
+      const taskCapabilityContract = modelTaskCapabilityContract(input.taskClass);
+      const effectiveTaskDepth =
+        depthLevel ?? taskCapabilityContract?.defaultDepth ?? 1;
       let output = null;
       let usage = { inputTokens: 0, outputTokens: 0, costUsd: 0 };
       let selectedProvider = providers[0]?.providerId ?? "unavailable";
@@ -672,28 +608,83 @@ export function createModelGateway({
           ? null
           : providerRepairMetadata(providers[0]).providerFamily;
       let failure = null;
+      let priorSafeOutputFailure = null;
       let attemptCount = 0;
-      const baseRoutedProviders = rankTaskRoutes(
-        repairRequest
-          ? providers.filter((provider) => {
-              const metadata = providerRepairMetadata(provider);
-              return metadata.maxRepairDepth >= depthLevel;
-            })
-          : providers,
-        selectedTier,
+      const fixtureOnly = providers.every(
+        (provider) => provider.fixtureOnly === true,
       );
-      const routedProviders = rankRoutesByPersistedTaskHistory(
-        baseRoutedProviders,
-        routeHistory(),
-        input.taskClass,
-      );
+      let capabilitySelection = null;
+      let baseRoutedProviders;
+      let routedProviders;
+      if (!fixtureOnly) {
+        if (modelRouter === null) {
+          throw new ModelGatewayValidationError(
+            "Live model execution requires the capability-driven Model Router.",
+          );
+        }
+        capabilitySelection = modelRouter.select({
+          taskClass: input.taskClass,
+          taskDepth: effectiveTaskDepth,
+          requiredCapabilities: [],
+          costConstraints: {
+            maximumTotalPerMillionTokensUsd: null,
+          },
+          userPreferences: {
+            priority: RoutingPriority.LOW_COST,
+            preferredLatencyProfile: preferredLatencyByTier[selectedTier],
+          },
+        });
+        const providersByRoute = new Map(
+          providers.map((provider) => [
+            `${provider.providerId}\u0000${providerRepairMetadata(provider).modelId}`,
+            provider,
+          ]),
+        );
+        baseRoutedProviders = diversifyProviderRoutes(capabilitySelection.candidateModels
+          .map((candidate) =>
+            providersByRoute.get(
+              `${candidate.providerId}\u0000${candidate.modelId}`,
+            ),
+          )
+          .filter(Boolean)
+          .filter((provider) =>
+            !repairRequest ||
+            providerRepairMetadata(provider).maxRepairDepth >= effectiveTaskDepth,
+          ));
+        routedProviders = baseRoutedProviders;
+      } else {
+        baseRoutedProviders = rankTaskRoutes(
+          repairRequest
+            ? providers.filter((provider) => {
+                const metadata = providerRepairMetadata(provider);
+                return metadata.maxRepairDepth >= depthLevel;
+              })
+            : providers,
+          selectedTier,
+        );
+        routedProviders = rankRoutesByPersistedTaskHistory(
+          baseRoutedProviders,
+          routeHistory(),
+          input.taskClass,
+        );
+      }
       const historyAdjusted =
         routedProviders[0]?.providerId !==
         baseRoutedProviders[0]?.providerId;
+      const eligibleProviderCount = new Set(
+        routedProviders.map((provider) => provider.providerId),
+      ).size;
+      const attemptedProviderIds = new Set();
+      let lastAttemptedProvider = null;
       for (let attempt = 0; attempt < maxProviderAttempts; attempt += 1) {
         attemptCount += 1;
-        const provider =
-          routedProviders[attempt % Math.max(routedProviders.length, 1)];
+        const repeatFinalValidationRoute =
+          priorSafeOutputFailure !== null &&
+          lastAttemptedProvider !== null &&
+          attemptedProviderIds.size >= eligibleProviderCount;
+        const provider = repeatFinalValidationRoute
+          ? lastAttemptedProvider
+          : routedProviders[attempt % Math.max(routedProviders.length, 1)];
         if (provider === undefined) {
           failure = new ModelProviderError(
             "No production model provider is configured.",
@@ -701,6 +692,8 @@ export function createModelGateway({
           break;
         }
         selectedProvider = provider.providerId;
+        attemptedProviderIds.add(provider.providerId);
+        lastAttemptedProvider = provider;
         const selectedMetadata = providerRepairMetadata(provider);
         selectedModelId = selectedMetadata.modelId;
         selectedProviderFamily = selectedMetadata.providerFamily;
@@ -708,7 +701,8 @@ export function createModelGateway({
         const routeTimestamp = clock();
         const effectiveRoutingReason =
           routingReason ??
-          `${selectedTier} task prefers ${preferredLatencyByTier[selectedTier]} models; provider health and capability ranking selected this route.${historyAdjusted ? " Persisted outcomes for this task class moved a repeatedly successful live provider ahead of routes with recent failures." : ""}`;
+          capabilitySelection?.rationale.join(" ") ??
+          `${selectedTier} fixture task prefers ${preferredLatencyByTier[selectedTier]} models.${historyAdjusted ? " Persisted outcomes for this task class moved a repeatedly successful fixture provider ahead of routes with recent failures." : ""}`;
         const routeEvidence = evidence.capture({
           evidenceId: `${input.requestId}.route-${routeAttempt}`,
           missionId: input.missionId,
@@ -736,6 +730,10 @@ export function createModelGateway({
             depthLevel,
             routingReason: effectiveRoutingReason,
             routeAttempt,
+            requiredCapabilities:
+              capabilitySelection?.requiredCapabilities ??
+              taskCapabilityContract?.requiredCapabilities ?? [],
+            candidateModels: capabilitySelection?.candidateModels ?? [],
           },
         });
         facts.recordResultFact({
@@ -764,11 +762,17 @@ export function createModelGateway({
               requestId: input.requestId,
               missionId: input.missionId,
               workUnitId: input.workUnitId,
-              purpose: input.purpose.trim(),
+              purpose:
+                priorSafeOutputFailure === null
+                  ? input.purpose.trim()
+                  : `${input.purpose.trim()}\n\nA prior eligible route returned output that failed deterministic admission: ${priorSafeOutputFailure} Return a fresh complete object that corrects this defect without omitting or weakening any requirement.`,
               taskClass: input.taskClass,
               modelTier: selectedTier,
               depthLevel,
               routingReason: effectiveRoutingReason,
+              requiredCapabilities:
+                capabilitySelection?.requiredCapabilities ??
+                taskCapabilityContract?.requiredCapabilities ?? [],
               contextReferences,
               expectedStructuredOutputSchema: schema,
             },
@@ -804,6 +808,16 @@ export function createModelGateway({
               : new ModelProviderError("Model provider call failed.", {
                   cause: error,
                 });
+          if (
+            failure instanceof ModelOutputValidationError ||
+            /returned (?:malformed structured output|no output text)/iu.test(
+              failure.message,
+            )
+          ) {
+            priorSafeOutputFailure = failure.message.slice(0, 500);
+          } else {
+            priorSafeOutputFailure = null;
+          }
           if (
             input.sensitiveValues.some((secret) =>
               failure.message.includes(secret),

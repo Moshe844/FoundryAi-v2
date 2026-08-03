@@ -8,8 +8,9 @@
     ".": "./src/index.js"
   },
   "scripts": {
-    "test": "node --test --test-concurrency=1",
-    "test:coverage": "node --test --test-concurrency=1 --experimental-test-coverage"
+    "test": "node --test --test-concurrency=1 --test-name-pattern=\"^(?!three clean real)\" \"test/*.test.js\"",
+    "test:certification": "node --test --test-concurrency=1 --test-name-pattern=\"^three clean real\" test/milestone-8.test.js test/milestone-9.test.js",
+    "test:coverage": "node --test --test-concurrency=1 --experimental-test-coverage --test-name-pattern=\"^(?!three clean real)\" \"test/*.test.js\""
   },
   "engines": {
     "node": ">=22"

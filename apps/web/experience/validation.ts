@@ -68,6 +68,31 @@ function textList(value: unknown, path: string): string[] {
   return list(value, path, text);
 }
 
+function designVisualSystem(value: unknown, path: string) {
+  const input = object(value, path);
+  const colors = object(input.colorRoles, `${path}.colorRoles`);
+  return {
+    layoutType: text(input.layoutType, `${path}.layoutType`),
+    navigationType: text(input.navigationType, `${path}.navigationType`),
+    typographyCategory: text(input.typographyCategory, `${path}.typographyCategory`),
+    density: text(input.density, `${path}.density`),
+    spacingProfile: text(input.spacingProfile, `${path}.spacingProfile`),
+    surfaceTreatment: text(input.surfaceTreatment, `${path}.surfaceTreatment`),
+    contentEmphasis: text(input.contentEmphasis, `${path}.contentEmphasis`),
+    imageStrategy: text(input.imageStrategy, `${path}.imageStrategy`),
+    interactionModel: text(input.interactionModel, `${path}.interactionModel`),
+    buttonTreatment: text(input.buttonTreatment, `${path}.buttonTreatment`),
+    colorRoles: {
+      background: text(colors.background, `${path}.colorRoles.background`),
+      surface: text(colors.surface, `${path}.colorRoles.surface`),
+      primary: text(colors.primary, `${path}.colorRoles.primary`),
+      accent: text(colors.accent, `${path}.colorRoles.accent`),
+      text: text(colors.text, `${path}.colorRoles.text`),
+    },
+    sampleLabels: textList(input.sampleLabels, `${path}.sampleLabels`),
+  };
+}
+
 function projectProfile(value: unknown, path: string): ProjectProfile {
   const input = object(value, path);
   return {
@@ -258,6 +283,10 @@ function projectProfile(value: unknown, path: string): ProjectProfile {
                         colorMood: text(preview.colorMood, `${itemPath}.preview.colorMood`),
                         hierarchy: text(preview.hierarchy, `${itemPath}.preview.hierarchy`),
                       },
+                visualSystem:
+                  alternative.visualSystem === undefined
+                    ? undefined
+                    : designVisualSystem(alternative.visualSystem, `${itemPath}.visualSystem`),
                 recommended: bool(
                   alternative.recommended,
                   `${itemPath}.recommended`,
@@ -413,6 +442,172 @@ function modelRoute(value: unknown, path: string): ModelRoute {
   };
 }
 
+function productTypeDiscovery(
+  value: unknown,
+  path: string,
+): NonNullable<Mission["productTypeDiscovery"]> {
+  const input = object(value, path);
+  const interpretation = object(
+    input.interpretation,
+    `${path}.interpretation`,
+  );
+  const interpretationConfidence = nullableNumber(
+    interpretation.confidence,
+    `${path}.interpretation.confidence`,
+  );
+  if (
+    interpretationConfidence === null ||
+    interpretationConfidence < 0 ||
+    interpretationConfidence > 1
+  ) {
+    return fail(`${path}.interpretation.confidence`, "a number from 0 to 1");
+  }
+  const schemaVersion = integer(input.schemaVersion, `${path}.schemaVersion`);
+  if (schemaVersion !== 1) return fail(`${path}.schemaVersion`, "1");
+  const subtypes = list(input.subtypes, `${path}.subtypes`, (entry, itemPath) => {
+    const subtype = object(entry, itemPath);
+    const confidence = object(subtype.confidence, `${itemPath}.confidence`);
+    const score = nullableNumber(confidence.score, `${itemPath}.confidence.score`);
+    if (score === null || score < 0 || score > 1) {
+      return fail(`${itemPath}.confidence.score`, "a number from 0 to 1");
+    }
+    const deliveryPlatform = text(
+      subtype.deliveryPlatform,
+      `${itemPath}.deliveryPlatform`,
+    );
+    if (deliveryPlatform !== "web") {
+      return fail(`${itemPath}.deliveryPlatform`, '"web"');
+    }
+    return {
+      optionId: text(subtype.optionId, `${itemPath}.optionId`),
+      title: text(subtype.title, `${itemPath}.title`),
+      explanation: text(subtype.explanation, `${itemPath}.explanation`),
+      likelyUsers: textList(subtype.likelyUsers, `${itemPath}.likelyUsers`),
+      likelyPrimaryOutcome: text(
+        subtype.likelyPrimaryOutcome,
+        `${itemPath}.likelyPrimaryOutcome`,
+      ),
+      whyItMayFit: text(subtype.whyItMayFit, `${itemPath}.whyItMayFit`),
+      confidence: {
+        score,
+        reason: text(confidence.reason, `${itemPath}.confidence.reason`),
+      },
+      recommended: bool(subtype.recommended, `${itemPath}.recommended`),
+      canCombine: bool(subtype.canCombine, `${itemPath}.canCombine`),
+      combinationNote: text(
+        subtype.combinationNote,
+        `${itemPath}.combinationNote`,
+      ),
+      compatibilityTags: Array.isArray(subtype.compatibilityTags)
+        ? textList(subtype.compatibilityTags, `${itemPath}.compatibilityTags`)
+        : [
+            subtype.canCombine === true
+              ? "legacy-combinable"
+              : `legacy-standalone-${text(subtype.optionId, `${itemPath}.optionId`)}`,
+          ],
+      deliveryPlatform: "web" as const,
+      requiredCapabilities: textList(
+        subtype.requiredCapabilities,
+        `${itemPath}.requiredCapabilities`,
+      ),
+    };
+  });
+  if (subtypes.length < 5 || subtypes.length > 10) {
+    return fail(`${path}.subtypes`, "5-10 subtype choices");
+  }
+  return {
+    schemaVersion: 1,
+    originalRequest: text(input.originalRequest, `${path}.originalRequest`),
+    context: textList(input.context, `${path}.context`),
+    interpretation: {
+      summary: text(interpretation.summary, `${path}.interpretation.summary`),
+      reasoning: text(interpretation.reasoning, `${path}.interpretation.reasoning`),
+      confidence: interpretationConfidence,
+    },
+    subtypes,
+  };
+}
+
+function productBlueprint(
+  value: unknown,
+  path: string,
+): NonNullable<Mission["productBlueprint"]> {
+  const input = object(value, path);
+  const version = integer(input.schemaVersion, `${path}.schemaVersion`);
+  if (version !== 1) return fail(`${path}.schemaVersion`, "1");
+  const states = object(input.experienceStates, `${path}.experienceStates`);
+  const design = object(input.designSpecification, `${path}.designSpecification`);
+  const stack = object(input.certifiedStackCapability, `${path}.certifiedStackCapability`);
+  const qualityInput = object(input.quality, `${path}.quality`);
+  const quality = Object.fromEntries(
+    Object.entries(qualityInput).map(([key, value]) => {
+      const score = nullableNumber(value, `${path}.quality.${key}`);
+      if (score === null || score < 0 || score > 1) {
+        return fail(`${path}.quality.${key}`, "a number from 0 to 1");
+      }
+      return [key, score];
+    }),
+  );
+  const verificationPlan = list(
+    input.verificationPlan,
+    `${path}.verificationPlan`,
+    (entry, itemPath) => {
+      const check = object(entry, itemPath);
+      return {
+        sourceRequirement: text(check.sourceRequirement, `${itemPath}.sourceRequirement`),
+        observableOutcome: text(check.observableOutcome, `${itemPath}.observableOutcome`),
+        acceptanceMethod: text(check.acceptanceMethod, `${itemPath}.acceptanceMethod`),
+      };
+    },
+  );
+  return {
+    schemaVersion: 1,
+    missionId: text(input.missionId, `${path}.missionId`),
+    blueprintVersion: integer(input.blueprintVersion, `${path}.blueprintVersion`),
+    originalCustomerRequest: text(input.originalCustomerRequest, `${path}.originalCustomerRequest`),
+    exactProductType: text(input.exactProductType, `${path}.exactProductType`),
+    selectedSubtypes: textList(input.selectedSubtypes, `${path}.selectedSubtypes`),
+    productName: text(input.productName, `${path}.productName`),
+    oneSentenceOutcome: text(input.oneSentenceOutcome, `${path}.oneSentenceOutcome`),
+    intendedUsers: textList(input.intendedUsers, `${path}.intendedUsers`),
+    businessGoal: text(input.businessGoal, `${path}.businessGoal`),
+    primaryWorkflows: textList(input.primaryWorkflows, `${path}.primaryWorkflows`),
+    supportingWorkflows: textList(input.supportingWorkflows, `${path}.supportingWorkflows`),
+    requiredSurfaces: textList(input.requiredSurfaces, `${path}.requiredSurfaces`),
+    navigationApproach: text(input.navigationApproach, `${path}.navigationApproach`),
+    contentStructure: text(input.contentStructure, `${path}.contentStructure`),
+    administrationNeeds: textList(input.administrationNeeds, `${path}.administrationNeeds`),
+    securityConsiderations: textList(input.securityConsiderations, `${path}.securityConsiderations`),
+    dataAndPersistenceNeeds: textList(input.dataAndPersistenceNeeds, `${path}.dataAndPersistenceNeeds`),
+    responsivePriorities: text(input.responsivePriorities, `${path}.responsivePriorities`),
+    accessibilityNeeds: textList(input.accessibilityNeeds, `${path}.accessibilityNeeds`),
+    experienceStates: {
+      empty: textList(states.empty, `${path}.experienceStates.empty`),
+      loading: textList(states.loading, `${path}.experienceStates.loading`),
+      error: textList(states.error, `${path}.experienceStates.error`),
+      success: textList(states.success, `${path}.experienceStates.success`),
+    },
+    includedNow: textList(input.includedNow, `${path}.includedNow`),
+    excludedFromV1: textList(input.excludedFromV1, `${path}.excludedFromV1`),
+    recommendedLater: textList(input.recommendedLater, `${path}.recommendedLater`),
+    designSpecification: design,
+    selectedFeatures: textList(input.selectedFeatures, `${path}.selectedFeatures`),
+    rejectedRecommendations: textList(input.rejectedRecommendations, `${path}.rejectedRecommendations`),
+    foundryDecisions: textList(input.foundryDecisions, `${path}.foundryDecisions`),
+    customerDecisions: textList(input.customerDecisions, `${path}.customerDecisions`),
+    customCustomerMessages: textList(input.customCustomerMessages, `${path}.customCustomerMessages`),
+    businessRules: textList(input.businessRules, `${path}.businessRules`),
+    integrations: textList(input.integrations, `${path}.integrations`),
+    assumptions: textList(input.assumptions, `${path}.assumptions`),
+    architecture: textList(input.architecture, `${path}.architecture`),
+    certifiedStackCapability: stack,
+    acceptanceRequirements: textList(input.acceptanceRequirements, `${path}.acceptanceRequirements`),
+    verificationPlan,
+    quality,
+    integrityHash: text(input.integrityHash, `${path}.integrityHash`),
+  };
+}
+
 export function validateMission(value: unknown, path = "mission"): Mission {
   const input = object(value, path);
   const currentActivity =
@@ -423,6 +618,17 @@ export function validateMission(value: unknown, path = "mission"): Mission {
     input.profile === null
       ? null
       : projectProfile(input.profile, `${path}.profile`);
+  const productDiscovery =
+    input.productTypeDiscovery === null
+      ? null
+      : productTypeDiscovery(
+          input.productTypeDiscovery,
+          `${path}.productTypeDiscovery`,
+        );
+  const blueprint =
+    input.productBlueprint === null || input.productBlueprint === undefined
+      ? null
+      : productBlueprint(input.productBlueprint, `${path}.productBlueprint`);
   const contract =
     input.contract === null
       ? null
@@ -805,6 +1011,13 @@ export function validateMission(value: unknown, path = "mission"): Mission {
     "integration",
     "limitation",
     "acceptance",
+    "design-preference",
+    "workflow-change",
+    "feature-request",
+    "content-requirement",
+    "acceptance-expectation",
+    "correction",
+    "other",
   ]);
   const discoveryRaw =
     input.discoveryConversation === undefined
@@ -837,6 +1050,14 @@ export function validateMission(value: unknown, path = "mission"): Mission {
           messageId: text(message.messageId, `${itemPath}.messageId`),
           kind: kind as Mission["discoveryConversation"]["messages"][number]["kind"],
           text: text(message.text, `${itemPath}.text`),
+          interpretation:
+            message.interpretation === undefined
+              ? `Foundry treated this as ${kind.replaceAll("-", " ")}.`
+              : text(message.interpretation, `${itemPath}.interpretation`),
+          affectedSections:
+            message.affectedSections === undefined
+              ? []
+              : textList(message.affectedSections, `${itemPath}.affectedSections`),
           profileVersion: integer(
             message.profileVersion,
             `${itemPath}.profileVersion`,
@@ -861,6 +1082,8 @@ export function validateMission(value: unknown, path = "mission"): Mission {
     intent: text(input.intent, `${path}.intent`),
     state: text(input.state, `${path}.state`),
     profile,
+    productTypeDiscovery: productDiscovery,
+    productBlueprint: blueprint,
     proposalConfirmed: bool(
       input.proposalConfirmed,
       `${path}.proposalConfirmed`,

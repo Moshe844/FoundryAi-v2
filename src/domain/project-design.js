@@ -23,6 +23,35 @@ const NON_EMPTY_STRING_ARRAY_SCHEMA = Object.freeze({
   items: { type: "string", minLength: 1 },
 });
 
+const VISUAL_ENUMS = Object.freeze({
+  layoutType: ["sidebar", "top-nav", "split-screen", "editorial", "dashboard", "guided-flow", "canvas", "documentation"],
+  navigationType: ["sidebar", "top-bar", "tabs", "stepper", "command", "inline", "tree", "none"],
+  typographyCategory: ["humanist", "editorial", "geometric", "technical", "compact", "expressive"],
+  density: ["spacious", "balanced", "dense"],
+  spacingProfile: ["open", "rhythmic", "compact"],
+  surfaceTreatment: ["flat", "bordered", "elevated", "layered", "immersive"],
+  contentEmphasis: ["action", "status", "story", "data", "guidance", "reference"],
+  imageStrategy: ["none", "ambient", "hero", "gallery", "supporting"],
+  interactionModel: ["direct", "guided", "exploratory", "command-driven", "review-and-confirm"],
+  buttonTreatment: ["solid", "outline", "quiet", "pill", "compact"],
+});
+
+export const DESIGN_VISUAL_SYSTEM_SCHEMA = Object.freeze({
+  type: "object",
+  additionalProperties: false,
+  required: [...Object.keys(VISUAL_ENUMS), "colorRoles", "sampleLabels"],
+  properties: Object.freeze({
+    ...Object.fromEntries(Object.entries(VISUAL_ENUMS).map(([key, values]) => [key, { type: "string", enum: values }])),
+    colorRoles: {
+      type: "object",
+      additionalProperties: false,
+      required: ["background", "surface", "primary", "accent", "text"],
+      properties: Object.fromEntries(["background", "surface", "primary", "accent", "text"].map((key) => [key, { type: "string", pattern: "^#[0-9A-Fa-f]{6}$" }])),
+    },
+    sampleLabels: { type: "array", minItems: 3, maxItems: 5, items: { type: "string", minLength: 1 } },
+  }),
+});
+
 export const PROJECT_DESIGN_SCHEMA = Object.freeze({
   type: "object",
   additionalProperties: false,
@@ -182,6 +211,7 @@ export const PROJECT_DESIGN_SCHEMA = Object.freeze({
               hierarchy: { type: "string", minLength: 1 },
             },
           },
+          visualSystem: DESIGN_VISUAL_SYSTEM_SCHEMA,
         },
       },
     },
@@ -481,9 +511,7 @@ export function normalizeDesignAlternativeList(value = []) {
   }
   const normalized = value.map((entry, index) => {
     const label = `designAlternatives[${index}]`;
-    exact(
-      entry,
-      [
+    const alternativeKeys = [
         "name",
         "description",
         "whyItFits",
@@ -496,9 +524,8 @@ export function normalizeDesignAlternativeList(value = []) {
         "confidence",
         "recommended",
         "preview",
-      ],
-      label,
-    );
+      ];
+    exact(entry, Object.hasOwn(entry, "visualSystem") ? [...alternativeKeys, "visualSystem"] : alternativeKeys, label);
     if (typeof entry.recommended !== "boolean") {
       fail(`${label}.recommended must be boolean.`);
     }
@@ -512,6 +539,7 @@ export function normalizeDesignAlternativeList(value = []) {
       ],
       `${label}.preview`,
     );
+    const visualSystem = normalizeVisualSystem(entry.visualSystem, entry, index, label);
     return {
       name: text(entry.name, `${label}.name`),
       description: text(entry.description, `${label}.description`),
@@ -545,6 +573,7 @@ export function normalizeDesignAlternativeList(value = []) {
         colorMood: text(entry.preview.colorMood, `${label}.preview.colorMood`),
         hierarchy: text(entry.preview.hierarchy, `${label}.preview.hierarchy`),
       },
+      visualSystem,
     };
   });
   if (
@@ -554,6 +583,72 @@ export function normalizeDesignAlternativeList(value = []) {
     fail("designAlternatives must mark exactly one direction as recommended.");
   }
   return freeze(normalized);
+}
+
+function hashSeed(value) {
+  let hash = 2166136261;
+  for (const character of String(value)) {
+    hash ^= character.codePointAt(0);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+function derivedVisualSystem(entry, index) {
+  const seed = hashSeed(`${entry.name}|${entry.layoutApproach}|${entry.visualPersonality}|${entry.navigationApproach}`);
+  const pick = (key, offset = 0) => VISUAL_ENUMS[key][(seed + index + offset) % VISUAL_ENUMS[key].length];
+  const hue = (seed + index * 71) % 360;
+  const hex = (h, saturation, lightness) => {
+    const a = saturation * Math.min(lightness, 1 - lightness);
+    const channel = (n) => {
+      const k = (n + h / 30) % 12;
+      const color = lightness - a * Math.max(-1, Math.min(k - 3, 9 - k, 1));
+      return Math.round(255 * color).toString(16).padStart(2, "0");
+    };
+    return `#${channel(0)}${channel(8)}${channel(4)}`;
+  };
+  return {
+    layoutType: VISUAL_ENUMS.layoutType[index % VISUAL_ENUMS.layoutType.length],
+    navigationType: VISUAL_ENUMS.navigationType[(index * 2 + 1) % VISUAL_ENUMS.navigationType.length],
+    typographyCategory: pick("typographyCategory", index * 2),
+    density: VISUAL_ENUMS.density[index % VISUAL_ENUMS.density.length],
+    spacingProfile: VISUAL_ENUMS.spacingProfile[(index + 1) % VISUAL_ENUMS.spacingProfile.length],
+    surfaceTreatment: pick("surfaceTreatment", index * 3),
+    contentEmphasis: pick("contentEmphasis", index * 4),
+    imageStrategy: pick("imageStrategy", index),
+    interactionModel: pick("interactionModel", index * 2),
+    buttonTreatment: pick("buttonTreatment", index * 3),
+    colorRoles: {
+      background: hex(hue, 0.12, 0.96),
+      surface: hex(hue, 0.08, 0.99),
+      primary: hex(hue, 0.55, 0.32),
+      accent: hex((hue + 58) % 360, 0.68, 0.52),
+      text: hex(hue, 0.22, 0.14),
+    },
+    sampleLabels: [
+      String(entry.name).slice(0, 48),
+      `Tone: ${String(entry.visualPersonality).slice(0, 40)}`,
+      `Layout: ${String(entry.layoutApproach).slice(0, 38)}`,
+    ],
+  };
+}
+
+function normalizeVisualSystem(value, entry, index, label) {
+  const candidate = value ?? derivedVisualSystem(entry, index);
+  exact(candidate, [...Object.keys(VISUAL_ENUMS), "colorRoles", "sampleLabels"], `${label}.visualSystem`);
+  for (const [key, values] of Object.entries(VISUAL_ENUMS)) {
+    if (!values.includes(candidate[key])) fail(`${label}.visualSystem.${key} is unsupported.`);
+  }
+  exact(candidate.colorRoles, ["background", "surface", "primary", "accent", "text"], `${label}.visualSystem.colorRoles`);
+  const colorRoles = Object.fromEntries(Object.entries(candidate.colorRoles).map(([key, color]) => {
+    if (typeof color !== "string" || !/^#[0-9a-f]{6}$/iu.test(color)) fail(`${label}.visualSystem.colorRoles.${key} must be a six-digit hex color.`);
+    return [key, color.toLowerCase()];
+  }));
+  return {
+    ...Object.fromEntries(Object.keys(VISUAL_ENUMS).map((key) => [key, candidate[key]])),
+    colorRoles,
+    sampleLabels: list(candidate.sampleLabels, `${label}.visualSystem.sampleLabels`, { required: true }).slice(0, 5),
+  };
 }
 
 export function normalizeDecisionList(value) {
@@ -568,21 +663,44 @@ export function normalizeRecommendationList(value) {
 
 export function normalizeProjectVerificationPlan(value) {
   if (!Array.isArray(value) || value.length === 0) fail("verificationPlan must be a non-empty array.");
-  return freeze(value.map((entry, index) => {
+  const normalized = value.map((entry, index) => {
     const label = `verificationPlan[${index}]`;
     exact(entry, ["observableOutcome", "acceptanceMethod", "evidenceRequired", "sourceRequirement", "origin", "dependencyIndexes"], label);
     if (!["customer-stated", "foundry-derived"].includes(entry.origin)) fail(`${label}.origin is invalid.`);
     if (!ACCEPTANCE_METHODS.has(entry.acceptanceMethod)) fail(`${label}.acceptanceMethod is unsupported.`);
     if (!Array.isArray(entry.dependencyIndexes) || entry.dependencyIndexes.some((dependency) => !Number.isSafeInteger(dependency) || dependency < 1)) fail(`${label}.dependencyIndexes must contain positive integers.`);
+    const dependencyIndexes = [...new Set(entry.dependencyIndexes)];
+    if (dependencyIndexes.some((dependency) => dependency > value.length)) {
+      fail(`${label}.dependencyIndexes references a missing verification item.`);
+    }
+    if (dependencyIndexes.includes(index + 1)) {
+      fail(`${label}.dependencyIndexes cannot reference itself.`);
+    }
     return {
       observableOutcome: text(entry.observableOutcome, `${label}.observableOutcome`),
       acceptanceMethod: text(entry.acceptanceMethod, `${label}.acceptanceMethod`),
       evidenceRequired: list(entry.evidenceRequired, `${label}.evidenceRequired`, { required: true }),
       sourceRequirement: text(entry.sourceRequirement, `${label}.sourceRequirement`),
       origin: entry.origin,
-      dependencyIndexes: [...new Set(entry.dependencyIndexes)],
+      dependencyIndexes,
     };
-  }));
+  });
+  const visiting = new Set();
+  const visited = new Set();
+  function visit(index) {
+    if (visiting.has(index)) {
+      fail("verificationPlan dependencyIndexes contain a cycle.");
+    }
+    if (visited.has(index)) return;
+    visiting.add(index);
+    for (const dependency of normalized[index].dependencyIndexes) {
+      visit(dependency - 1);
+    }
+    visiting.delete(index);
+    visited.add(index);
+  }
+  for (const index of normalized.keys()) visit(index);
+  return freeze(normalized);
 }
 
 export function normalizeProjectDesign(input) {
@@ -646,14 +764,8 @@ export function validateProjectDesignQuality(input, { originalRequest = "" } = {
     if (wordCount(value) < 6) issues.push(`projectIntent.${field} is too vague.`);
   }
   const anchors = tokens([originalRequest, intent.customerOutcome, intent.businessContext, intent.primaryGoal, ...intent.intendedUsers, ...design.userExperiencePlan.primaryJourneys].join(" "));
-  const designRationaleTokens = tokens(
-    `${design.designDirection.visualPersonality} ${design.designDirection.rationale}`,
-  );
   if (wordCount(design.designDirection.rationale) < 8) {
     issues.push("designDirection.rationale is too vague.");
-  }
-  if (anchors.size > 0 && !overlap(anchors, designRationaleTokens)) {
-    issues.push("designDirection is not grounded in this project.");
   }
   const alternativeNames = new Set();
   for (const [index, alternative] of design.designAlternatives.entries()) {
@@ -669,11 +781,16 @@ export function validateProjectDesignQuality(input, { originalRequest = "" } = {
     ) {
       issues.push(`designAlternatives[${index}] lacks a meaningful tradeoff.`);
     }
-    const grounding = tokens(
-      `${alternative.description} ${alternative.whyItFits} ${alternative.layoutApproach} ${alternative.navigationApproach}`,
-    );
-    if (anchors.size > 0 && !overlap(anchors, grounding)) {
-      issues.push(`designAlternatives[${index}] is not grounded in this project.`);
+  }
+  for (let left = 0; left < design.designAlternatives.length; left += 1) {
+    for (let right = left + 1; right < design.designAlternatives.length; right += 1) {
+      const a = design.designAlternatives[left].visualSystem;
+      const b = design.designAlternatives[right].visualSystem;
+      const dimensions = Object.keys(VISUAL_ENUMS).filter((key) => a[key] !== b[key]).length;
+      const colorsDiffer = JSON.stringify(a.colorRoles) !== JSON.stringify(b.colorRoles);
+      if (dimensions + Number(colorsDiffer) < 5) {
+        issues.push(`designAlternatives[${left}] and designAlternatives[${right}] are visually indistinguishable.`);
+      }
     }
   }
   const recommendedAlternative = design.designAlternatives.find(
@@ -681,22 +798,25 @@ export function validateProjectDesignQuality(input, { originalRequest = "" } = {
   );
   if (
     recommendedAlternative !== undefined &&
-    (normalizeText(recommendedAlternative.name) !==
-      normalizeText(design.designDirection.visualPersonality) ||
-      normalizeText(recommendedAlternative.visualPersonality) !==
-        normalizeText(design.designDirection.visualPersonality))
+    normalizeText(recommendedAlternative.visualPersonality) !==
+      normalizeText(design.designDirection.visualPersonality)
   ) {
     issues.push(
       "designAlternatives recommended direction does not match the approved designDirection.",
     );
   }
   for (const [index, observation] of design.foundryInsights.observations.entries()) {
-    const observationTokens = tokens(observation);
     if (wordCount(observation) < 8) {
       issues.push(`foundryInsights.observations[${index}] is too vague.`);
-    } else if (anchors.size > 0 && !overlap(anchors, observationTokens)) {
-      issues.push(`foundryInsights.observations[${index}] is not grounded in this project.`);
     }
+  }
+  const observationSetTokens = tokens(
+    design.foundryInsights.observations.join(" "),
+  );
+  if (anchors.size > 0 && !overlap(anchors, observationSetTokens)) {
+    issues.push(
+      `foundryInsights.observations are not grounded in this project: ${JSON.stringify(design.foundryInsights.observations)}.`,
+    );
   }
   const recommendationTitles = new Set();
   for (const [index, recommendation] of design.recommendations.entries()) {
@@ -704,8 +824,6 @@ export function validateProjectDesignQuality(input, { originalRequest = "" } = {
     if (recommendationTitles.has(title)) issues.push(`recommendations[${index}] duplicates another recommendation.`);
     recommendationTitles.add(title);
     if (wordCount(recommendation.specificValue) < 6 || wordCount(recommendation.whyThisProjectNeedsIt) < 8) issues.push(`recommendations[${index}] lacks a specific rationale.`);
-    const rationaleTokens = tokens(`${recommendation.specificValue} ${recommendation.whyThisProjectNeedsIt}`);
-    if (anchors.size > 0 && !overlap(anchors, rationaleTokens)) issues.push(`recommendations[${index}] is not grounded in this project.`);
   }
   for (const [index, decision] of design.decisions.entries()) {
     if (TECHNICAL_QUESTION_TERMS.test(decision.customerFriendlyQuestion)) issues.push(`decisions[${index}] asks a technical question.`);

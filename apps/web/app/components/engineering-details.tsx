@@ -6,6 +6,28 @@ import type { Mission } from "../../experience/contracts";
 
 const ACTIVITY_WINDOW = 200;
 
+type ActivityGroup = {
+  item: Mission["activities"][number];
+  count: number;
+};
+
+function groupedActivityRecords(mission: Mission): ActivityGroup[] {
+  const groups: ActivityGroup[] = [];
+  const bySignature = new Map<string, ActivityGroup>();
+  for (const item of [...mission.activities].reverse()) {
+    const signature = JSON.stringify([item.kind, item.title, item.detail]);
+    const existing = bySignature.get(signature);
+    if (existing === undefined) {
+      const group = { item, count: 1 };
+      bySignature.set(signature, group);
+      groups.push(group);
+    } else {
+      existing.count += 1;
+    }
+  }
+  return groups;
+}
+
 function Chevron() {
   return (
     <svg
@@ -69,7 +91,8 @@ export function EngineeringDetails({ mission }: { mission: Mission }) {
       window.localStorage.getItem(storageKey) === "open",
   );
   const [activityLimit, setActivityLimit] = useState(ACTIVITY_WINDOW);
-  const activities = [...mission.activities].reverse();
+  const activities = groupedActivityRecords(mission);
+  const activityRecordCount = mission.activities.length;
   const metrics = mission.executionMetrics;
 
   return (
@@ -85,7 +108,9 @@ export function EngineeringDetails({ mission }: { mission: Mission }) {
       <summary>
         <Chevron />
         Engineering details
-        {activities.length > 0 ? ` · ${activities.length} records` : ""}
+        {activityRecordCount > 0
+          ? ` · ${activityRecordCount} records in ${activities.length} distinct steps`
+          : ""}
       </summary>
       <div className="eng-body">
         <p className="t-body-s eng-intro">
@@ -100,10 +125,11 @@ export function EngineeringDetails({ mission }: { mission: Mission }) {
           ) : (
             <>
               <ul className="eng-activity" aria-label="Recorded activity">
-                {activities.slice(0, activityLimit).map((item) => (
+                {activities.slice(0, activityLimit).map(({ item, count }) => (
                   <li key={item.sequence}>
                     <p className="t-body-s">
                       <strong>{item.title}</strong>
+                      {count > 1 ? ` × ${count}` : ""}
                     </p>
                     <p className="t-caption ink-tertiary">
                       {item.kind} ·{" "}

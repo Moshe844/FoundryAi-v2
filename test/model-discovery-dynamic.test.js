@@ -370,6 +370,45 @@ test("Anthropic negotiates provider-reported unsupported schema keywords without
   assert.equal(requests[1].body.output_config.format.schema.properties.tags.maxItems, undefined);
 });
 
+test("Anthropic removes provider-reported unsupported array constraints", async (t) => {
+  const originalFetch = globalThis.fetch;
+  const requests = [];
+  t.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+  globalThis.fetch = async (url, options) => {
+    requests.push({ url: String(url), body: JSON.parse(options.body) });
+    return requests.length === 1
+      ? errorResponse(
+          "output_config.format.schema: For 'array' type, 'minItems' values other than 0 or 1 are not supported (got: [2, 5]).",
+        )
+      : jsonResponse({
+          content: [{ type: "text", text: '{"name":"Live constraint fallback"}' }],
+          usage: { input_tokens: 18, output_tokens: 5 },
+        });
+  };
+
+  const adapters = createLiveAiAdapters({ environment: {} });
+  const adapter = adapters.executionAdapters.find(
+    (candidate) => candidate.providerId === ProviderId.ANTHROPIC,
+  );
+  const request = structuredRequest();
+  request.schema.properties.tags = {
+    type: "array",
+    minItems: 2,
+    items: { type: "string" },
+  };
+  const result = await adapter.generate({
+    credential: "test-credential",
+    modelId: "catalog-entry-selected-at-runtime",
+    request,
+  });
+
+  assert.deepEqual(result.output, { name: "Live constraint fallback" });
+  assert.equal(requests[0].body.output_config.format.schema.properties.tags.minItems, 2);
+  assert.equal(requests[1].body.output_config.format.schema.properties.tags.minItems, undefined);
+});
+
 test("Anthropic falls back to validated JSON when its live schema grammar is too large", async (t) => {
   const originalFetch = globalThis.fetch;
   const requests = [];

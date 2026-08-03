@@ -7,7 +7,11 @@ import {
   cloneAiValue,
 } from "../domain/ai-registry.js";
 import { ModelProviderError } from "../domain/errors.js";
-import { governProviderCatalog } from "../domain/model-governance.js";
+import { ModelFamilyDefaultEligibility } from "../config/model-governance-policy.js";
+import {
+  governProviderCatalog,
+  resolveModelFamilyGovernance,
+} from "../domain/model-governance.js";
 
 const endpoints = Object.freeze({
   [ProviderId.OPENAI]: "https://api.openai.com/v1",
@@ -16,12 +20,15 @@ const endpoints = Object.freeze({
     "https://generativelanguage.googleapis.com/v1beta",
 });
 
-function modelRequestTimeoutMs(request) {
+export function modelRequestTimeoutMs(request) {
   if (request.taskClass === "FILE_GENERATION") return 300_000;
+  if (request.taskClass === "PROJECT_UNDERSTANDING") return 120_000;
   return 120_000;
 }
 
-function modelMaxOutputTokens() {
+function modelMaxOutputTokens(request) {
+  if (request.taskClass === "FILE_GENERATION") return 32_000;
+  if (request.taskClass === "PROJECT_UNDERSTANDING") return 6_000;
   return 16_000;
 }
 
@@ -108,17 +115,21 @@ function withoutJsonSchemaKeyword(value, keyword) {
 }
 
 function unsupportedJsonSchemaKeyword(message) {
-  return /property ['"](?<keyword>[A-Za-z][A-Za-z0-9]*)['"] is not supported/iu.exec(
-    String(message),
-  )?.groups?.keyword ?? null;
+  const detail = String(message);
+  return (
+    /property ['"](?<keyword>[A-Za-z][A-Za-z0-9]*)['"] is not supported/iu.exec(
+      detail,
+    )?.groups?.keyword ??
+    /for ['"](?:array|object|string|number|integer)['"] type, ['"](?<keyword>[A-Za-z][A-Za-z0-9]*)['"] values?/iu.exec(
+      detail,
+    )?.groups?.keyword ??
+    null
+  );
 }
 
-function textModelId(id) {
-  return (
-    typeof id === "string" &&
-    /^(?:gpt-|o\d|chatgpt-)/u.test(id) &&
-    !/(?:audio|image|realtime|transcribe|tts|search)/u.test(id)
-  );
+function familyPotentiallySupportsEngineering(providerId, modelId, raw) {
+  return resolveModelFamilyGovernance({ providerId, modelId, raw })
+    .defaultEligibility === ModelFamilyDefaultEligibility.CONDITIONAL;
 }
 
 const DISCOVERED_TEXT_SCORE = 80;
@@ -184,7 +195,11 @@ function catalogueReleaseValue(model) {
 }
 
 function openAiManifest(model, qualityScore = DISCOVERED_TEXT_SCORE) {
-  const eligible = textModelId(model.id);
+  const eligible = familyPotentiallySupportsEngineering(
+    ProviderId.OPENAI,
+    model.id,
+    model,
+  );
   return {
     modelId: model.id,
     providerId: ProviderId.OPENAI,
@@ -216,6 +231,11 @@ function openAiManifest(model, qualityScore = DISCOVERED_TEXT_SCORE) {
 function anthropicManifest(model, qualityScore = DISCOVERED_TEXT_SCORE) {
   const structured =
     model.capabilities?.structured_outputs?.supported === true;
+  const familyEligible = familyPotentiallySupportsEngineering(
+    ProviderId.ANTHROPIC,
+    model.id,
+    model,
+  );
   const reasoning = model.capabilities?.thinking?.supported === true;
   const vision = model.capabilities?.image_input?.supported === true;
   const displayName = model.display_name ?? model.id;
@@ -223,12 +243,12 @@ function anthropicManifest(model, qualityScore = DISCOVERED_TEXT_SCORE) {
     modelId: model.id,
     providerId: ProviderId.ANTHROPIC,
     displayName,
-    status: structured ? ModelStatus.AVAILABLE : ModelStatus.UNAVAILABLE,
-    enabled: structured,
+    status: structured && familyEligible ? ModelStatus.AVAILABLE : ModelStatus.UNAVAILABLE,
+    enabled: structured && familyEligible,
     contextWindow: Math.max(1, model.max_input_tokens ?? 1),
     supportsVision: vision,
     supportsToolCalling: false,
-    supportsStructuredOutput: structured,
+    supportsStructuredOutput: structured && familyEligible,
     supportsReasoning: reasoning,
     supportsStreaming: true,
     latencyProfile: LatencyProfile.BALANCED,
@@ -237,8 +257,8 @@ function anthropicManifest(model, qualityScore = DISCOVERED_TEXT_SCORE) {
       outputPerMillionTokensUsd: 0,
     },
     capabilities: discoveredCapabilities({
-      eligible: structured,
-      structured,
+      eligible: structured && familyEligible,
+      structured: structured && familyEligible,
       reasoning,
       vision,
       largeContext: (model.max_input_tokens ?? 0) >= 100_000,
@@ -254,8 +274,13 @@ function geminiManifest(model, qualityScore = DISCOVERED_TEXT_SCORE) {
     model.stage ?? model.lifecycleStage ?? "",
   ).toUpperCase();
   const legacy = lifecycleStage === "LEGACY";
-  const eligible = methods.includes("generateContent") && !legacy;
   const modelId = (model.name ?? model.baseModelId).replace(/^models\//u, "");
+  const eligible = methods.includes("generateContent") && !legacy &&
+    familyPotentiallySupportsEngineering(
+      ProviderId.GOOGLE_GEMINI,
+      modelId,
+      model,
+    );
   const displayName = model.displayName ?? modelId;
   const reasoning =
     model.thinking === true || model.thinking?.supported === true;

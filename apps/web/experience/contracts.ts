@@ -48,6 +48,21 @@ export type FoundryObservation = Readonly<{
   confidence: Sourced<Confidence | null>;
 }>;
 
+export type DesignVisualSystem = Readonly<{
+  layoutType: string;
+  navigationType: string;
+  typographyCategory: string;
+  density: string;
+  spacingProfile: string;
+  surfaceTreatment: string;
+  contentEmphasis: string;
+  imageStrategy: string;
+  interactionModel: string;
+  buttonTreatment: string;
+  colorRoles: Readonly<Record<"background" | "surface" | "primary" | "accent" | "text", string>>;
+  sampleLabels: readonly string[];
+}>;
+
 export type DesignAlternative = Readonly<{
   id: string;
   name: Sourced<string>;
@@ -66,6 +81,7 @@ export type DesignAlternative = Readonly<{
     colorMood: Sourced<string>;
     hierarchy: Sourced<string>;
   }>;
+  visualSystem?: DesignVisualSystem;
   recommended: Sourced<boolean>;
 }>;
 
@@ -378,6 +394,7 @@ export type ProjectDesignAlternative = Readonly<{
     colorMood: string;
     hierarchy: string;
   }>;
+  visualSystem?: DesignVisualSystem;
   recommended: boolean;
 }>;
 
@@ -462,9 +479,18 @@ export type CustomerInputKind =
   | "role"
   | "integration"
   | "limitation"
-  | "acceptance";
+  | "acceptance"
+  | "design-preference"
+  | "workflow-change"
+  | "feature-request"
+  | "content-requirement"
+  | "acceptance-expectation"
+  | "correction"
+  | "other";
 
 export type DecisionSelectionKind =
+  | "product-subtype"
+  | "blueprint-approval"
   | "design-direction"
   | "recommendation"
   | "decision"
@@ -498,11 +524,88 @@ export type CustomerFollowUpAnswer = Readonly<{
   selection?: DecisionSelection;
 }>;
 
+export type ProductTypeDiscovery = Readonly<{
+  schemaVersion: 1;
+  originalRequest: string;
+  context: readonly string[];
+  interpretation: Readonly<{
+    summary: string;
+    reasoning: string;
+    confidence: number;
+  }>;
+  subtypes: readonly Readonly<{
+    optionId: string;
+    title: string;
+    explanation: string;
+    likelyUsers: readonly string[];
+    likelyPrimaryOutcome: string;
+    whyItMayFit: string;
+    confidence: Readonly<{
+      score: number;
+      reason: string;
+    }>;
+    recommended: boolean;
+    canCombine: boolean;
+    combinationNote: string;
+    compatibilityTags: readonly string[];
+    deliveryPlatform: "web";
+    requiredCapabilities: readonly string[];
+  }>[];
+}>;
+
+export type ProductBlueprint = Readonly<{
+  schemaVersion: 1;
+  missionId: string;
+  blueprintVersion: number;
+  originalCustomerRequest: string;
+  exactProductType: string;
+  selectedSubtypes: readonly string[];
+  productName: string;
+  oneSentenceOutcome: string;
+  intendedUsers: readonly string[];
+  businessGoal: string;
+  primaryWorkflows: readonly string[];
+  supportingWorkflows: readonly string[];
+  requiredSurfaces: readonly string[];
+  navigationApproach: string;
+  contentStructure: string;
+  administrationNeeds: readonly string[];
+  securityConsiderations: readonly string[];
+  dataAndPersistenceNeeds: readonly string[];
+  responsivePriorities: string;
+  accessibilityNeeds: readonly string[];
+  experienceStates: Readonly<Record<"empty" | "loading" | "error" | "success", readonly string[]>>;
+  includedNow: readonly string[];
+  excludedFromV1: readonly string[];
+  recommendedLater: readonly string[];
+  designSpecification: Readonly<Record<string, unknown>>;
+  selectedFeatures: readonly string[];
+  rejectedRecommendations: readonly string[];
+  foundryDecisions: readonly string[];
+  customerDecisions: readonly string[];
+  customCustomerMessages: readonly string[];
+  businessRules: readonly string[];
+  integrations: readonly string[];
+  assumptions: readonly string[];
+  architecture: readonly string[];
+  certifiedStackCapability: Readonly<Record<string, unknown>>;
+  acceptanceRequirements: readonly string[];
+  verificationPlan: readonly Readonly<{
+    sourceRequirement: string;
+    observableOutcome: string;
+    acceptanceMethod: string;
+  }>[];
+  quality: Readonly<Record<string, number>>;
+  integrityHash: string;
+}>;
+
 export type DiscoveryConversation = Readonly<{
   messages: readonly Readonly<{
     messageId: string;
     kind: CustomerInputKind;
     text: string;
+    interpretation: string;
+    affectedSections: readonly string[];
     profileVersion: number;
     occurredAt: string;
   }>[];
@@ -517,6 +620,8 @@ export type Mission = Readonly<{
   intent: string;
   state: string;
   profile: ProjectProfile | null;
+  productTypeDiscovery: ProductTypeDiscovery | null;
+  productBlueprint: ProductBlueprint | null;
   proposalConfirmed: boolean;
   contract: Readonly<{
     contractVersion: number;

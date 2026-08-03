@@ -9,6 +9,7 @@ import {
   normalizeRecommendationList,
   normalizeUserExperiencePlan,
 } from "./project-design.js";
+import { normalizeProductBlueprint } from "./product-blueprint.js";
 
 export const APPROVED_PROJECT_CONTRACT_SCHEMA_VERSION = 2;
 export const APPROVED_PROJECT_CONTRACT_SOURCE = "APPROVED_PROJECT_CONTRACT_SERVICE";
@@ -38,6 +39,7 @@ const KEYS = [
   "approvalTimestamp",
 ];
 const LEGACY_KEYS = KEYS.filter((key) => key !== "decisionSelections");
+const BLUEPRINT_KEYS = [...KEYS, "productBlueprint"];
 
 function fail(message) {
   throw new ApprovedProjectContractValidationError(message);
@@ -86,6 +88,8 @@ function normalizeSelection(value, label) {
 function normalizeDecisionSelections(value) {
   if (!Array.isArray(value)) fail("decisionSelections must be an array.");
   const kinds = new Set([
+    "product-subtype",
+    "blueprint-approval",
     "design-direction",
     "recommendation",
     "decision",
@@ -151,10 +155,48 @@ function assertDecisionLedgerConsistency(contract) {
     fail("decisionSelections must record the choices used to approve this contract.");
   }
   const identities = contract.decisionSelections.map(
-    (selection) => `${selection.kind}:${selection.subjectId}`,
+    (selection) =>
+      selection.kind === "product-subtype"
+        ? `${selection.kind}:${selection.subjectId}:${selection.optionId ?? selection.value}`
+        : `${selection.kind}:${selection.subjectId}`,
   );
   if (new Set(identities).size !== identities.length) {
     fail("decisionSelections contains more than one final choice for the same subject.");
+  }
+  const blueprintApprovals = contract.decisionSelections.filter(
+    (selection) => selection.kind === "blueprint-approval",
+  );
+  if (
+    blueprintApprovals.length > 1 ||
+    blueprintApprovals.some(
+      (selection) =>
+        selection.mode !== "confirm" ||
+        selection.subjectId !== "product-blueprint",
+    )
+  ) fail("Product Blueprint approval is invalid.");
+  if (contract.productBlueprint !== undefined) {
+    const blueprint = contract.productBlueprint;
+    if (
+      blueprint.missionId !== contract.missionId ||
+      blueprint.originalCustomerRequest !== contract.originalCustomerRequest
+    ) fail("Product Blueprint identity does not match the approved contract.");
+    if (
+      blueprintApprovals.length !== 1 ||
+      blueprintApprovals[0].value !== blueprint.integrityHash ||
+      blueprintApprovals[0].sourceProfileVersion !== blueprint.blueprintVersion
+    ) fail("Product Blueprint hash and version were not approved exactly.");
+    if (
+      blueprint.navigationApproach !== contract.selectedDesignDirection.navigationApproach ||
+      blueprint.designSpecification.visualPersonality !== contract.selectedDesignDirection.visualPersonality
+    ) fail("Approved visual direction was lost between the Product Blueprint and contract.");
+    const contractAudiences = new Set(contract.audiences.map((item) => item.toLowerCase()));
+    if (blueprint.intendedUsers.some((item) => !contractAudiences.has(item.toLowerCase()))) {
+      fail("Product Blueprint audience was dropped from the approved contract.");
+    }
+    const exclusions = new Set(contract.explicitExclusions.map((item) => item.toLowerCase()));
+    if (blueprint.excludedFromV1.some((item) => !exclusions.has(item.toLowerCase()))) {
+      fail("Product Blueprint exclusion was dropped from the approved contract.");
+    }
   }
 
   const designSelections = contract.decisionSelections.filter(
@@ -198,9 +240,12 @@ export function computeApprovedProjectContractHash(contract) {
 
 export function normalizeApprovedProjectContract(input) {
   const hasDecisionSelections = Object.hasOwn(input, "decisionSelections");
+  const hasProductBlueprint = Object.hasOwn(input, "productBlueprint");
   exact(
     input,
-    hasDecisionSelections ? KEYS : LEGACY_KEYS,
+    hasProductBlueprint
+      ? BLUEPRINT_KEYS
+      : hasDecisionSelections ? KEYS : LEGACY_KEYS,
     "approvedProjectContract",
   );
   if (!Number.isSafeInteger(input.contractVersion) || input.contractVersion < 1) fail("contractVersion must be a positive integer.");
@@ -248,6 +293,9 @@ export function normalizeApprovedProjectContract(input) {
     selectedStackCapability: stack,
     acceptanceObligations: obligations,
     verificationPlan,
+    ...(hasProductBlueprint
+      ? { productBlueprint: normalizeProductBlueprint(input.productBlueprint) }
+      : {}),
     ...(hasDecisionSelections
       ? { decisionSelections: normalizeDecisionSelections(input.decisionSelections) }
       : {}),

@@ -57,7 +57,7 @@ const control = openMissionControl({
   environmentVariables: configuredEnvironment,
   aiDiscoveryAdapters: liveAdapters.discoveryAdapters,
   modelProviders: liveAdapters.executionAdapters,
-  maxModelProviderAttempts: 3,
+  maxModelProviderAttempts: 1,
 });
 
 let stopping = false;
@@ -96,17 +96,19 @@ try {
   } catch {}
   try {
     const projected = control.ledger.projectState(missionId);
-    if (!isTerminalMissionState(projected.state)) {
-      const target =
-        projected.state === MissionState.PROVISIONING ||
-        projected.state === MissionState.REPAIRING
-          ? MissionState.FAILED
-          : MissionState.EXHAUSTED;
+    if (
+      !isTerminalMissionState(projected.state) &&
+      ![
+        MissionState.INTAKE,
+        MissionState.CLARIFYING,
+        MissionState.CONTRACTED,
+      ].includes(projected.state)
+    ) {
       control.orchestrator.transition({
         missionId,
         eventId: `${missionId}-worker-failure-${projected.lastSequence + 1}`,
         causationId: projected.lastEventId,
-        to: target,
+        to: MissionState.FAILED,
         reason: `The production worker stopped after a recorded unrecoverable error: ${failureMessage}`,
       });
     }

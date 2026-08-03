@@ -9,10 +9,22 @@ const INPUT_KINDS = new Set([
   "integration",
   "limitation",
   "acceptance",
+  "design-preference",
+  "workflow-change",
+  "feature-request",
+  "content-requirement",
+  "acceptance-expectation",
+  "correction",
+  "other",
 ]);
 
 function customerInputKind(answer, records) {
   if (answer?.selection?.kind === "customer-message") {
+    const explicit = String(answer.selection.classification ?? "")
+      .trim()
+      .toLowerCase()
+      .replaceAll(" ", "-");
+    if (INPUT_KINDS.has(explicit)) return explicit;
     const revision = records.find(
       (record) =>
         record.profile.profileVersion === answer.selection.sourceProfileVersion + 1,
@@ -22,12 +34,12 @@ function customerInputKind(answer, records) {
       revisionIndex <= 0
         ? []
         : changedSections(records[revisionIndex - 1].profile, revision.profile);
-    if (sections.includes("Design direction")) return "design";
-    if (sections.includes("Workflows")) return "workflow";
-    if (sections.includes("Useful ideas")) return "feature";
+    if (sections.includes("Design direction")) return "design-preference";
+    if (sections.includes("Workflows")) return "workflow-change";
+    if (sections.includes("Useful ideas")) return "feature-request";
     if (sections.includes("Decisions")) return "business-rule";
-    if (sections.includes("Understanding")) return "understanding";
-    return "context";
+    if (sections.includes("Understanding")) return "correction";
+    return "other";
   }
   const questionId = answer?.questionId;
   if (typeof questionId !== "string") return null;
@@ -106,6 +118,16 @@ export function projectDiscoveryConversation(events) {
       messageId: record.answer.questionId,
       kind,
       text: record.answer.answer,
+      ...(record.answer?.selection?.kind === "customer-message"
+        ? {
+            interpretation: `Foundry treated this as ${kind.replaceAll("-", " ")} based on the sections revised by the model.`,
+            affectedSections: (() => {
+              const matching = records.find((item) => item.profile.profileVersion === record.profileVersion);
+              const index = matching === undefined ? -1 : records.indexOf(matching);
+              return index > 0 ? changedSections(records[index - 1].profile, matching.profile) : [];
+            })(),
+          }
+        : {}),
       profileVersion: record.profileVersion,
       occurredAt: record.occurredAt,
     });
@@ -121,6 +143,12 @@ export function projectDiscoveryConversation(events) {
         messageId: answer.questionId,
         kind,
         text: answer.answer,
+        ...(answer?.selection?.kind === "customer-message"
+          ? {
+              interpretation: `Foundry treated this as ${kind.replaceAll("-", " ")} based on the model-authored revision.`,
+              affectedSections: changedSections(records.at(-2)?.profile, record.profile),
+            }
+          : {}),
         profileVersion: record.profile.profileVersion,
         occurredAt: record.occurredAt,
       });

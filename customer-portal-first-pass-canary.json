@@ -1,0 +1,15 @@
+{
+  "startedAt": "2026-08-03T03:34:30.692Z",
+  "execute": true,
+  "resumed": false,
+  "inputs": [
+    {
+      "input": "Customer portal",
+      "attempts": 1,
+      "error": "Customer portal execution ended in FAILED."
+    }
+  ],
+  "completedAt": "2026-08-03T03:38:32.482Z",
+  "passed": 0,
+  "failed": 1
+}

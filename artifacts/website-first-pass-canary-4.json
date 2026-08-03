@@ -1,0 +1,15 @@
+{
+  "startedAt": "2026-08-03T11:52:11.731Z",
+  "execute": true,
+  "resumed": false,
+  "inputs": [
+    {
+      "input": "Website",
+      "attempts": 1,
+      "error": "Website project design: Project design quality validation failed: foundryInsights.observations[1] is not grounded in this project."
+    }
+  ],
+  "completedAt": "2026-08-03T11:52:42.437Z",
+  "passed": 0,
+  "failed": 1
+}

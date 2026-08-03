@@ -10,6 +10,8 @@ import {
   isPlainObject,
 } from "../domain/ai-registry.js";
 import { ModelLifecycleState } from "../domain/model-governance.js";
+import { modelTaskCapabilityContract } from "../config/model-task-capability-policy.js";
+import { modelRouteReliability } from "./model-route-reliability.js";
 
 export const RoutingPriority = Object.freeze({
   BALANCED: "BALANCED",
@@ -102,6 +104,41 @@ function normalizePreferences(value) {
   return cloneAiValue(value);
 }
 
+function mergeTaskRequirements(requirements, taskClass, reasoningMinimum) {
+  const contract = taskClass === null
+    ? null
+    : modelTaskCapabilityContract(taskClass);
+  if (taskClass !== null && contract === null) {
+    throw new ModelGatewayValidationError(
+      `Task class "${taskClass}" has no capability contract.`,
+    );
+  }
+  const merged = new Map();
+  for (const entry of [
+    ...(contract?.requiredCapabilities ?? []),
+    ...requirements,
+  ]) {
+    merged.set(
+      entry.capability,
+      Math.max(merged.get(entry.capability) ?? 0, entry.minimumScore),
+    );
+  }
+  if (taskClass !== null && reasoningMinimum > 0) {
+    merged.set(
+      ModelCapability.REASONING,
+      Math.max(
+        merged.get(ModelCapability.REASONING) ?? 0,
+        reasoningMinimum,
+      ),
+    );
+  }
+  return cloneAiValue(
+    [...merged]
+      .map(([capability, minimumScore]) => ({ capability, minimumScore }))
+      .sort((left, right) => left.capability.localeCompare(right.capability)),
+  );
+}
+
 function capabilityQuality(model, requirements, reasoningMinimum) {
   const values = requirements.map(
     (requirement) => model.capabilities[requirement.capability],
@@ -120,11 +157,26 @@ function capabilityQuality(model, requirements, reasoningMinimum) {
 
 function compareCandidates(priority, preferredLatencyProfile) {
   return (left, right) => {
+    const reliabilityDifference =
+      left.reliability.estimatedFailureRate -
+      right.reliability.estimatedFailureRate;
     const preferredLatencyDifference =
       preferredLatencyProfile === null
         ? 0
         : Number(right.model.latencyProfile === preferredLatencyProfile) -
           Number(left.model.latencyProfile === preferredLatencyProfile);
+    if (priority === RoutingPriority.FAST_RESPONSE) {
+      return (
+        preferredLatencyDifference ||
+        latencyRank[left.model.latencyProfile] -
+          latencyRank[right.model.latencyProfile] ||
+        reliabilityDifference ||
+        right.quality - left.quality ||
+        left.totalCost - right.totalCost ||
+        left.model.modelId.localeCompare(right.model.modelId)
+      );
+    }
+    if (reliabilityDifference !== 0) return reliabilityDifference;
     if (preferredLatencyDifference !== 0) {
       return preferredLatencyDifference;
     }
@@ -135,14 +187,6 @@ function compareCandidates(priority, preferredLatencyProfile) {
           right.quality - left.quality ||
           latencyRank[left.model.latencyProfile] -
             latencyRank[right.model.latencyProfile] ||
-          left.model.modelId.localeCompare(right.model.modelId)
-        );
-      case RoutingPriority.FAST_RESPONSE:
-        return (
-          latencyRank[left.model.latencyProfile] -
-            latencyRank[right.model.latencyProfile] ||
-          right.quality - left.quality ||
-          left.totalCost - right.totalCost ||
           left.model.modelId.localeCompare(right.model.modelId)
         );
       case RoutingPriority.CAPABILITY:
@@ -165,7 +209,11 @@ function compareCandidates(priority, preferredLatencyProfile) {
   };
 }
 
-export function createModelRouter({ registry, clock = () => new Date().toISOString() }) {
+export function createModelRouter({
+  registry,
+  clock = () => new Date().toISOString(),
+  routeHistory = () => [],
+}) {
   if (
     registry === null ||
     typeof registry !== "object" ||
@@ -195,12 +243,15 @@ export function createModelRouter({ registry, clock = () => new Date().toISOStri
           "taskDepth must be an integer from 1 through 5.",
         );
       }
-      const requirements = normalizeRequiredCapabilities(
-        requiredCapabilities,
-      );
+      const explicitRequirements = normalizeRequiredCapabilities(requiredCapabilities);
       const costs = normalizeCostConstraints(costConstraints);
       const preferences = normalizePreferences(userPreferences);
       const reasoningMinimum = (taskDepth - 1) * 20;
+      const requirements = mergeTaskRequirements(
+        explicitRequirements,
+        taskClass,
+        reasoningMinimum,
+      );
       const requestedAlias =
         preferences.priority === RoutingPriority.FAST_RESPONSE
           ? "MODEL_FAST"
@@ -214,6 +265,7 @@ export function createModelRouter({ registry, clock = () => new Date().toISOStri
           .list()
           .map((provider) => [provider.providerId, provider]),
       );
+      const history = routeHistory();
 
       for (const model of registry.models.list()) {
         const provider = providersById.get(model.providerId);
@@ -242,12 +294,6 @@ export function createModelRouter({ registry, clock = () => new Date().toISOStri
         ) {
           reasons.push(`task class ${taskClass} is not approved`);
         }
-        if (
-          model.governance !== undefined &&
-          !model.governance.capabilityAliases.includes(requestedAlias)
-        ) {
-          reasons.push(`does not satisfy capability alias ${requestedAlias}`);
-        }
         if (model.governance?.validation !== null && model.governance?.validation !== undefined) {
           const validation = model.governance.validation;
           if (validation.validationStatus !== "VALIDATED") {
@@ -270,6 +316,11 @@ export function createModelRouter({ registry, clock = () => new Date().toISOStri
             reasons.push("provider catalog metadata is stale");
           }
         }
+        const supportedCapabilities = new Set(
+          (model.governance?.capabilitySupport ?? [])
+            .filter((entry) => entry.support === "SUPPORTED")
+            .map((entry) => entry.capability),
+        );
         if (
           costs.maximumTotalPerMillionTokensUsd !== null &&
           model.governance?.pricing?.known === false
@@ -286,6 +337,15 @@ export function createModelRouter({ registry, clock = () => new Date().toISOStri
         }
         for (const requirement of requirements) {
           if (
+            model.governance?.validation !== undefined &&
+            !supportedCapabilities.has(requirement.capability)
+          ) {
+            reasons.push(
+              `${requirement.capability} lacks validated capability support evidence`,
+            );
+            continue;
+          }
+          if (
             model.capabilities[requirement.capability] <
             requirement.minimumScore
           ) {
@@ -301,12 +361,21 @@ export function createModelRouter({ registry, clock = () => new Date().toISOStri
           reasons.push("cost exceeds configured maximum");
         }
         if (reasons.length > 0) {
-          rejections.push({ modelId: model.modelId, reasons });
+          rejections.push({
+            providerId: model.providerId,
+            modelId: model.modelId,
+            reasons,
+          });
           continue;
         }
         candidates.push({
           model,
           totalCost,
+          reliability: modelRouteReliability(
+            model,
+            Array.isArray(history) ? history : [],
+            taskClass,
+          ),
           quality: capabilityQuality(
             model,
             requirements,
@@ -328,16 +397,26 @@ export function createModelRouter({ registry, clock = () => new Date().toISOStri
       }
       const selected = candidates[0];
       const selectedAlias = requestedAlias;
+      const reliabilityHistoryApplied = candidates.some(
+        (candidate) => candidate.reliability.observations > 0,
+      );
       return cloneAiValue({
         selectedModel: selected.model,
+        taskClass,
         taskDepth,
         requiredCapabilities: requirements,
+        taskCapabilityPolicy:
+          taskClass === null ? null : modelTaskCapabilityContract(taskClass),
         totalCostPerMillionTokensUsd: selected.totalCost,
         rationale: [
           "provider credential, enablement, and health are eligible",
           "model passed discovery, lifecycle validation, and engineering eligibility",
           ...(selected.model.governance?.eligibilityReasons ?? []),
-          `resolved dynamic capability alias ${selectedAlias}`,
+          "every task capability has explicit validated support evidence",
+          reliabilityHistoryApplied
+            ? `persisted ${taskClass} reliability favored the lowest observed failure rate`
+            : "no task-specific reliability outcome exists; neutral prior applied",
+          `dynamic capability alias ${selectedAlias} is descriptive and did not replace task capability checks`,
           `reasoning score satisfies task depth ${taskDepth}`,
           "all required capability thresholds are satisfied",
           "cost constraint is satisfied",
@@ -346,7 +425,26 @@ export function createModelRouter({ registry, clock = () => new Date().toISOStri
         eligibleModelIds: candidates.map(
           (candidate) => candidate.model.modelId,
         ),
+        candidateModels: candidates.map((candidate) => ({
+          providerId: candidate.model.providerId,
+          modelId: candidate.model.modelId,
+          lifecycleState:
+            candidate.model.governance?.validation?.registryState ?? null,
+          capabilityFit: "COMPLETE",
+          reliability: candidate.reliability,
+          totalCostPerMillionTokensUsd: candidate.totalCost,
+          latencyProfile: candidate.model.latencyProfile,
+        })),
         rejectedModels: rejections,
+        selectionFactors: {
+          capabilityFitRequired: true,
+          lifecycleStabilityRequired: true,
+          reliabilityHistoryApplied,
+          costConstraintApplied:
+            costs.maximumTotalPerMillionTokensUsd !== null,
+          providerHealthRequired: true,
+          taskDepth,
+        },
         selectedAlias,
       });
     },

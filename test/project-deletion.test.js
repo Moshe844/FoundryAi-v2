@@ -163,6 +163,42 @@ test("only active, non-deleted execution states recover a worker after restart",
     recover: true,
     reason: "interrupted-worker",
   });
+  assert.deepEqual(
+    executionRecoveryDecision([
+      transition("EXECUTING"),
+      {
+        fact: {
+          metadata: {
+            modelRouteStart: { taskClass: "FILE_GENERATION" },
+          },
+        },
+      },
+    ]),
+    { recover: false, reason: "provider-attempt-interrupted" },
+  );
+  assert.deepEqual(
+    executionRecoveryDecision([
+      transition("EXECUTING"),
+      {
+        fact: {
+          metadata: {
+            modelRouteStart: { taskClass: "FILE_GENERATION" },
+          },
+        },
+      },
+      {
+        fact: {
+          metadata: {
+            modelCallRecord: {
+              taskClass: "FILE_GENERATION",
+              status: "SUCCEEDED",
+            },
+          },
+        },
+      },
+    ]),
+    { recover: true, reason: "interrupted-worker" },
+  );
   assert.deepEqual(executionRecoveryDecision([transition("SUCCEEDED")]), {
     recover: false,
     reason: "not-recoverable",

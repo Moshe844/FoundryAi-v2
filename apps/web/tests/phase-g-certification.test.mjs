@@ -231,3 +231,33 @@ test("Phase A through G remain mandatory web regression gates", async () => {
     assert.match(packageJson.scripts.test, new RegExp(suite));
   }
 });
+
+test("terminal intake truth replaces the reading screen even without a profile", async () => {
+  const selectors = await source("../experience/selectors.ts");
+  const surface = /function surface\([\s\S]*?\n\}/u.exec(selectors)?.[0] ?? "";
+  const cancelled = surface.indexOf('mission.state === "CANCELLED"');
+  const profileMissing = surface.indexOf('mission.profile === null');
+  assert.ok(cancelled >= 0 && profileMissing >= 0 && cancelled < profileMissing);
+  assert.match(
+    surface,
+    /\["FAILED", "EXHAUSTED"\]\.includes\(mission\.state\)[\s\S]*mission\.profile === null/u,
+  );
+});
+
+test("the Decision Brief never presents architecture choices as exclusions", async () => {
+  const selectors = await source("../experience/selectors.ts");
+  assert.match(
+    selectors,
+    /profile\.constraints\.filter\([\s\S]*?!profile\.architectureDecisions\.includes\(constraint\)/u,
+  );
+});
+
+test("completion keeps defaults and internal governance out of customer launch gaps", async () => {
+  const selectors = await source("../experience/selectors.ts");
+  assert.match(selectors, /hasExplicitDeferredCustomerContent\(mission\)/u);
+  assert.match(
+    selectors,
+    /!\(profile\?\.architectureDecisions \?\? \[\]\)\.includes\(description\)/u,
+  );
+  assert.match(selectors, /milestone\\s\+\\d\+/u);
+});

@@ -95,3 +95,38 @@ test("design tokens are centralized and shell breakpoints match the approved con
   assert.match(shell, /grid-template-columns: 64px/);
   assert.match(shell, /mobile-navigation-sheet/);
 });
+
+test("Phase A broad requests use model-generated subtype intelligence before proposals", async () => {
+  const [page, component, server, service, intelligence] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(
+      new URL("../app/components/product-type-discovery.tsx", import.meta.url),
+      "utf8",
+    ),
+    readFile(new URL("../local-api/server.mjs", import.meta.url), "utf8"),
+    readFile(
+      new URL("../../../src/understanding-plane/project-understanding-service.js", import.meta.url),
+      "utf8",
+    ),
+    readFile(
+      new URL("../../../src/domain/product-type-discovery.js", import.meta.url),
+      "utf8",
+    ),
+  ]);
+
+  assert.match(page, /<ProductTypeDiscovery/);
+  assert.match(component, /discovery\.subtypes\.map/);
+  assert.match(component, /Combine \$\{selectedIds\.size\} choices and continue/);
+  assert.match(component, /Something else/);
+  assert.match(component, /Let Foundry decide/);
+  assert.match(component, /Add a short note/);
+  assert.match(server, /productTypeDiscovery/);
+  assert.match(service, /generateProductTypeDiscovery/);
+  assert.match(service, /validateStructuredModelOutput\([\s\S]*PRODUCT_TYPE_DISCOVERY_SCHEMA/u);
+  assert.match(intelligence, /minItems: 5/);
+  assert.match(intelligence, /maxItems: 10/);
+  assert.doesNotMatch(
+    intelligence,
+    /(?:Retail inventory|Warehouse inventory|Local business website|Customer portal)/u,
+  );
+});

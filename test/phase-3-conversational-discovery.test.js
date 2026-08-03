@@ -224,11 +224,77 @@ test("Phase 3 production is a staged working session with unrestricted custom in
   assert.match(understandingService, /Do not repeat the complete project understanding/u);
   assert.match(understandingService, /revisionFieldsForAnswers/u);
   assert.match(understandingService, /copy each essential capability exactly/u);
-  assert.match(understandingService, /maximumCorrectionAttempts = 3/u);
+  assert.match(understandingService, /MAX_PRODUCT_INTELLIGENCE_GENERATIONS = 1/u);
+  assert.match(understandingService, /MAX_PRODUCT_INTELLIGENCE_ROUTES = 1/u);
   assert.match(understandingService, /priority: "FAST_RESPONSE"/u);
+  assert.match(
+    understandingService,
+    /id: identifier\("question", index\)/u,
+  );
+  assert.match(
+    understandingService,
+    /id: identifier\("suggestion", index\)/u,
+  );
+  assert.match(
+    understandingService,
+    /subjectId = identifier\("suggestion", index\)/u,
+  );
+  assert.match(understandingService, /resolvedCustomerQuestionIds/u);
+  assert.match(
+    understandingService,
+    /shouldDiscoverProductType\(intent, cumulativeAnswers\)/u,
+  );
+  assert.match(
+    understandingService,
+    /existing\.value = recommendation\.title/u,
+  );
+  assert.match(
+    understandingService,
+    /customerSuppliedContent \?\? \[\]\)\.flatMap/u,
+  );
+  assert.match(
+    understandingService,
+    /answer\.selection\.kind === "customer-message"/u,
+  );
+  assert.match(
+    understandingService,
+    /answer\.selection\?\.kind === "decision"/u,
+  );
+  assert.match(
+    understandingService,
+    /recordSelections\(\{/u,
+  );
+  assert.match(
+    understandingService,
+    /without another model call/u,
+  );
+  assert.match(
+    server,
+    /generatedOptionSelectionsOnly/u,
+  );
+  assert.match(
+    server,
+    /control\.understanding\.recordSelections/u,
+  );
+  assert.match(
+    understandingService,
+    /!resolvedCustomerQuestionIds\.has\(questionId\)/u,
+  );
   const liveAdapters = readFileSync(
     new URL("../src/capability-plane/live-ai-adapters.js", import.meta.url),
     "utf8",
+  );
+  assert.match(
+    liveAdapters,
+    /request\.taskClass === "FILE_GENERATION"\) return 32_000/u,
+  );
+  assert.match(
+    liveAdapters,
+    /request\.taskClass === "PROJECT_UNDERSTANDING"\) return 30_000/u,
+  );
+  assert.match(
+    liveAdapters,
+    /request\.taskClass === "PROJECT_UNDERSTANDING"\) return 6_000/u,
   );
   assert.match(liveAdapters, /return 16_000/u);
   assert.match(liveAdapters, /negotiatedEffort/u);

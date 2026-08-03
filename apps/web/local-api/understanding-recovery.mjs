@@ -43,6 +43,23 @@ export function executionRecoveryDecision(events) {
     .filter((record) => record.type === "MISSION_TRANSITION")
     .at(-1)?.transition.to;
   if (state === "EXECUTING" || state === "VERIFYING") {
+    const hasDispatchedGenerationAttempt = events.some(
+      (record) =>
+        record.fact?.metadata?.modelRouteStart?.taskClass ===
+        "FILE_GENERATION",
+    );
+    const hasSucceededGenerationAttempt = events.some(
+      (record) =>
+        record.fact?.metadata?.modelCallRecord?.taskClass ===
+          "FILE_GENERATION" &&
+        record.fact.metadata.modelCallRecord.status === "SUCCEEDED",
+    );
+    if (hasDispatchedGenerationAttempt && !hasSucceededGenerationAttempt) {
+      return Object.freeze({
+        recover: false,
+        reason: "provider-attempt-interrupted",
+      });
+    }
     return Object.freeze({ recover: true, reason: "interrupted-worker" });
   }
   return Object.freeze({ recover: false, reason: "not-recoverable" });

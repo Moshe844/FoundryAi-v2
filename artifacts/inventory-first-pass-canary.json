@@ -1,0 +1,15 @@
+{
+  "startedAt": "2026-08-03T10:20:38.947Z",
+  "execute": true,
+  "resumed": false,
+  "inputs": [
+    {
+      "input": "Inventory",
+      "attempts": 1,
+      "error": "Inventory execution ended in FAILED."
+    }
+  ],
+  "completedAt": "2026-08-03T10:24:02.323Z",
+  "passed": 0,
+  "failed": 1
+}

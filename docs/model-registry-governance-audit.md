@@ -63,3 +63,9 @@ Each successful provider refresh records an immutable event containing its exact
 Lifecycle notices are ingested from the official deprecation pages listed above. Foundry persists the normalized notices, fetch time, source URL, and a SHA-256 content hash—not a mutable copy of the provider document. A fresh cached official result is used during a transient source outage; otherwise the dated bundled governance policy remains explicit in the projection rather than masquerading as a live provider result.
 
 If a previously observed model disappears from a later provider response, Foundry preserves its identity, raw historical observations, `lastSeenAt`, and `missingSince`. It moves the current validation projection to `QUARANTINED` pending validation and removes the model from automatic routing. It is never silently deleted, and historical route facts remain untouched.
+
+## Phase 7 capability-driven routing
+
+Every production model task now resolves through a versioned capability contract. Governed models carry explicit capability-support evidence derived from validated purpose, provider catalog metadata, and the maintained engineering-family policy. Routing requires that evidence as well as the configured score threshold; a broad numeric score alone cannot qualify a model.
+
+Live execution consumes the router's exact candidate order. All candidates completely satisfy the task contract before persisted task-specific reliability, cost, and latency are considered. Capability aliases no longer act as an eligibility shortcut. The chosen route records the merged requirements and candidate facts in immutable route evidence.

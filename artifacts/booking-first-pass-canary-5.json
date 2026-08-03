@@ -1,0 +1,15 @@
+{
+  "startedAt": "2026-08-03T13:15:08.905Z",
+  "execute": true,
+  "resumed": false,
+  "inputs": [
+    {
+      "input": "Booking system",
+      "attempts": 1,
+      "error": "fetch failed"
+    }
+  ],
+  "completedAt": "2026-08-03T13:15:25.708Z",
+  "passed": 0,
+  "failed": 1
+}

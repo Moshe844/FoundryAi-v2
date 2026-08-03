@@ -1,0 +1,15 @@
+{
+  "startedAt": "2026-08-03T11:46:29.311Z",
+  "execute": true,
+  "resumed": false,
+  "inputs": [
+    {
+      "input": "Website",
+      "attempts": 1,
+      "error": "fetch failed"
+    }
+  ],
+  "completedAt": "2026-08-03T11:48:32.610Z",
+  "passed": 0,
+  "failed": 1
+}

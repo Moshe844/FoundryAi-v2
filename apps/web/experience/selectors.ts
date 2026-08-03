@@ -130,15 +130,40 @@ export function customerPhase(mission: Mission): CustomerPhaseView {
         spineIndex: 1,
         fixing: false,
       };
-    case "EXECUTING":
+    case "EXECUTING": {
+      const currentPhaseIndex =
+        mission.executionProjection.phase.currentIndex;
+      const currentActivity = mission.currentActivity;
+      const correcting = currentActivity?.kind === "repair";
+      if (correcting) {
+        return {
+          label: "Correcting an issue",
+          status: currentActivity?.title ?? "Correcting the affected part",
+          pill: "pill-attention",
+          action: "Watch",
+          spineIndex: currentPhaseIndex,
+          fixing: true,
+        };
+      }
+      if (currentPhaseIndex >= 7) {
+        return {
+          label: "Testing",
+          status: "Testing important actions",
+          pill: "pill-building",
+          action: "Watch",
+          spineIndex: currentPhaseIndex,
+          fixing: false,
+        };
+      }
       return {
         label: "Building",
         status: "Building your project",
         pill: "pill-building",
         action: "Watch",
-        spineIndex: 1,
+        spineIndex: currentPhaseIndex,
         fixing: false,
       };
+    }
     case "VERIFYING":
       return {
         label: "Testing",
@@ -187,7 +212,7 @@ export function customerPhase(mission: Mission): CustomerPhaseView {
     case "EXHAUSTED":
       return {
         label: "Stopped",
-        status: "I ran out of safe approaches",
+        status: "I stopped at the safe repair limit",
         pill: "pill-stopped",
         action: "Reopen",
         spineIndex: 7,
@@ -479,6 +504,7 @@ function proposal(mission: Mission): FoundryProposal {
               `mission.profile.designAlternatives[${index}].preview.hierarchy`,
             ),
           }),
+          visualSystem: alternative.visualSystem,
           recommended: sourced(
             alternative.recommended,
             "model-recommendation",
@@ -859,9 +885,11 @@ function decisionBrief(mission: Mission): DecisionBrief | null {
       "mission.profile.assumptions",
     ),
     explicitExclusions: sourced(
-      profile.constraints,
+      profile.constraints.filter(
+        (constraint) => !profile.architectureDecisions.includes(constraint),
+      ),
       "project-understanding",
-      "mission.profile.constraints",
+      "mission.profile.constraints excluding mission.profile.architectureDecisions",
     ),
     selectedEnhancements: Object.freeze(
       mission.selectedEnhancements.map((enhancement) =>
@@ -1078,6 +1106,16 @@ function customerRepairArea(classification: string | null): string | null {
   return "the interrupted part of the build";
 }
 
+function hasExplicitDeferredCustomerContent(mission: Mission): boolean {
+  const customerText = [
+    mission.intent,
+    ...mission.discoveryConversation.messages.map((message) => message.text),
+  ].join(" ");
+  return /\b(?:will provide|will send|provide later|send later|pending|tbd|to be provided|not yet supplied|still need to (?:provide|send)|placeholder (?:content|copy|image|logo))\b/iu.test(
+    customerText,
+  );
+}
+
 function completion(mission: Mission): CompletionSummary {
   const profile = mission.profile;
   const verification = mission.executionProjection.verification;
@@ -1114,18 +1152,30 @@ function completion(mission: Mission): CompletionSummary {
     kind: ExperienceSourceKind;
     reference: string;
   }> = [
-    ...(profile?.constraints ?? []).map((description, index) => ({
-      id: `constraint-${index}`,
-      description,
-      kind: "project-understanding" as const,
-      reference: `mission.profile.constraints[${index}]`,
-    })),
-    ...mission.technicalStack.knownLimitations.map((description, index) => ({
-      id: `stack-${index}`,
-      description,
-      kind: "capability-registry" as const,
-      reference: `mission.technicalStack.knownLimitations[${index}]`,
-    })),
+    ...(profile?.constraints ?? [])
+      .filter(
+        (description) =>
+          !(profile?.architectureDecisions ?? []).includes(description),
+      )
+      .map((description, index) => ({
+        id: `constraint-${index}`,
+        description,
+        kind: "project-understanding" as const,
+        reference: `mission.profile.constraints[${index}]`,
+      })),
+    ...mission.technicalStack.knownLimitations
+      .filter(
+        (description) =>
+          !/\b(?:foundry|milestone\s+\d+|certification requires)\b/iu.test(
+            description,
+          ),
+      )
+      .map((description, index) => ({
+        id: `stack-${index}`,
+        description,
+        kind: "capability-registry" as const,
+        reference: `mission.technicalStack.knownLimitations[${index}]`,
+      })),
   ].filter(
     (item, index, items) =>
       items.findIndex(
@@ -1229,7 +1279,10 @@ function completion(mission: Mission): CompletionSummary {
       ),
     ),
     launchRequirements: Object.freeze(
-      (profile?.customerContent.missingBeforeLaunch ?? []).map(
+      (hasExplicitDeferredCustomerContent(mission)
+        ? (profile?.customerContent.missingBeforeLaunch ?? [])
+        : []
+      ).map(
         (description, index) =>
           Object.freeze({
             id: `launch-content-${index}`,
@@ -1362,13 +1415,15 @@ function lifecycleOutcome(
         "Nothing is required right now. A revised request can change the part that stopped.",
     },
     exhausted: {
-      headline: "I ran out of safe approaches.",
+      headline: "I stopped at the safe repair limit.",
       happened:
-        "I tried the available safe repair approaches, but the remaining promises could not be proved.",
+        affectedArea === null
+          ? "The evidence-backed repair limit was reached. The final engineering error and every attempted change were preserved."
+          : `The evidence-backed repair limit was reached while working on ${affectedArea}. The final error and every attempted change were preserved.`,
       next:
-        "Narrow or change the remaining promise before starting a revised project.",
+        "Review the final recorded error in Engineering details before deciding whether to retry or revise the plan.",
       need:
-        "Decide whether the remaining promise should change or be removed from the next plan.",
+        "Nothing is required until the recorded failure has been diagnosed.",
     },
     blocked: {
       headline: "I need a decision before I can carry on.",
@@ -1539,12 +1594,12 @@ function providerTransparency(
 }
 
 function surface(mission: Mission): FoundryExperienceModel["surface"] {
-  if (mission.profile === null) return "reading";
-  if (mission.profile.platform !== "web") return "unsupported";
   if (mission.state === "SUCCEEDED") return "completion";
   if (mission.state === "BLOCKED") return "blocked";
   if (mission.state === "CANCELLED") return "cancelled";
   if (["FAILED", "EXHAUSTED"].includes(mission.state)) return "failed";
+  if (mission.profile === null) return "reading";
+  if (mission.profile.platform !== "web") return "unsupported";
   if (
     ["INTAKE", "CLARIFYING", "CONTRACTED"].includes(mission.state) &&
     (!mission.proposalConfirmed ||

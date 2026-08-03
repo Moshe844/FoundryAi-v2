@@ -60,11 +60,13 @@ export const LEGAL_TRANSITIONS = Object.freeze({
   ]),
   [MissionState.EXECUTING]: Object.freeze([
     MissionState.VERIFYING,
+    MissionState.FAILED,
     ...forcedTerminalTargets,
   ]),
   [MissionState.VERIFYING]: Object.freeze([
     MissionState.SUCCEEDED,
     MissionState.REPAIRING,
+    MissionState.FAILED,
     ...forcedTerminalTargets,
   ]),
   [MissionState.REPAIRING]: Object.freeze([
@@ -96,4 +98,3 @@ export function isLegalTransition(from, to) {
     ? LEGAL_TRANSITIONS[from].includes(to)
     : false;
 }
-

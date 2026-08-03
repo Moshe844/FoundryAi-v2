@@ -29,6 +29,20 @@ function messageAnswer(
   };
 }
 
+function correctedMessageAnswer(
+  value: string,
+  profileVersion: number,
+  classification: string,
+): CustomerFollowUpAnswer {
+  const answer = messageAnswer(value, profileVersion);
+  return {
+    ...answer,
+    selection: answer.selection === undefined
+      ? undefined
+      : { ...answer.selection, classification },
+  };
+}
+
 export function CustomerInputComposer({
   busy,
   conversation,
@@ -43,12 +57,17 @@ export function CustomerInputComposer({
   onSubmit: (answer: CustomerFollowUpAnswer) => Promise<void>;
 }>) {
   const [message, setMessage] = useState("");
+  const [correcting, setCorrecting] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  async function send(value = message.trim()) {
+  async function send(value = message.trim(), classification: string | null = null) {
     const normalized = value.trim();
     if (normalized === "" || busy) return;
-    await onSubmit(messageAnswer(normalized, profileVersion));
+    await onSubmit(
+      classification === null
+        ? messageAnswer(normalized, profileVersion)
+        : correctedMessageAnswer(normalized, profileVersion, classification),
+    );
     setMessage("");
   }
 
@@ -142,6 +161,35 @@ export function CustomerInputComposer({
                     : item.kind.replaceAll("-", " ")}
                 </span>
                 <p className="t-body-s">{item.text.replace(/^[^:]+:\s*/u, "")}</p>
+                <p className="t-caption ink-tertiary">{item.interpretation}</p>
+                {item.affectedSections.length > 0 && (
+                  <p className="t-caption ink-tertiary">Updated: {item.affectedSections.join(", ")}</p>
+                )}
+                <button className="btn-quiet small" type="button" onClick={() => setCorrecting((current) => current === item.messageId ? null : item.messageId)}>
+                  Correct interpretation
+                </button>
+                {correcting === item.messageId && (
+                  <div className="message-interpretation-correction">
+                    <span className="t-caption">Treat this instruction as</span>
+                    <div className="interpretation-kind-buttons">
+                      {[
+                        "design-preference", "workflow-change", "feature-request",
+                        "business-rule", "role", "integration", "limitation",
+                        "content-requirement", "acceptance-expectation", "correction", "other",
+                      ].map((kind) => (
+                        <button
+                          className="btn-quiet small"
+                          disabled={busy}
+                          key={kind}
+                          type="button"
+                          onClick={() => void send(`Correction: interpret my prior instruction \"${item.text}\" as ${kind.replaceAll("-", " ")}.`, kind).then(() => setCorrecting(null))}
+                        >
+                          {kind.replaceAll("-", " ")}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </li>
             ))}
           </ol>

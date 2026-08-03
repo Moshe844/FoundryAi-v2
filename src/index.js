@@ -223,6 +223,7 @@ export {
 export {
   classifyModelRouteFailure,
   createDeterministicLocalModelProvider,
+  diversifyProviderRoutes,
   excludePermanentlyRejectedRoutes,
   validateStructuredModelOutput,
 } from "./work-plane/model-gateway.js";
@@ -252,9 +253,16 @@ export {
   parseLifecycleNotices,
 } from "./capability-plane/model-lifecycle-source.js";
 export {
+  MODEL_FAMILY_GOVERNANCE_POLICY,
   MODEL_GOVERNANCE_POLICY,
   MODEL_GOVERNANCE_POLICY_VERSION,
+  ModelFamilyDefaultEligibility,
 } from "./config/model-governance-policy.js";
+export {
+  MODEL_TASK_CAPABILITY_POLICY,
+  MODEL_TASK_CAPABILITY_POLICY_VERSION,
+  modelTaskCapabilityContract,
+} from "./config/model-task-capability-policy.js";
 export {
   EngineeringModelAlias,
   ModelLifecycle,
@@ -262,6 +270,7 @@ export {
   ModelPurpose,
   ModelReleaseChannel,
   governProviderCatalog,
+  resolveModelFamilyGovernance,
 } from "./domain/model-governance.js";
 export { createAiRegistryStore } from "./truth-plane/ai-registry-store.js";
 export {
@@ -284,6 +293,13 @@ export {
 } from "./domain/project-profile.js";
 export { createProjectProfileService } from "./understanding-plane/project-profile-service.js";
 export {
+  PRODUCT_BLUEPRINT_SCHEMA,
+  PRODUCT_BLUEPRINT_SCHEMA_VERSION,
+  createProductBlueprint,
+  normalizeProductBlueprint,
+  validateProductBlueprintQuality,
+} from "./domain/product-blueprint.js";
+export {
   PROJECT_UNDERSTANDING_SOURCE,
   cumulativeCustomerFollowUpAnswers,
   createProjectUnderstandingService,
@@ -291,6 +307,7 @@ export {
 } from "./understanding-plane/project-understanding-service.js";
 export {
   PRODUCTION_MISSION_SOURCE,
+  bindMissingApprovedRequirementTraces,
   createProductionMissionService,
 } from "./work-plane/production-mission-service.js";
 export {

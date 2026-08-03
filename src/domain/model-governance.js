@@ -7,8 +7,10 @@ import {
   cloneAiValue,
 } from "./ai-registry.js";
 import {
+  MODEL_FAMILY_GOVERNANCE_POLICY,
   MODEL_GOVERNANCE_POLICY,
   MODEL_GOVERNANCE_POLICY_VERSION,
+  ModelFamilyDefaultEligibility,
 } from "../config/model-governance-policy.js";
 
 export const ModelPurpose = Object.freeze({
@@ -16,6 +18,7 @@ export const ModelPurpose = Object.freeze({
   SOFTWARE_ENGINEERING: "SOFTWARE_ENGINEERING",
   CODING_AGENT: "CODING_AGENT",
   IMAGE_GENERATION: "IMAGE_GENERATION",
+  VIDEO_GENERATION: "VIDEO_GENERATION",
   AUDIO: "AUDIO",
   EMBEDDINGS: "EMBEDDINGS",
   SPEECH: "SPEECH",
@@ -65,12 +68,6 @@ export const EngineeringModelAlias = Object.freeze({
   MODEL_LONG_CONTEXT: "MODEL_LONG_CONTEXT",
 });
 
-const GENERAL_ENGINEERING_TASKS = Object.freeze([
-  "PROJECT_UNDERSTANDING",
-  "FILE_GENERATION",
-  "REPAIR_IMPLEMENTATION",
-]);
-
 function normalizedId(providerId, raw) {
   const value = providerId === ProviderId.GOOGLE_GEMINI
     ? raw.name ?? raw.baseModelId
@@ -87,28 +84,88 @@ function releaseChannel(modelId, raw) {
   return ModelReleaseChannel.STABLE;
 }
 
-function purposeFor(providerId, modelId, raw) {
-  const text = `${modelId} ${raw.displayName ?? raw.display_name ?? ""} ${raw.description ?? ""}`.toLowerCase();
-  const rules = [
-    [ModelPurpose.ROBOTICS, /robotic/u],
-    [ModelPurpose.IMAGE_GENERATION, /image|imagen/u],
-    [ModelPurpose.EMBEDDINGS, /embed/u],
-    [ModelPurpose.SPEECH, /transcrib|speech|tts/u],
-    [ModelPurpose.AUDIO, /audio|music/u],
-    [ModelPurpose.MODERATION, /moderat/u],
-    [ModelPurpose.RESEARCH, /deep-research|research-preview/u],
-    [ModelPurpose.COMPUTER_USE, /computer-use/u],
-    [ModelPurpose.REALTIME, /realtime|live-/u],
-    [ModelPurpose.SEARCH, /search/u],
-  ];
-  for (const [purpose, pattern] of rules) if (pattern.test(text)) return purpose;
-  if (/codex|code(?:-|\s)special/u.test(text)) return ModelPurpose.CODING_AGENT;
-  if (
-    (providerId === ProviderId.OPENAI && /^gpt-/u.test(modelId)) ||
-    (providerId === ProviderId.ANTHROPIC && /^claude-/u.test(modelId)) ||
-    (providerId === ProviderId.GOOGLE_GEMINI && /^gemini-/u.test(modelId))
-  ) return ModelPurpose.GENERAL_REASONING;
-  return ModelPurpose.UNKNOWN;
+function ruleMatches(values, patterns) {
+  return patterns.some((pattern) => {
+    const matcher = new RegExp(pattern, "iu");
+    return values.some((value) => matcher.test(value));
+  });
+}
+
+function providerMetadataValues(raw) {
+  return [
+    raw.description,
+    raw.purpose,
+    raw.modelPurpose,
+    ...(Array.isArray(raw.supportedTasks) ? raw.supportedTasks : []),
+    ...(Array.isArray(raw.supported_tasks) ? raw.supported_tasks : []),
+  ]
+    .filter((value) => typeof value === "string" && value.trim() !== "")
+    .map((value) => value.toLowerCase());
+}
+
+function metadataValue(raw, path) {
+  return path.split(".").reduce(
+    (value, key) => value !== null && typeof value === "object" ? value[key] : undefined,
+    raw,
+  );
+}
+
+function metadataRequirementMatches(raw, requirement) {
+  const value = metadataValue(raw, requirement.path);
+  if (Object.hasOwn(requirement, "equals")) return value === requirement.equals;
+  if (Object.hasOwn(requirement, "includes")) {
+    return Array.isArray(value) && value.includes(requirement.includes);
+  }
+  return false;
+}
+
+function metadataConditionMatches(raw, condition) {
+  const all = condition.all ?? [];
+  const any = condition.any ?? [];
+  return all.every((requirement) => metadataRequirementMatches(raw, requirement)) &&
+    (any.length === 0 || any.some((requirement) => metadataRequirementMatches(raw, requirement)));
+}
+
+function familyDecision(rule, classificationSource) {
+  return cloneAiValue({
+    ruleId: rule.ruleId,
+    family: rule.family,
+    purpose: rule.purpose,
+    defaultEligibility: rule.defaultEligibility,
+    allowedTaskClasses: rule.allowedTaskClasses,
+    classificationSource,
+    reason: rule.reason,
+    policyVersion: MODEL_FAMILY_GOVERNANCE_POLICY.policyVersion,
+  });
+}
+
+export function resolveModelFamilyGovernance({ providerId, modelId, raw = {} }) {
+  const metadataValues = providerMetadataValues(raw);
+  for (const rule of MODEL_FAMILY_GOVERNANCE_POLICY.excludedFamilies) {
+    if (ruleMatches(metadataValues, rule.metadataPatterns)) {
+      return familyDecision(rule, "PROVIDER_METADATA");
+    }
+  }
+  for (const rule of MODEL_FAMILY_GOVERNANCE_POLICY.excludedFamilies) {
+    if (ruleMatches([modelId], rule.idPatterns)) {
+      return familyDecision(rule, "MAINTAINED_FAMILY_RULE");
+    }
+  }
+  for (const rule of MODEL_FAMILY_GOVERNANCE_POLICY.providers[providerId] ?? []) {
+    if (ruleMatches(metadataValues, rule.metadataPatterns)) {
+      return familyDecision(rule, "PROVIDER_METADATA");
+    }
+    if (rule.metadataConditions.some((condition) => metadataConditionMatches(raw, condition))) {
+      return familyDecision(rule, "PROVIDER_CAPABILITY_METADATA");
+    }
+    if (ruleMatches([modelId], rule.idPatterns)) {
+      return familyDecision(rule, "MAINTAINED_FAMILY_RULE");
+    }
+  }
+  return familyDecision(
+    MODEL_FAMILY_GOVERNANCE_POLICY.unknownFamily,
+    "FAIL_CLOSED_DEFAULT",
+  );
 }
 
 function familyPolicy(providerId, modelId) {
@@ -143,17 +200,16 @@ function registryStateFor({
   accountAccessible,
   capabilities,
   channel,
-  family,
+  engineeringFamily,
+  familyGovernance,
   lifecycle,
-  purpose,
 }) {
   if (!accountAccessible) return ModelLifecycleState.INACCESSIBLE;
   if (lifecycle === ModelLifecycle.SHUTDOWN) return ModelLifecycleState.SHUTDOWN;
   if (lifecycle === ModelLifecycle.DEPRECATED) return ModelLifecycleState.DEPRECATED;
   if (lifecycle === ModelLifecycle.UNKNOWN) return ModelLifecycleState.UNVERIFIED;
   if (
-    ![ModelPurpose.GENERAL_REASONING, ModelPurpose.SOFTWARE_ENGINEERING, ModelPurpose.CODING_AGENT]
-      .includes(purpose) ||
+    familyGovernance.defaultEligibility !== ModelFamilyDefaultEligibility.CONDITIONAL ||
     !capabilities.endpointCompatible
   ) {
     return ModelLifecycleState.QUARANTINED;
@@ -164,7 +220,7 @@ function registryStateFor({
   if (channel === ModelReleaseChannel.PREVIEW) {
     return ModelLifecycleState.ACTIVE_PREVIEW;
   }
-  if (channel === ModelReleaseChannel.MOVING_ALIAS || family === null) {
+  if (channel === ModelReleaseChannel.MOVING_ALIAS || engineeringFamily === null) {
     return ModelLifecycleState.UNVERIFIED;
   }
   if (channel === ModelReleaseChannel.STABLE || channel === ModelReleaseChannel.SNAPSHOT) {
@@ -204,6 +260,11 @@ function providerCapabilities(providerId, raw) {
 
 function scores(quality, capabilities, contextWindow) {
   const values = Object.fromEntries(MODEL_CAPABILITIES.map((capability) => [capability, 0]));
+  for (const capability of [
+    ModelCapability.SOFTWARE_ENGINEERING,
+    ModelCapability.CODE_GENERATION,
+    ModelCapability.CODE_REPAIR,
+  ]) values[capability] = quality;
   for (const capability of [ModelCapability.CODING, ModelCapability.ARCHITECTURE, ModelCapability.PLANNING, ModelCapability.DEBUGGING]) values[capability] = quality;
   values[ModelCapability.REASONING] = capabilities.reasoning ? quality : 0;
   values[ModelCapability.STRUCTURED_OUTPUT] = capabilities.structuredOutput ? quality : 0;
@@ -212,6 +273,43 @@ function scores(quality, capabilities, contextWindow) {
   values[ModelCapability.LOW_COST] = 50;
   values[ModelCapability.LARGE_CONTEXT] = contextWindow >= 100_000 ? quality : 0;
   return values;
+}
+
+function capabilitySupport({
+  capabilities,
+  contextWindow,
+  family,
+  policy,
+  purpose,
+}) {
+  const supported = new Set([
+    ModelCapability.SOFTWARE_ENGINEERING,
+    ModelCapability.CODE_GENERATION,
+    ModelCapability.CODE_REPAIR,
+    ModelCapability.CODING,
+    ModelCapability.ARCHITECTURE,
+    ModelCapability.PLANNING,
+    ModelCapability.DEBUGGING,
+  ]);
+  if (capabilities.structuredOutput) supported.add(ModelCapability.STRUCTURED_OUTPUT);
+  if (capabilities.reasoning) supported.add(ModelCapability.REASONING);
+  if (capabilities.vision) supported.add(ModelCapability.VISION);
+  if (contextWindow >= 100_000) supported.add(ModelCapability.LARGE_CONTEXT);
+  if (family.latencyProfile === LatencyProfile.FAST) supported.add(ModelCapability.FAST_RESPONSE);
+  if (
+    Number.isFinite(family.inputPerMillionTokensUsd) &&
+    Number.isFinite(family.outputPerMillionTokensUsd) &&
+    family.inputPerMillionTokensUsd + family.outputPerMillionTokensUsd <= 10
+  ) supported.add(ModelCapability.LOW_COST);
+  return [...supported].sort().map((capability) => ({
+    capability,
+    support: "SUPPORTED",
+    evidence: [
+      `validated model purpose ${purpose}`,
+      `matched engineering family policy ${MODEL_GOVERNANCE_POLICY_VERSION}`,
+      policy.catalogSource,
+    ],
+  }));
 }
 
 function aliases(family, contextWindow) {
@@ -236,7 +334,8 @@ export function governProviderCatalog({
     const modelId = normalizedId(providerId, raw);
     if (modelId === "") continue;
     const displayName = String(raw.displayName ?? raw.display_name ?? modelId);
-    const purpose = purposeFor(providerId, modelId, raw);
+    const familyGovernance = resolveModelFamilyGovernance({ providerId, modelId, raw });
+    const purpose = familyGovernance.purpose;
     const channel = releaseChannel(modelId, raw);
     const lifecycle = providerLifecycleFor(policy, modelId, raw, lifecycleEvidence);
     const lifecycleNotice = lifecycleEvidence?.notices?.find(
@@ -249,16 +348,18 @@ export function governProviderCatalog({
       accountAccessible,
       capabilities,
       channel,
-      family,
+      engineeringFamily: family,
+      familyGovernance,
       lifecycle,
-      purpose,
     });
     const validationReasons = [];
     if (purpose === ModelPurpose.UNKNOWN) validationReasons.push("purpose is unknown");
     if (lifecycle !== ModelLifecycle.ACTIVE) validationReasons.push(`lifecycle is ${lifecycle}`);
     if (channel === ModelReleaseChannel.PREVIEW || channel === ModelReleaseChannel.EXPERIMENTAL || channel === ModelReleaseChannel.MOVING_ALIAS) validationReasons.push(`release channel is ${channel}`);
     if (!accountAccessible) validationReasons.push("model is inaccessible to the configured account");
-    if (![ModelPurpose.GENERAL_REASONING, ModelPurpose.SOFTWARE_ENGINEERING, ModelPurpose.CODING_AGENT].includes(purpose)) validationReasons.push(`purpose ${purpose} is not approved for ordinary engineering`);
+    if (familyGovernance.defaultEligibility !== ModelFamilyDefaultEligibility.CONDITIONAL) {
+      validationReasons.push(`family ${familyGovernance.family} is denied by default: ${familyGovernance.reason}`);
+    }
     if (!capabilities.endpointCompatible) validationReasons.push("required structured generation endpoint is unsupported");
     if (family === null) validationReasons.push("no current engineering family policy matches");
     const validated = registryState === ModelLifecycleState.ACTIVE_STABLE && validationReasons.length === 0;
@@ -276,6 +377,13 @@ export function governProviderCatalog({
     });
     validatedModels.push({
       providerId, modelId, purpose, lifecycle, releaseChannel: channel,
+      family: familyGovernance.family,
+      familyRuleId: familyGovernance.ruleId,
+      familyDefaultEligibility: familyGovernance.defaultEligibility,
+      familyAllowedTaskClasses: familyGovernance.allowedTaskClasses,
+      familyClassificationSource: familyGovernance.classificationSource,
+      familyPolicyVersion: familyGovernance.policyVersion,
+      familyReason: familyGovernance.reason,
       registryState,
       stateHistory: [
         ModelLifecycleState.DISCOVERED,
@@ -302,12 +410,24 @@ export function governProviderCatalog({
     if (!validated) continue;
     const quality = family.quality;
     const costKnown = Number.isFinite(family.inputPerMillionTokensUsd) && Number.isFinite(family.outputPerMillionTokensUsd);
+    const supportedCapabilities = capabilitySupport({
+      capabilities,
+      contextWindow,
+      family,
+      policy,
+      purpose,
+    });
     engineeringEligibleModels.push({
       providerId, modelId,
-      allowedTaskClasses: GENERAL_ENGINEERING_TASKS,
+      family: familyGovernance.family,
+      familyRuleId: familyGovernance.ruleId,
+      familyPolicyVersion: familyGovernance.policyVersion,
+      allowedTaskClasses: familyGovernance.allowedTaskClasses,
       capabilityAliases: aliases(family, contextWindow),
+      capabilitySupport: supportedCapabilities,
       eligibilityReasons: [
         `purpose ${purpose} is approved for engineering`,
+        `family ${familyGovernance.family} is conditionally eligible under centralized rule ${familyGovernance.ruleId}`,
         `provider lifecycle ${lifecycle} is active`,
         `lifecycle state ${registryState} is eligible for Auto routing`,
         `release channel ${channel} is pinned or stable`,

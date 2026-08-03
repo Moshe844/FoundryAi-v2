@@ -1,0 +1,53 @@
+{
+  "startedAt": "2026-08-03T11:53:39.480Z",
+  "execute": true,
+  "resumed": false,
+  "inputs": [
+    {
+      "input": "Website",
+      "missionId": "mission-1785758020684-e0234bd5",
+      "subtypeCount": 6,
+      "selectedSubtype": "Business Information Website",
+      "blueprintVersion": 2,
+      "blueprintHash": "3132c45b56d41d907b02aff9f2d3b7b6f41acdea312c6154f9962d8816bd078a",
+      "primaryWorkflows": [
+        "Open the site on a phone, understand the business, review offerings, and find the contact path.",
+        "Use navigation to locate a specific business fact without confusion.",
+        "Encounter a consequential error and understand what to do next."
+      ],
+      "requiredSurfaces": [
+        "Visitors can understand the business, offerings, service area, and contact path on a phone.",
+        "Navigation and primary calls to action remain usable across phone and desktop widths.",
+        "Consequential navigation or contact failures display clear, human-readable explanations.",
+        "The completed website builds successfully for public delivery."
+      ],
+      "designDirections": [
+        "Clear Local Presence",
+        "Story-Led Introduction",
+        "Information Hub"
+      ],
+      "minimumVisualDifferences": 11,
+      "recommendations": [
+        "Clarify fit immediately",
+        "Reduce contact hesitation",
+        "Speed up mobile scanning"
+      ],
+      "customMessagePresent": true,
+      "selectedSubtypePresent": true,
+      "executionState": "SUCCEEDED",
+      "contractBlueprintHash": "3132c45b56d41d907b02aff9f2d3b7b6f41acdea312c6154f9962d8816bd078a",
+      "finishedMatchesApprovedBlueprint": true,
+      "firstPass": true,
+      "firstPassMetrics": {
+        "repairModelCalls": 0,
+        "reinstallCount": 0,
+        "rebuildCount": 1,
+        "runtimeRestartCount": 0
+      },
+      "attempts": 1
+    }
+  ],
+  "completedAt": "2026-08-03T11:58:10.938Z",
+  "passed": 1,
+  "failed": 0
+}

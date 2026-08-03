@@ -32,6 +32,9 @@ export const ModelStatus = Object.freeze({
 });
 
 export const ModelCapability = Object.freeze({
+  SOFTWARE_ENGINEERING: "SOFTWARE_ENGINEERING",
+  CODE_GENERATION: "CODE_GENERATION",
+  CODE_REPAIR: "CODE_REPAIR",
   REASONING: "REASONING",
   CODING: "CODING",
   ARCHITECTURE: "ARCHITECTURE",
@@ -49,6 +52,12 @@ export const ModelCapability = Object.freeze({
 export const MODEL_CAPABILITIES = Object.freeze(
   Object.values(ModelCapability),
 );
+
+const REPLAY_DEFAULT_UNSUPPORTED_CAPABILITIES = Object.freeze([
+  ModelCapability.SOFTWARE_ENGINEERING,
+  ModelCapability.CODE_GENERATION,
+  ModelCapability.CODE_REPAIR,
+]);
 
 export const TaskDepth = Object.freeze({
   MECHANICAL: 1,
@@ -256,10 +265,20 @@ export function normalizeProviderMetadata(input) {
 }
 
 export function normalizeCapabilityScores(input) {
+  const suppliedKeys = isPlainObject(input) ? Object.keys(input) : [];
+  const missingKeys = MODEL_CAPABILITIES.filter(
+    (capability) => !suppliedKeys.includes(capability),
+  );
+  const unexpectedKeys = suppliedKeys.filter(
+    (capability) => !MODEL_CAPABILITIES.includes(capability),
+  );
   if (
     !isPlainObject(input) ||
-    Object.keys(input).sort().join(",") !==
-      [...MODEL_CAPABILITIES].sort().join(",")
+    unexpectedKeys.length > 0 ||
+    missingKeys.some(
+      (capability) =>
+        !REPLAY_DEFAULT_UNSUPPORTED_CAPABILITIES.includes(capability),
+    )
   ) {
     throw new ModelGatewayValidationError(
       "Model capability scores must define every registered capability.",
@@ -267,7 +286,7 @@ export function normalizeCapabilityScores(input) {
   }
   const scores = {};
   for (const capability of MODEL_CAPABILITIES) {
-    const score = input[capability];
+    const score = input[capability] ?? 0;
     if (
       !Number.isSafeInteger(score) ||
       score < 0 ||

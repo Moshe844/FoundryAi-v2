@@ -1,0 +1,15 @@
+{
+  "startedAt": "2026-08-03T11:45:04.687Z",
+  "execute": true,
+  "resumed": false,
+  "inputs": [
+    {
+      "input": "Website",
+      "attempts": 1,
+      "error": "Website project design: Product Blueprint contains generic or unresolved language."
+    }
+  ],
+  "completedAt": "2026-08-03T11:45:34.869Z",
+  "passed": 0,
+  "failed": 1
+}

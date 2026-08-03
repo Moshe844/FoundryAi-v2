@@ -141,12 +141,14 @@ function designFor({ audience, subject, style }) {
 }
 
 test("Phase 4 validates and retains meaningful design alternatives", () => {
+  const design = designFor({
+    audience: "community garden coordinators",
+    subject: "plot assignments and shared work days",
+    style: "Warm, practical, and season-aware",
+  });
+  design.designAlternatives[0].name = "Seasonal coordination board";
   const normalized = validateProjectDesignQuality(
-    designFor({
-      audience: "community garden coordinators",
-      subject: "plot assignments and shared work days",
-      style: "Warm, practical, and season-aware",
-    }),
+    design,
     { originalRequest: "A planner for community garden coordinators managing plot assignments and shared work days" },
   );
   assert.equal(normalized.designAlternatives.length, 3);
@@ -156,6 +158,21 @@ test("Phase 4 validates and retains meaningful design alternatives", () => {
     "Accepts less decorative storytelling in exchange for faster repeat use.",
   );
   assert(Object.isFrozen(normalized.designAlternatives));
+});
+
+test("Phase 4 requires the recommended alternative to carry the approved visual direction", () => {
+  const design = designFor({
+    audience: "community garden coordinators",
+    subject: "plot assignments and shared work days",
+    style: "Warm, practical, and season-aware",
+  });
+  design.designAlternatives[0].visualPersonality = "Cold financial dashboard";
+  assert.throws(
+    () => validateProjectDesignQuality(design, {
+      originalRequest: "A planner for community garden coordinators managing plot assignments and shared work days",
+    }),
+    /recommended direction does not match/u,
+  );
 });
 
 test("Phase 4 rejects cosmetic alternatives and generic observations", () => {
@@ -240,4 +257,29 @@ test("Phase 4 carries model intelligence into the customer working session", () 
   assert.match(recommendations, /"Ask why"/u);
   assert.match(recommendations, /Impact:/u);
   assert.doesNotMatch(understanding, /if\s*\([^)]*(?:portal|booking|photographer)/iu);
+});
+
+test("visual directions differ across structural renderer dimensions", () => {
+  const design = validateProjectDesignQuality(
+    designFor({
+      audience: "restaurant operators",
+      subject: "service readiness and table handoffs",
+      style: "Warm operational focus",
+    }),
+    { originalRequest: "Build a restaurant operations portal" },
+  );
+  const dimensions = [
+    "layoutType", "navigationType", "typographyCategory", "density",
+    "spacingProfile", "surfaceTreatment", "contentEmphasis", "imageStrategy",
+    "interactionModel", "buttonTreatment",
+  ];
+  for (let left = 0; left < design.designAlternatives.length; left += 1) {
+    for (let right = left + 1; right < design.designAlternatives.length; right += 1) {
+      const a = design.designAlternatives[left].visualSystem;
+      const b = design.designAlternatives[right].visualSystem;
+      const differences = dimensions.filter((field) => a[field] !== b[field]).length +
+        Number(JSON.stringify(a.colorRoles) !== JSON.stringify(b.colorRoles));
+      assert.ok(differences >= 5, `directions ${left + 1} and ${right + 1} need structural differences`);
+    }
+  }
 });

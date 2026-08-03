@@ -1,0 +1,55 @@
+{
+  "startedAt": "2026-08-03T11:36:22.416Z",
+  "execute": true,
+  "resumed": false,
+  "inputs": [
+    {
+      "input": "Inventory",
+      "missionId": "mission-1785756983518-131aaf1e",
+      "subtypeCount": 6,
+      "selectedSubtype": "Stock Inventory Tracker",
+      "blueprintVersion": 2,
+      "blueprintHash": "91c5e78d60c3a55da08c2014a31d04b21fdd22d100d0d8b078dcbcfdf9ae0b82",
+      "primaryWorkflows": [
+        "Add an inventory item.",
+        "Find an item on a phone and adjust its quantity.",
+        "Refresh the app and verify the saved stock level.",
+        "Recover from an invalid or failed adjustment with a clear explanation."
+      ],
+      "requiredSurfaces": [
+        "Users can browse and search inventory items comfortably on a phone.",
+        "Users can create an item and record an increase or decrease in quantity.",
+        "Saved quantities remain correct after refreshing the application.",
+        "Invalid or consequential stock changes show a clear explanation without silently changing data.",
+        "The project produces a deployable production build without errors."
+      ],
+      "designDirections": [
+        "Quick Count",
+        "Audit Desk",
+        "Count Flow"
+      ],
+      "minimumVisualDifferences": 9,
+      "recommendations": [
+        "Guard large adjustments",
+        "Surface reorder risk",
+        "Explain quantity changes"
+      ],
+      "customMessagePresent": true,
+      "selectedSubtypePresent": true,
+      "executionState": "SUCCEEDED",
+      "contractBlueprintHash": "91c5e78d60c3a55da08c2014a31d04b21fdd22d100d0d8b078dcbcfdf9ae0b82",
+      "finishedMatchesApprovedBlueprint": true,
+      "firstPass": true,
+      "firstPassMetrics": {
+        "repairModelCalls": 0,
+        "reinstallCount": 0,
+        "rebuildCount": 1,
+        "runtimeRestartCount": 0
+      },
+      "attempts": 1
+    }
+  ],
+  "completedAt": "2026-08-03T11:41:10.311Z",
+  "passed": 1,
+  "failed": 0
+}

@@ -315,6 +315,7 @@ function normalizeDesignAlternative(alternative, index) {
       "tradeoff",
       "confidence",
       "preview",
+      "visualSystem",
       "tradeoffs",
     ],
     `designAlternatives[${index}]`,
@@ -395,6 +396,37 @@ function normalizeDesignAlternative(alternative, index) {
         ),
       ]),
     );
+  }
+  if (alternative.visualSystem !== undefined) {
+    const fields = [
+      "layoutType", "navigationType", "typographyCategory", "density",
+      "spacingProfile", "surfaceTreatment", "contentEmphasis", "imageStrategy",
+      "interactionModel", "buttonTreatment", "colorRoles", "sampleLabels",
+    ];
+    exactKeys(alternative.visualSystem, fields, `designAlternatives[${index}].visualSystem`);
+    exactKeys(
+      alternative.visualSystem.colorRoles,
+      ["background", "surface", "primary", "accent", "text"],
+      `designAlternatives[${index}].visualSystem.colorRoles`,
+    );
+    normalized.visualSystem = {
+      ...Object.fromEntries(fields
+        .filter((field) => !["colorRoles", "sampleLabels"].includes(field))
+        .map((field) => [field, meaningfulText(alternative.visualSystem[field], `designAlternatives[${index}].visualSystem.${field}`)])),
+      colorRoles: Object.fromEntries(
+        Object.entries(alternative.visualSystem.colorRoles).map(([field, value]) => {
+          if (typeof value !== "string" || !/^#[0-9a-f]{6}$/iu.test(value)) {
+            fail(`designAlternatives[${index}].visualSystem.colorRoles.${field} must be a hex color.`);
+          }
+          return [field, value.toLowerCase()];
+        }),
+      ),
+      sampleLabels: uniqueMeaningfulTextList(
+        alternative.visualSystem.sampleLabels,
+        `designAlternatives[${index}].visualSystem.sampleLabels`,
+        { allowEmpty: false },
+      ),
+    };
   }
   return normalized;
 }

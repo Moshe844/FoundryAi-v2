@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import {
   ProviderHealth,
@@ -82,7 +82,8 @@ const control = openMissionControl({
   environmentVariables: configuredEnvironment,
   aiDiscoveryAdapters: liveAdapters.discoveryAdapters,
   modelProviders: liveAdapters.executionAdapters,
-  maxModelProviderAttempts: 3,
+  maxModelProviderAttempts: 1,
+  requireProductBlueprintApproval: true,
 });
 const activeJobs = new Map();
 const activeUnderstandingJobs = new Map();
@@ -348,7 +349,7 @@ function activity(record) {
       SUCCEEDED: ["Project verified", "Every binding outcome passed the completion gate."],
       FAILED: ["Build stopped", "A recorded failure prevented completion."],
       BLOCKED: ["Customer decision required", "Foundry cannot continue safely without resolving a blocker."],
-      EXHAUSTED: ["Repair budget exhausted", "Foundry stopped after exhausting novel repair strategies."],
+      EXHAUSTED: ["Build needs review", "Foundry stopped after bounded, distinct corrections did not resolve the verified issue. No additional paid repair was attempted."],
       CANCELLED: ["Mission cancelled", "Work stopped and the recorded workspace was preserved."],
     };
     const [title, detail] = moments[record.transition.to] ?? [
@@ -615,6 +616,9 @@ function modelRouting(events) {
 
 async function missionView(missionId) {
   const events = control.ledger.reportEvents(missionId);
+  const productTypeDiscovery =
+    control.understanding.latestProductTypeDiscovery(missionId);
+  const productBlueprint = control.understanding.blueprint(missionId);
   const decisionHistory = projectDecisionHistory(events);
   const state = events
     .filter((record) => record.type === "MISSION_TRANSITION")
@@ -650,13 +654,13 @@ async function missionView(missionId) {
     }
   }
   const contract = projectRequirementContract(events, missionId);
+  const approvedProjectContract = control.approvedContracts.latest(missionId);
   const executionProjection = projectExecutionProjection({
     contract,
     events,
     profile,
     projectDesign,
-    approvedProjectContract:
-      control.approvedContracts.latest(missionId),
+    approvedProjectContract,
   });
   let previewUrl = null;
   const persistedRuntime = events
@@ -679,6 +683,36 @@ async function missionView(missionId) {
   const understandingJob = activeUnderstandingJobs.get(missionId);
   const activities = events.map(activity).filter(Boolean);
   const routing = modelRouting(events);
+  const generatedMissionCall = control.models
+    .listCalls(missionId)
+    .filter(
+      (call) =>
+        call.taskClass === "FILE_GENERATION" &&
+        call.status === "SUCCEEDED" &&
+        call.structuredOutput?.contractHash !== undefined,
+    )
+    .at(-1) ?? null;
+  const generatedMissionPlan = generatedMissionCall === null
+    ? null
+    : {
+        requestId: generatedMissionCall.requestId,
+        provider: generatedMissionCall.provider,
+        modelId: generatedMissionCall.modelId,
+        contractHash: generatedMissionCall.structuredOutput.contractHash,
+        contractVersion: generatedMissionCall.structuredOutput.contractVersion,
+        supportedPlatform: generatedMissionCall.structuredOutput.supportedPlatform,
+        designDirectionHash:
+          generatedMissionCall.structuredOutput.designDirectionHash,
+        requirementClaims:
+          generatedMissionCall.structuredOutput.requirementClaims,
+        explicitExclusionIds:
+          generatedMissionCall.structuredOutput.explicitExclusionIds,
+        files: generatedMissionCall.structuredOutput.files.map((file) => ({
+          path: file.path,
+          contractRequirementIds: file.contractRequirementIds,
+          contentHash: createHash("sha256").update(file.content).digest("hex"),
+        })),
+      };
   if (understandingJob?.error !== null && understandingJob !== undefined) {
     const activeRoute = [...routing]
       .reverse()
@@ -690,9 +724,12 @@ async function missionView(missionId) {
     intent: missionIntent(events),
     state,
     profile,
+    productTypeDiscovery,
+    productBlueprint,
     proposalConfirmed,
     experience,
     contract,
+    approvedProjectContract,
     decisionHistory: decisionHistory.decisions,
     selectedEnhancements: decisionHistory.selectedEnhancements,
     discoveryConversation: projectDiscoveryConversation(events),
@@ -718,6 +755,7 @@ async function missionView(missionId) {
     activities,
     currentActivity: activities.at(-1) ?? null,
     modelRouting: routing,
+    generatedMissionPlan,
     activeModelRoute:
       [...routing].reverse().find((route) => route.status === "ACTIVE") ??
       null,
@@ -728,6 +766,9 @@ async function missionView(missionId) {
 
 function missionSummary(missionId) {
   const events = control.ledger.reportEvents(missionId);
+  const productTypeDiscovery =
+    control.understanding.latestProductTypeDiscovery(missionId);
+  const productBlueprint = control.understanding.blueprint(missionId);
   const decisionHistory = projectDecisionHistory(events);
   const state = events
     .filter((record) => record.type === "MISSION_TRANSITION")
@@ -768,6 +809,8 @@ function missionSummary(missionId) {
     intent: missionIntent(events),
     state,
     profile,
+    productTypeDiscovery,
+    productBlueprint,
     proposalConfirmed,
     contract: null,
     decisionHistory: decisionHistory.decisions,
@@ -864,7 +907,12 @@ function isProjectDeleted(missionId) {
 
 async function stopMissionWork(missionId, { cancel = false } = {}) {
   const job = activeJobs.get(missionId);
-  if (job !== undefined && job.child.connected && job.child.exitCode === null) {
+  if (
+    job?.child !== null &&
+    job?.child !== undefined &&
+    job.child.connected &&
+    job.child.exitCode === null
+  ) {
     await new Promise((resolve) => {
       job.child.send({ type: cancel ? "stop" : "shutdown" }, () => resolve());
     });
@@ -974,7 +1022,16 @@ for (const missionId of control.catalogue.listMissionIds()) {
       causationId: `${missionId}-recovered-understanding`,
     });
   }
-  if (executionRecoveryDecision(events).recover) {
+  const executionRecovery = executionRecoveryDecision(events);
+  if (executionRecovery.reason === "provider-attempt-interrupted") {
+    activeJobs.set(missionId, {
+      child: null,
+      error:
+        "Project generation was interrupted after provider dispatch. Start explicitly to avoid an automatic duplicate provider charge.",
+      completed: false,
+    });
+  }
+  if (executionRecovery.recover) {
     startMissionWorker(missionId);
   }
 }
@@ -1070,6 +1127,39 @@ const server = createServer(async (request, response) => {
       }
       const prior = await missionView(missionRoute.missionId);
       const nextProfileVersion = (prior.profile?.profileVersion ?? 0) + 1;
+      if (
+        answers.length === 1 &&
+        answers[0].selection?.kind === "blueprint-approval"
+      ) {
+        const suffix = `${prior.productBlueprint?.blueprintVersion ?? 0}-${Date.now()}`;
+        control.understanding.approveBlueprint({
+          missionId: missionRoute.missionId,
+          answer: answers[0],
+          eventId: `${missionRoute.missionId}-blueprint-approval-${suffix}`,
+          causationId: `${missionRoute.missionId}-customer-approval-${suffix}`,
+        });
+        return json(response, 200, await missionView(missionRoute.missionId));
+      }
+      const generatedOptionSelectionsOnly =
+        answers.length > 0 &&
+        answers.every(
+          (answer) =>
+            answer.selection !== undefined &&
+            answer.selection.mode !== "other" &&
+            answer.selection.kind !== "customer-message" &&
+            answer.selection.kind !== "product-subtype",
+        );
+      if (generatedOptionSelectionsOnly) {
+        const suffix = `${nextProfileVersion}-${Date.now()}`;
+        control.understanding.recordSelections({
+          missionId: missionRoute.missionId,
+          answers,
+          requestId: `${missionRoute.missionId}-selections-${suffix}`,
+          eventId: `${missionRoute.missionId}-selection-profile-${suffix}`,
+          causationId: `${missionRoute.missionId}-customer-selections-${suffix}`,
+        });
+        return json(response, 200, await missionView(missionRoute.missionId));
+      }
       startUnderstandingJob({
         missionId: missionRoute.missionId,
         intent: prior.intent,

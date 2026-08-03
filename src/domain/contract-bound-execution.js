@@ -61,6 +61,20 @@ function overlaps(left, right) {
   return false;
 }
 
+function preservesRequirementSubject(requirement, summary) {
+  if (overlaps(requirement.statement, summary)) return true;
+  // Production-build claims are often expressed by models as compiling,
+  // packaging, or bundling. Those are concrete execution synonyms, while the
+  // generic word "build" is intentionally excluded from ordinary overlap.
+  return (
+    requirement.kind === "acceptance-obligation" &&
+    /\bproduction build\b/iu.test(requirement.statement) &&
+    /\b(?:production|compile[sd]?|compilation|package[sd]?|packaging|bundle[sd]?)\b/iu.test(
+      summary,
+    )
+  );
+}
+
 function freeze(value) {
   if (value !== null && typeof value === "object" && !Object.isFrozen(value)) {
     Object.freeze(value);
@@ -82,6 +96,51 @@ export function approvedContractRequirementCatalogue(contractInput) {
     target.set(item.requirementId, item);
   }
   add(implementation, entry("customer-intent-1", "original-request", contract.originalCustomerRequest));
+  if (contract.productBlueprint !== undefined) {
+    const blueprint = contract.productBlueprint;
+    add(implementation, entry(
+      "approved-blueprint-version",
+      "product-blueprint",
+      `Product Blueprint version ${blueprint.blueprintVersion} integrity ${blueprint.integrityHash}. ${blueprint.productName}. ${blueprint.oneSentenceOutcome}`,
+    ));
+    add(implementation, entry(
+      "approved-product-type",
+      "product-type",
+      `${blueprint.exactProductType}. ${blueprint.selectedSubtypes.join(". ")}`,
+    ));
+    blueprint.requiredSurfaces.forEach((surface, index) => add(
+      implementation,
+      entry(`blueprint-surface-${index + 1}`, "required-surface", surface),
+    ));
+    blueprint.selectedFeatures.forEach((feature, index) => add(
+      implementation,
+      entry(`blueprint-feature-${index + 1}`, "selected-feature", feature),
+    ));
+    blueprint.businessRules.forEach((rule, index) => add(
+      implementation,
+      entry(`blueprint-business-rule-${index + 1}`, "business-rule", rule),
+    ));
+    blueprint.integrations.forEach((integration, index) => add(
+      implementation,
+      entry(`blueprint-integration-${index + 1}`, "integration", integration),
+    ));
+    blueprint.architecture.forEach((decision, index) => add(
+      implementation,
+      entry(`blueprint-architecture-${index + 1}`, "architecture", decision),
+    ));
+    blueprint.acceptanceRequirements.forEach((requirement, index) => add(
+      implementation,
+      entry(`blueprint-acceptance-${index + 1}`, "acceptance", requirement),
+    ));
+    blueprint.excludedFromV1.forEach((statement, index) => add(
+      exclusions,
+      entry(`blueprint-exclusion-${index + 1}`, "blueprint-exclusion", statement),
+    ));
+    blueprint.rejectedRecommendations.forEach((statement, index) => add(
+      exclusions,
+      entry(`blueprint-rejected-${index + 1}`, "blueprint-rejected", statement),
+    ));
+  }
   contract.customerFollowUpMessages.forEach((message, index) => add(
     implementation,
     entry(`customer-follow-up-${index + 1}`, "customer-follow-up", message),
@@ -154,6 +213,8 @@ export function deriveContractRoutingRequirements(contractInput, stackManifest) 
   return freeze({
     contractHash: contract.contentHash,
     contractVersion: contract.contractVersion,
+    blueprintHash: contract.productBlueprint?.integrityHash ?? null,
+    blueprintVersion: contract.productBlueprint?.blueprintVersion ?? null,
     supportedPlatform: contract.supportedPlatform,
     stackId: contract.selectedStackCapability.stackId,
     stackVersion: contract.selectedStackCapability.stackVersion,
@@ -241,7 +302,7 @@ export function validateContractBoundMissionPlan(plan, contractInput) {
     const requirement = requiredById.get(requirementId);
     if (requirement === undefined) fail(`Generated mission plan adds unapproved requirement "${requirementId}".`);
     if (claims.has(requirementId)) fail(`Generated mission plan duplicates requirement "${requirementId}".`);
-    if (!overlaps(requirement.statement, summary)) fail(`Generated mission plan reinterprets requirement "${requirementId}" without preserving its subject.`);
+    if (!preservesRequirementSubject(requirement, summary)) fail(`Generated mission plan reinterprets requirement "${requirementId}" without preserving its subject.`);
     claims.set(requirementId, summary);
   }
   const missing = [...requiredById.keys()].filter((requirementId) => !claims.has(requirementId));
@@ -341,18 +402,24 @@ export function createModelTaskContract({
       audiences: contract.audiences,
       workflows: contract.workflows,
       selectedDesignDirection: contract.selectedDesignDirection,
+      selectedDesignDirectionHash: approvedDesignDirectionHash(contract),
       acceptedRecommendations: contract.acceptedRecommendations,
       rejectedRecommendations: contract.rejectedRecommendations,
       customerDecisions: contract.customerDecisions,
       foundryDecisions: contract.foundryDecisions,
       decisionSelections: contract.decisionSelections ?? [],
+      productBlueprint: contract.productBlueprint ?? null,
       assumptions: contract.assumptions,
       explicitExclusions: contract.explicitExclusions,
+      explicitExclusionIds: catalogue.exclusionRequirements.map(
+        (requirement) => requirement.requirementId,
+      ),
       architectureConstraints: contract.architectureConstraints,
       supportedPlatform: contract.supportedPlatform,
       selectedStackCapability: contract.selectedStackCapability,
     },
     relevantRequirements,
+    requiredImplementationRequirementIds: ids,
     verificationObligations: contract.acceptanceObligations,
     verificationPlan: contract.verificationPlan,
     routingRequirements,
@@ -366,6 +433,7 @@ export function contractBoundModelPrompt(taskContract, instructions) {
   return [
     "MODEL TASK CONTRACT — BINDING",
     JSON.stringify(taskContract),
+    "Copy authoritative contractHash, contractVersion, supportedPlatform, designDirectionHash, and explicitExclusionIds values exactly from the binding task contract when the output schema requests them. Never calculate, abbreviate, or reinterpret those values. Return exactly one requirementClaims entry for every requiredImplementationRequirementIds value and trace every one of those identifiers to at least one generated file. In each implementationSummary, preserve at least one exact distinctive subject word from that requirement; for a production-build requirement, explicitly describe the production compilation, packaging, or bundle.",
     "INSTRUCTIONS",
     ...instructions.map((instruction, index) => `${index + 1}. ${text(instruction, `instructions[${index}]`)}`),
     "Do not reinterpret the original request. Do not omit an approved requirement, add an unapproved major feature, change platform or design direction, ignore a customer message, violate an exclusion, or weaken verification.",

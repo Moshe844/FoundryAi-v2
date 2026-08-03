@@ -9,6 +9,7 @@ import { DecisionBrief } from "./components/decision-brief";
 import { HomeView } from "./components/home-view";
 import { LifecycleOutcome } from "./components/lifecycle-outcome";
 import { ProjectDiscovery } from "./components/project-discovery";
+import { ProductTypeDiscovery } from "./components/product-type-discovery";
 import { ProjectsView } from "./components/project-list";
 import { ProviderView } from "./components/provider-view";
 import { StartBuildingTransition } from "./components/start-building-transition";
@@ -480,6 +481,22 @@ function Reading({
   onRetry: () => Promise<void>;
 }) {
   const route = mission.activeModelRoute;
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!mission.running) return undefined;
+    const timer = window.setInterval(() => setNow(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, [mission.running, route?.occurredAt]);
+  const startedAt = route?.occurredAt ?? mission.updatedAt;
+  const elapsedSeconds = startedAt
+    ? Math.max(0, Math.floor((now - Date.parse(startedAt)) / 1_000))
+    : 0;
+  const elapsed = elapsedSeconds >= 60
+    ? `${Math.floor(elapsedSeconds / 60)}m ${elapsedSeconds % 60}s`
+    : `${elapsedSeconds}s`;
+  const failedRoutes = mission.modelRouting.filter(
+    (candidate) => candidate.status === "FAILED",
+  ).length;
   return (
     <section className="act measure">
       <h1 className="t-display-l">Working out what you need</h1>
@@ -492,9 +509,14 @@ function Reading({
       </p>
       <p className="t-body-s ink-tertiary" style={{ marginTop: "var(--space-4)" }}>
         {route
-          ? `${route.providerFamily ?? route.provider} · ${route.modelId}`
+          ? `${route.providerFamily ?? route.provider} · ${route.modelId} · ${elapsed}`
           : "Choosing a model for this."}
       </p>
+      {failedRoutes > 0 && (
+        <p className="t-body-s ink-tertiary" style={{ marginTop: "var(--space-2)" }}>
+          {failedRoutes} earlier {failedRoutes === 1 ? "route" : "routes"} did not complete. Foundry is trying another approved route.
+        </p>
+      )}
       <p className="t-body-s ink-tertiary" style={{ marginTop: "var(--space-5)" }}>
         This is already recorded. You can leave and come back.
       </p>
@@ -904,7 +926,7 @@ function Stopped({
           {cancelled
             ? "You stopped this build."
             : mission.state === "EXHAUSTED"
-              ? "I ran out of safe approaches."
+              ? "I stopped at the safe repair limit."
               : mission.state === "BLOCKED"
                 ? "I need a decision before I can carry on."
                 : "I stopped, and I couldn't finish this."}
@@ -1236,29 +1258,63 @@ export default function Page() {
 
   /* ---- polling ---- */
   useEffect(() => {
-    if (currentMissionId === null || TERMINAL.has(current?.state ?? "")) return;
-    const timer = window.setInterval(
-      () => {
-        api<unknown>(`/missions/${currentMissionId}`)
-          .then(validateMission)
-          .then((mission) => {
-            if (deletedMissionIdsRef.current.has(mission.missionId)) return;
-            setCurrent(mission);
-            setMissions((items) => [
-              mission,
-              ...items.filter((item) => item.missionId !== mission.missionId),
-            ]);
-          })
-          .catch((failure) => {
-            if (!deletedMissionIdsRef.current.has(currentMissionId)) {
-              setError(failure.message);
-            }
-          });
-      },
-      current?.error === null ? 1000 : 3000,
-    );
-    return () => window.clearInterval(timer);
-  }, [current?.error, current?.state, currentMissionId]);
+    if (
+      currentMissionId === null ||
+      (TERMINAL.has(current?.state ?? "") && !current?.running)
+    ) return;
+    let disposed = false;
+    let timer: number | undefined;
+    let requestController: AbortController | null = null;
+
+    const poll = async () => {
+      requestController = new AbortController();
+      try {
+        const mission = validateMission(
+          await api<unknown>(`/missions/${currentMissionId}`, {
+            signal: requestController.signal,
+          }),
+        );
+        if (
+          disposed ||
+          deletedMissionIdsRef.current.has(mission.missionId)
+        ) return;
+        setCurrent((existing) => {
+          if (existing?.missionId !== mission.missionId) return existing;
+          const existingTime = Date.parse(existing.updatedAt ?? "");
+          const candidateTime = Date.parse(mission.updatedAt ?? "");
+          return Number.isFinite(existingTime) &&
+            Number.isFinite(candidateTime) &&
+            candidateTime < existingTime
+            ? existing
+            : mission;
+        });
+        setMissions((items) => [
+          mission,
+          ...items.filter((item) => item.missionId !== mission.missionId),
+        ]);
+        setError(null);
+      } catch (failure) {
+        if (
+          !disposed &&
+          !(failure instanceof DOMException && failure.name === "AbortError") &&
+          !deletedMissionIdsRef.current.has(currentMissionId)
+        ) {
+          setError(failure instanceof Error ? failure.message : String(failure));
+        }
+      } finally {
+        if (!disposed) {
+          timer = window.setTimeout(poll, current?.error === null ? 1000 : 3000);
+        }
+      }
+    };
+
+    void poll();
+    return () => {
+      disposed = true;
+      requestController?.abort();
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [current?.error, current?.running, current?.state, currentMissionId]);
 
   const open = useCallback((mission: Mission) => {
     setStartHandoff(null);
@@ -1296,8 +1352,8 @@ export default function Page() {
     }
   }
 
-  async function clarify(answers: CustomerFollowUpAnswer[]) {
-    if (current === null) return;
+  async function clarify(answers: CustomerFollowUpAnswer[]): Promise<boolean> {
+    if (current === null) return false;
     const missionId = current.missionId;
     setBusy(true);
     setError(null);
@@ -1319,8 +1375,10 @@ export default function Page() {
       }
       if (revised.error !== null) throw new Error(revised.error);
       if (revised.proposalConfirmed) scrollToSurfaceStart();
+      return true;
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : String(failure));
+      return false;
     } finally {
       setBusy(false);
     }
@@ -1481,6 +1539,18 @@ export default function Page() {
         />
       );
     }
+    if (
+      mission.profile === null &&
+      mission.productTypeDiscovery !== null
+    ) {
+      return (
+        <ProductTypeDiscovery
+          busy={busy || mission.running}
+          discovery={mission.productTypeDiscovery}
+          onContinue={clarify}
+        />
+      );
+    }
     if (experience.surface === "reading") {
       return (
         <Reading mission={mission} busy={busy} onRetry={retryUnderstanding} />
@@ -1496,15 +1566,15 @@ export default function Page() {
           understanding={experience.understanding}
           unsupported={experience.unsupported}
           busy={busy}
-          onDesignWeb={() =>
-            clarify([
+          onDesignWeb={async () => {
+            await clarify([
               {
                 questionId: "customer-web-version",
                 answer:
                   "Design a web version of this instead. It must run in a browser.",
               },
-            ])
-          }
+            ]);
+          }}
           onStartOver={() => setView("home")}
         />
       );
@@ -1549,6 +1619,7 @@ export default function Page() {
       return (
         <DecisionBrief
           brief={experience.decisionBrief}
+          blueprint={mission.productBlueprint}
           busy={busy}
           missionRunning={mission.running}
           onStart={start}

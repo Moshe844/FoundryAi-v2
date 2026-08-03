@@ -110,6 +110,7 @@ export function createAiProviderRegistry({
     }
     executionAdapterMap.set(adapter.providerId, adapter);
     executionProviderMetadata.push({
+      fixtureOnly: adapter.fixtureOnly === true,
       providerId: adapter.providerId,
       providerFamily: adapter.providerFamily ?? "GPT",
       modelId: adapter.modelId ?? adapter.providerId,

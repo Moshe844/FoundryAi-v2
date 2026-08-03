@@ -16,10 +16,15 @@ import {
   normalizeProjectProfile,
 } from "../domain/project-profile.js";
 import {
+  DESIGN_VISUAL_SYSTEM_SCHEMA,
   PROJECT_DESIGN_SCHEMA,
   normalizeProjectDesign,
   validateProjectDesignQuality,
 } from "../domain/project-design.js";
+import {
+  createProductBlueprint,
+  normalizeProductBlueprint,
+} from "../domain/product-blueprint.js";
 import {
   createApprovedProjectContract,
   validateApprovedProjectContractConsistency,
@@ -30,9 +35,15 @@ import {
   WEB_STACK_MANIFEST,
 } from "../domain/toolchain-stack.js";
 import {
+  PRODUCT_TYPE_DISCOVERY_SCHEMA,
+  normalizeProductTypeDiscovery,
+  productTypeDiscoveryPrompt,
+  shouldDiscoverProductType,
+  validateDiscoveryPortfolioDifferentiation,
+} from "../domain/product-type-discovery.js";
+import {
   classifyModelRouteFailure,
   excludePermanentlyRejectedRoutes,
-  rankRoutesByPersistedTaskHistory,
   validateStructuredModelOutput,
 } from "../work-plane/model-gateway.js";
 
@@ -40,10 +51,28 @@ export const PROJECT_UNDERSTANDING_SOURCE =
   "PROJECT_UNDERSTANDING_SERVICE";
 const PROJECT_UNDERSTANDING_DEPTH = TaskDepth.ARCHITECTURE;
 const PROJECT_UNDERSTANDING_TIER = ModelTier.ARCHITECTURE;
+// Product intelligence is accepted only when the selected route produces a
+// publishable first response. Paid correction and provider failover loops hide
+// contract defects and multiply cost, so they are intentionally disabled.
+const MAX_PRODUCT_INTELLIGENCE_ROUTES = 1;
+const MAX_PRODUCT_INTELLIGENCE_GENERATIONS = 1;
 const PROJECT_DESIGN_MODEL_FIELDS = Object.freeze([
   ...PROJECT_DESIGN_SCHEMA.required,
   "designAlternatives",
 ]);
+
+export function projectGroundingContext(intent, answers = []) {
+  return [
+    intent,
+    ...answers.flatMap((answer) => [
+      answer?.answer,
+      answer?.selection?.value,
+      answer?.selection?.reason,
+    ]),
+  ]
+    .filter((value) => typeof value === "string" && value.trim() !== "")
+    .join("\n");
+}
 
 const stringArray = Object.freeze({
   type: "array",
@@ -301,6 +330,10 @@ const understandingSchema = Object.freeze({
     family: { type: "string", enum: Object.values(ProjectFamily) },
     platform: { type: "string", enum: PROJECT_PLATFORMS },
     ...PROJECT_DESIGN_SCHEMA.properties,
+    designAlternatives: {
+      ...PROJECT_DESIGN_SCHEMA.properties.designAlternatives,
+      maxItems: 12,
+    },
     capabilities: {
       type: "array",
       items: {
@@ -315,6 +348,491 @@ const understandingSchema = Object.freeze({
     missingCustomerContent: stringArray,
   },
 });
+
+const fastText = Object.freeze({ type: "string", minLength: 1, maxLength: 240 });
+const fastList = Object.freeze({
+  type: "array",
+  minItems: 1,
+  maxItems: 5,
+  items: fastText,
+});
+export const FAST_INITIAL_UNDERSTANDING_SCHEMA = Object.freeze({
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "name",
+    "family",
+    "platform",
+    "customerOutcome",
+    "intendedUsers",
+    "primaryGoal",
+    "primaryJourneys",
+    "essentialCapabilities",
+    "explicitExclusions",
+    "designDirection",
+    "designAlternatives",
+    "observations",
+    "opportunities",
+    "risks",
+    "assumptions",
+    "recommendations",
+    "decisions",
+    "capabilities",
+    "dataConcepts",
+    "architectureDecisions",
+    "customerSuppliedContent",
+    "missingCustomerContent",
+  ],
+  properties: {
+    name: { ...fastText, maxLength: 80 },
+    family: { type: "string", enum: Object.values(ProjectFamily) },
+    platform: { type: "string", enum: PROJECT_PLATFORMS },
+    customerOutcome: fastText,
+    intendedUsers: fastList,
+    primaryGoal: fastText,
+    primaryJourneys: fastList,
+    essentialCapabilities: {
+      type: "array",
+      minItems: 1,
+      maxItems: 7,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["statement", "acceptanceMethod"],
+        properties: {
+          statement: fastText,
+          acceptanceMethod:
+            PROJECT_DESIGN_SCHEMA.properties.verificationPlan.items.properties
+              .acceptanceMethod,
+        },
+      },
+    },
+    explicitExclusions: fastList,
+    designDirection: {
+      type: "object",
+      additionalProperties: false,
+      required: [
+        "visualPersonality",
+        "layoutStrategy",
+        "informationDensity",
+        "navigationApproach",
+        "responsivePriority",
+        "accessibilityNeeds",
+        "rationale",
+      ],
+      properties: {
+        visualPersonality: fastText,
+        layoutStrategy: fastText,
+        informationDensity: fastText,
+        navigationApproach: fastText,
+        responsivePriority: fastText,
+        accessibilityNeeds: fastList,
+        rationale: fastText,
+      },
+    },
+    designAlternatives: {
+      type: "array",
+      minItems: 3,
+      maxItems: 3,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "name",
+          "whyItFits",
+          "visualPersonality",
+          "layoutApproach",
+          "tradeoff",
+          "recommended",
+          "visualSystem",
+        ],
+        properties: {
+          name: fastText,
+          whyItFits: fastText,
+          visualPersonality: fastText,
+          layoutApproach: fastText,
+          tradeoff: fastText,
+          recommended: { type: "boolean" },
+          visualSystem: DESIGN_VISUAL_SYSTEM_SCHEMA,
+        },
+      },
+    },
+    observations: fastList,
+    opportunities: fastList,
+    risks: fastList,
+    assumptions: { ...fastList, minItems: 0 },
+    recommendations: {
+      type: "array",
+      minItems: 3,
+      maxItems: 3,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: [
+          "title",
+          "specificValue",
+          "whyThisProjectNeedsIt",
+          "selectedByDefault",
+        ],
+        properties: {
+          title: fastText,
+          specificValue: fastText,
+          whyThisProjectNeedsIt: fastText,
+          selectedByDefault: { type: "boolean" },
+        },
+      },
+    },
+    decisions: {
+      type: "array",
+      maxItems: 2,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["question", "recommendedOption", "alternatives"],
+        properties: {
+          question: fastText,
+          recommendedOption: fastText,
+          alternatives: {
+            type: "array",
+            minItems: 3,
+            maxItems: 3,
+            items: fastText,
+          },
+        },
+      },
+    },
+    capabilities: {
+      type: "array",
+      maxItems: 10,
+      items: {
+        type: "string",
+        enum: WEB_STACK_MANIFEST.supportedCapabilities,
+      },
+    },
+    dataConcepts: fastList,
+    architectureDecisions: fastList,
+    customerSuppliedContent:
+      legacyProfileProjectionSchema.properties.customerSuppliedContent,
+    missingCustomerContent: { ...fastList, minItems: 0 },
+  },
+});
+
+export function normalizeUnderstandingCandidateBounds(candidate) {
+  if (candidate === null || typeof candidate !== "object") {
+    return candidate;
+  }
+  let designAlternatives = candidate.designAlternatives;
+  if (
+    Array.isArray(designAlternatives) &&
+    designAlternatives.length > 7
+  ) {
+    const retained = designAlternatives.slice(0, 7);
+    const recommended = designAlternatives.find(
+      (alternative) => alternative?.recommended === true,
+    );
+    if (recommended !== undefined && !retained.includes(recommended)) {
+      retained[retained.length - 1] = recommended;
+    }
+    designAlternatives = retained;
+  }
+  const audience = String(
+    candidate.projectIntent?.intendedUsers?.[0] ?? "the people using this project",
+  ).trim();
+  const technicalQuestionTerms =
+    /\b(?:api|architecture|database|delegated|middleware|oauth|persistence|runtime|schema|server-side|stateless|topology|webhook)\b/iu;
+  const decisions = Array.isArray(candidate.decisions)
+    ? candidate.decisions.map((decision) => {
+        const alternatives = Array.isArray(decision?.alternatives)
+          ? decision.alternatives
+          : [];
+        const consequences = Array.isArray(decision?.consequenceOfEachChoice)
+          ? decision.consequenceOfEachChoice
+          : [];
+        const seen = new Set();
+        const retainedIndexes = alternatives
+          .map((alternative, index) => ({
+            index,
+            key: String(alternative).trim().replace(/\s+/gu, " ").toLowerCase(),
+          }))
+          .filter(({ key }) => {
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+          })
+          .map(({ index }) => index);
+        const canDeduplicate =
+          retainedIndexes.length >= 3 &&
+          retainedIndexes.length < alternatives.length &&
+          consequences.length === alternatives.length;
+        return {
+          ...decision,
+          customerFriendlyQuestion: technicalQuestionTerms.test(
+            String(decision?.customerFriendlyQuestion ?? ""),
+          )
+            ? `Which customer-visible outcome should Foundry prioritize for ${audience}?`
+            : decision.customerFriendlyQuestion,
+          alternatives: canDeduplicate
+            ? retainedIndexes.map((index) => alternatives[index])
+            : alternatives,
+          consequenceOfEachChoice: canDeduplicate
+            ? retainedIndexes.map((index) => consequences[index])
+            : consequences,
+        };
+      })
+    : candidate.decisions;
+  return {
+    ...candidate,
+    designAlternatives,
+    decisions,
+  };
+}
+
+function groundedFastText(value, anchor, minimumWords = 8) {
+  const base = String(value ?? "").trim();
+  const words = base.split(/\s+/u).filter(Boolean);
+  if (words.length >= minimumWords) return base;
+  const normalizedAnchor = String(anchor ?? "")
+    .trim()
+    .replace(/[.!?]+$/u, "");
+  return `${base}${/[.!?]$/u.test(base) ? "" : "."} This supports ${normalizedAnchor}.`;
+}
+
+export function normalizeFastDecisionAlternatives(
+  recommendedOption,
+  alternatives,
+) {
+  const unique = [];
+  for (const value of [recommendedOption, ...(alternatives ?? [])]) {
+    if (typeof value !== "string" || value.trim() === "") continue;
+    if (
+      unique.some(
+        (existing) =>
+          existing.trim().toLowerCase() === value.trim().toLowerCase(),
+      )
+    ) continue;
+    unique.push(value);
+  }
+  return unique.length >= 3 ? unique.slice(0, 3) : [];
+}
+
+export function expandFastInitialUnderstanding(brief) {
+  const customerOutcome = groundedFastText(
+    brief.customerOutcome,
+    brief.primaryGoal,
+    8,
+  );
+  const primaryGoal = groundedFastText(
+    brief.primaryGoal,
+    customerOutcome,
+    6,
+  );
+  const intendedUsers = [...brief.intendedUsers];
+  const recommendations = brief.recommendations.map((item) => ({
+    title: item.title,
+    specificValue: groundedFastText(item.specificValue, primaryGoal, 6),
+    whyThisProjectNeedsIt: groundedFastText(
+      item.whyThisProjectNeedsIt,
+      primaryGoal,
+      8,
+    ),
+    impact: `Changes first-version scope and proof for ${item.title}.`,
+    selectedByDefault: item.selectedByDefault,
+    confidence: {
+      score: 0.8,
+      rationale: groundedFastText(item.whyThisProjectNeedsIt, primaryGoal, 8),
+    },
+    requiredDependencies: [],
+  }));
+  const recommendedIndex = Math.max(
+    0,
+    brief.designAlternatives.findIndex((item) => item.recommended === true),
+  );
+  const recommendedDirection = brief.designAlternatives[recommendedIndex];
+  const designDirection = {
+    visualPersonality: recommendedDirection.visualPersonality,
+    tone: brief.designDirection.visualPersonality,
+    layoutStrategy: brief.designDirection.layoutStrategy,
+    informationDensity: brief.designDirection.informationDensity,
+    navigationApproach: brief.designDirection.navigationApproach,
+    responsivePriority: brief.designDirection.responsivePriority,
+    accessibilityNeeds: brief.designDirection.accessibilityNeeds,
+    contentStrategy: groundedFastText(
+      brief.designDirection.rationale,
+      primaryGoal,
+      8,
+    ),
+    interactionStyle: brief.designDirection.navigationApproach,
+    rationale: groundedFastText(
+      brief.designDirection.rationale,
+      primaryGoal,
+      8,
+    ),
+  };
+  const designAlternatives = brief.designAlternatives.map((item, index) => {
+    const whyItFits = groundedFastText(item.whyItFits, primaryGoal, 8);
+    return {
+      name: item.name,
+      description: whyItFits,
+      whyItFits,
+      layoutApproach: item.layoutApproach,
+      visualPersonality: item.visualPersonality,
+      informationDensity: designDirection.informationDensity,
+      navigationApproach: designDirection.navigationApproach,
+      mobileBehavior: designDirection.responsivePriority,
+      tradeoff: groundedFastText(item.tradeoff, primaryGoal, 5),
+      confidence: { score: 0.75, rationale: whyItFits },
+      recommended: index === recommendedIndex,
+      preview: {
+        typographyCharacter: item.visualPersonality,
+        spacingDensity: designDirection.informationDensity,
+        colorMood: item.visualPersonality,
+        hierarchy: item.layoutApproach,
+      },
+      visualSystem: item.visualSystem,
+    };
+  });
+  const decisions = brief.decisions.flatMap((item) => {
+    const alternatives = normalizeFastDecisionAlternatives(
+      item.recommendedOption,
+      item.alternatives,
+    );
+    if (alternatives.length < 3) return [];
+    return [{
+      customerFriendlyQuestion: item.question,
+      whyItMatters: groundedFastText(item.question, primaryGoal, 8),
+      recommendation: item.recommendedOption,
+      recommendationReason: groundedFastText(
+        `The recommended choice best supports ${primaryGoal}`,
+        customerOutcome,
+        8,
+      ),
+      alternatives,
+      consequenceOfEachChoice: alternatives.map(
+        (option) =>
+          `Choosing ${option} changes the approved customer-visible scope for ${primaryGoal}.`,
+      ),
+      canFoundryDecide: false,
+      architectureImpact: `The selected outcome changes how Foundry delivers ${primaryGoal}.`,
+      scopeImpact: `The selected outcome changes first-version scope for ${primaryGoal}.`,
+    }];
+  });
+  const verificationPlan = [
+    ...brief.essentialCapabilities.map((capability) => ({
+      observableOutcome: `${capability.statement}: observable evidence proves this approved capability works.`,
+      acceptanceMethod: capability.acceptanceMethod,
+      evidenceRequired: [`Recorded evidence for ${capability.statement}`],
+      sourceRequirement: "customer-intent-1",
+      origin: "customer-stated",
+      dependencyIndexes: [],
+    })),
+    ...(brief.platform === "web"
+      ? [{
+          observableOutcome: `${brief.name} preserves its approved ${brief.designDirection.informationDensity}; ${brief.designDirection.responsivePriority}; ${brief.designDirection.navigationApproach}; and accessible keyboard behavior including ${brief.designDirection.accessibilityNeeds.join(", ")}.`,
+          acceptanceMethod: "browser-check",
+          evidenceRequired: [
+            "Responsive viewport, keyboard interaction, visible focus, and horizontal-overflow browser evidence",
+          ],
+          sourceRequirement: "foundry-derived-design-quality",
+          origin: "foundry-derived",
+          dependencyIndexes: [],
+        }]
+      : []),
+    {
+      observableOutcome: `${brief.name} completes a production build for the approved first-version scope.`,
+      acceptanceMethod: "production-build",
+      evidenceRequired: ["Successful production build output"],
+      sourceRequirement: "foundry-derived-production-readiness",
+      origin: "foundry-derived",
+      dependencyIndexes: [],
+    },
+    {
+      observableOutcome: `${brief.name} completes its primary browser workflow without blocking browser errors.`,
+      acceptanceMethod: "browser-errors",
+      evidenceRequired: ["Browser console and page-error evidence"],
+      sourceRequirement: "foundry-derived-browser-stability",
+      origin: "foundry-derived",
+      dependencyIndexes: [],
+    },
+  ];
+  const observations = brief.observations.map((item) =>
+    groundedFastText(item, customerOutcome, 8),
+  );
+  return {
+    name: brief.name,
+    family: brief.family,
+    platform: brief.platform,
+    projectIntent: {
+      customerOutcome,
+      businessContext: groundedFastText(customerOutcome, primaryGoal, 8),
+      intendedUsers,
+      primaryGoal,
+      secondaryGoals: recommendations.map((item) => item.specificValue),
+      successDefinition: groundedFastText(
+        `Success means ${customerOutcome}`,
+        primaryGoal,
+        8,
+      ),
+      constraints: [...brief.explicitExclusions, ...brief.architectureDecisions],
+      confidence: {
+        score: 0.8,
+        rationale: groundedFastText(customerOutcome, primaryGoal, 8),
+      },
+    },
+    userExperiencePlan: {
+      primaryJourneys: brief.primaryJourneys,
+      secondaryJourneys: [],
+      criticalMoments: brief.primaryJourneys,
+      failureStates: brief.risks,
+      trustMoments: observations,
+      repeatedTasks: brief.primaryJourneys,
+      adminResponsibilities: [
+        groundedFastText(
+          `${intendedUsers[0]} supports ${primaryGoal}`,
+          customerOutcome,
+          8,
+        ),
+      ],
+    },
+    productProposal: {
+      essentialCapabilities: brief.essentialCapabilities.map(
+        (item) => item.statement,
+      ),
+      recommendedCapabilities: recommendations.map(
+        (item) => item.specificValue,
+      ),
+      intentionallyExcludedCapabilities: brief.explicitExclusions,
+      futureCapabilities: [],
+      rationale: groundedFastText(customerOutcome, primaryGoal, 8),
+      dependencies: brief.architectureDecisions,
+      scopeImpact: groundedFastText(
+        brief.explicitExclusions.join("; "),
+        primaryGoal,
+        8,
+      ),
+    },
+    designDirection,
+    designAlternatives,
+    foundryInsights: {
+      observations,
+      opportunities: brief.opportunities,
+      risks: brief.risks,
+      ambiguities: [],
+      assumptions: brief.assumptions,
+      confidence: {
+        score: 0.8,
+        rationale: groundedFastText(customerOutcome, primaryGoal, 8),
+      },
+    },
+    decisions,
+    recommendations,
+    verificationPlan,
+    capabilities: brief.capabilities,
+    dataConcepts: brief.dataConcepts,
+    architectureDecisions: brief.architectureDecisions,
+    customerSuppliedContent: brief.customerSuppliedContent,
+    missingCustomerContent: brief.missingCustomerContent,
+  };
+}
 
 const UNDERSTANDING_REVISION_FIELDS = Object.freeze([
   ...PROJECT_DESIGN_MODEL_FIELDS,
@@ -693,23 +1211,21 @@ function customerContentFromUnderstanding(intent, answers, result) {
       text: String(answer?.answer ?? ""),
     })),
   ];
-  const supplied = (result.customerSuppliedContent ?? []).map(
-    (item, index) => {
+  const supplied = (result.customerSuppliedContent ?? []).flatMap(
+    (item) => {
       const value = String(item.value).trim();
       const comparable = normalizeSourceText(value);
       const matched = sources.find((source) =>
         normalizeSourceText(source.text).includes(comparable),
       );
       if (matched === undefined) {
-        throw new TypeError(
-          `customerSuppliedContent[${index}] is not a verbatim customer-provided value.`,
-        );
+        return [];
       }
-      return {
+      return [{
         kind: item.kind,
         value,
         source: matched.source,
-      };
+      }];
     },
   );
   return {
@@ -769,6 +1285,14 @@ function profileFromUnderstanding(
     intent,
     answers,
     result,
+  );
+  const resolvedCustomerQuestionIds = new Set(
+    answers.flatMap((answer) => {
+      if (answer.selection?.kind === "decision") {
+        return [answer.selection.subjectId];
+      }
+      return answer.selection === undefined ? [answer.questionId] : [];
+    }),
   );
   if (
     customerContent.supplied.length === 0 &&
@@ -851,22 +1375,28 @@ function profileFromUnderstanding(
         tradeoff: alternative.tradeoff,
         confidence: alternative.confidence,
         preview: alternative.preview,
+        visualSystem: alternative.visualSystem,
         recommended: alternative.recommended,
       }),
     ),
     openQuestions: projectDesign.decisions
       .filter((decision) => !decision.canFoundryDecide)
       .map((decision, index) => ({
+        decision,
         questionId: identifier("question", index),
-        prompt: decision.customerFriendlyQuestion,
-        reason: decision.whyItMatters,
-        answerOptions: decision.alternatives,
-        recommendation: decision.recommendation,
-        recommendationReason: decision.recommendationReason,
-        consequences: decision.consequenceOfEachChoice,
-        architectureImpact: decision.architectureImpact,
-        scopeImpact: decision.scopeImpact,
-      })),
+      }))
+      .filter(({ questionId }) => !resolvedCustomerQuestionIds.has(questionId))
+      .map(({ decision, questionId }) => ({
+          questionId,
+          prompt: decision.customerFriendlyQuestion,
+          reason: decision.whyItMatters,
+          answerOptions: decision.alternatives,
+          recommendation: decision.recommendation,
+          recommendationReason: decision.recommendationReason,
+          consequences: decision.consequenceOfEachChoice,
+          architectureImpact: decision.architectureImpact,
+          scopeImpact: decision.scopeImpact,
+        })),
     contextualSuggestions: projectDesign.recommendations.map(
       (suggestion, index) => ({
         suggestionId: identifier("suggestion", index),
@@ -915,6 +1445,24 @@ function latestProjectDesign(ledger, missionId) {
   return null;
 }
 
+function latestProductTypeDiscovery(ledger, missionId) {
+  const records = ledger.listEvents(missionId);
+  for (let index = records.length - 1; index >= 0; index -= 1) {
+    const candidate = records[index]?.fact?.metadata?.productTypeDiscovery;
+    if (candidate !== undefined) return structuredClone(candidate);
+  }
+  return null;
+}
+
+function latestProductBlueprint(ledger, missionId) {
+  const records = ledger.listEvents(missionId);
+  for (let index = records.length - 1; index >= 0; index -= 1) {
+    const candidate = records[index]?.fact?.metadata?.productBlueprint;
+    if (candidate !== undefined) return normalizeProductBlueprint(candidate);
+  }
+  return null;
+}
+
 function latestUnderstandingContext(ledger, missionId) {
   const records = ledger.listEvents(missionId);
   for (let index = records.length - 1; index >= 0; index -= 1) {
@@ -927,6 +1475,15 @@ function latestUnderstandingContext(ledger, missionId) {
         ),
       };
     }
+  }
+  return null;
+}
+
+function latestBlueprintApproval(ledger, missionId) {
+  const records = ledger.listEvents(missionId);
+  for (let index = records.length - 1; index >= 0; index -= 1) {
+    const approval = records[index]?.fact?.metadata?.productBlueprintApproval;
+    if (approval !== undefined) return structuredClone(approval);
   }
   return null;
 }
@@ -968,6 +1525,8 @@ export function normalizeCustomerFollowUpAnswers(value) {
           "value",
         ];
         const kinds = new Set([
+          "product-subtype",
+          "blueprint-approval",
           "design-direction",
           "recommendation",
           "decision",
@@ -1070,30 +1629,41 @@ function validateStructuredSelectionsAgainstCurrent(
   currentProfile,
   currentDesign,
 ) {
-  if (answers.every((answer) => answer.selection === undefined)) return;
+  const projectAnswers = answers.filter(
+    (answer) =>
+      answer.selection !== undefined &&
+      ![
+        "product-subtype",
+        "customer-message",
+        "proposal-confirmation",
+        "blueprint-approval",
+      ].includes(answer.selection.kind),
+  );
+  if (projectAnswers.length === 0) return;
   if (currentProfile === null || currentDesign === null) {
     throw new TypeError(
       "Structured choices require a current validated Project Design.",
     );
   }
   const recommendations = currentDesign.recommendations.map((item, index) => ({
-    id: `suggestion-${index + 1}`,
+    id: identifier("suggestion", index),
     item,
   }));
   const decisions = currentDesign.decisions
     .filter((item) => !item.canFoundryDecide)
-    .map((item, index) => ({ id: `question-${index + 1}`, item }));
+    .map((item, index) => ({ id: identifier("question", index), item }));
   const directions = currentDesign.designAlternatives.map((item, index) => ({
     id: `alternative-${index + 1}`,
     item,
   }));
 
-  for (const answer of answers) {
+  for (const answer of projectAnswers) {
     const selection = answer.selection;
     if (
       selection === undefined ||
       selection.kind === "customer-message" ||
-      selection.kind === "proposal-confirmation"
+      selection.kind === "proposal-confirmation" ||
+      selection.kind === "blueprint-approval"
     ) {
       continue;
     }
@@ -1158,15 +1728,68 @@ function validateStructuredSelectionsAgainstCurrent(
   }
 }
 
+function validateProductSubtypeSelections(answers, discovery) {
+  const selections = answers
+    .map((answer) => answer.selection)
+    .filter((selection) => selection?.kind === "product-subtype");
+  if (selections.length === 0) return;
+  if (discovery === null) {
+    throw new TypeError("Product subtype choices require a current product-type discovery.");
+  }
+  const generated = new Map(
+    discovery.subtypes.map((subtype) => [subtype.optionId, subtype]),
+  );
+  const selectedGenerated = [];
+  for (const selection of selections) {
+    if (selection.subjectId !== "product-type") {
+      throw new TypeError("The product subtype choice has an invalid subject.");
+    }
+    if (selection.mode === "other") continue;
+    if (![
+      "accept-recommendation",
+      "delegate",
+      "select-option",
+    ].includes(selection.mode)) {
+      throw new TypeError("The product subtype choice has an invalid selection mode.");
+    }
+    const subtype = generated.get(selection.optionId);
+    if (
+      subtype === undefined ||
+      subtype.title !== selection.value ||
+      (["accept-recommendation", "delegate"].includes(selection.mode) &&
+        !subtype.recommended)
+    ) {
+      throw new TypeError("The product subtype choice is not one of Foundry's generated interpretations.");
+    }
+    selectedGenerated.push(subtype);
+  }
+  if (
+    selectedGenerated.length > 1 &&
+    (
+      selectedGenerated.some((subtype) => subtype.canCombine !== true) ||
+      !selectedGenerated
+        .map((subtype) => new Set(subtype.compatibilityTags ?? []))
+        .reduce(
+          (shared, tags) => new Set([...shared].filter((tag) => tags.has(tag))),
+        ).size
+    )
+  ) {
+    throw new TypeError("One or more selected product subtypes cannot be safely combined.");
+  }
+}
+
 function resolvedDecisionSelections(projectDesign, answers, profileVersion) {
   const explicit = answers
     .map((answer) => answer.selection)
     .filter(Boolean);
   const latest = new Map();
   for (const selection of explicit) {
-    latest.set(`${selection.kind}:${selection.subjectId}`, selection);
+    const identity = selection.kind === "product-subtype"
+      ? `${selection.kind}:${selection.subjectId}:${selection.optionId ?? selection.value}`
+      : `${selection.kind}:${selection.subjectId}`;
+    latest.set(identity, selection);
   }
-  const result = [...latest.values()];
+  const result = [...latest.values()].map((selection) => ({ ...selection }));
 
   if (!result.some((item) => item.kind === "design-direction")) {
     const recommended = projectDesign.designAlternatives.find(
@@ -1188,7 +1811,7 @@ function resolvedDecisionSelections(projectDesign, answers, profileVersion) {
   }
 
   for (const [index, recommendation] of projectDesign.recommendations.entries()) {
-    const subjectId = `suggestion-${index + 1}`;
+    const subjectId = identifier("suggestion", index);
     const existing = result.find(
       (item) =>
         item.kind === "recommendation" &&
@@ -1205,6 +1828,11 @@ function resolvedDecisionSelections(projectDesign, answers, profileVersion) {
         classification: "feature recommendation",
         sourceProfileVersion: profileVersion,
       });
+    } else if (existing.value !== recommendation.title) {
+      existing.value = recommendation.title;
+      existing.reason = recommendation.whyThisProjectNeedsIt;
+      existing.optionId = subjectId;
+      existing.sourceProfileVersion = profileVersion;
     }
   }
 
@@ -1213,7 +1841,7 @@ function resolvedDecisionSelections(projectDesign, answers, profileVersion) {
     if (!decision.canFoundryDecide) customerQuestionIndex += 1;
     const subjectId = decision.canFoundryDecide
       ? `foundry-decision-${index + 1}`
-      : `question-${customerQuestionIndex}`;
+      : identifier("question", customerQuestionIndex - 1);
     const existing = result.find(
       (item) =>
         item.kind === "decision" &&
@@ -1246,6 +1874,49 @@ function latestBindings(ledger, missionId) {
   return null;
 }
 
+export function approvedArchitectureConstraints(projectDesign, profile) {
+  return Object.freeze([
+    ...new Set([
+      ...projectDesign.projectIntent.constraints,
+      ...profile.architectureDecisions,
+    ]),
+  ]);
+}
+
+function applyStructuredSelectionChoices(currentUnderstanding, answers) {
+  const revised = structuredClone(currentUnderstanding);
+  const designSelection = [...answers]
+    .reverse()
+    .find((answer) => answer.selection?.kind === "design-direction")
+    ?.selection;
+  if (designSelection === undefined) return revised;
+  const selectedIndex = /^alternative-(?<index>\d+)$/u.exec(
+    String(designSelection.optionId ?? ""),
+  )?.groups?.index;
+  const selected = selectedIndex === undefined
+    ? revised.designAlternatives.find(
+        (alternative) =>
+          alternative.name === designSelection.value ||
+          alternative.visualPersonality === designSelection.value,
+      )
+    : revised.designAlternatives[Number(selectedIndex) - 1];
+  if (selected === undefined) return revised;
+  revised.designDirection = {
+    ...revised.designDirection,
+    visualPersonality: selected.visualPersonality,
+    layoutStrategy: selected.layoutApproach,
+    informationDensity: selected.informationDensity,
+    navigationApproach: selected.navigationApproach,
+    responsivePriority: selected.mobileBehavior,
+    rationale: selected.whyItFits,
+  };
+  revised.designAlternatives = revised.designAlternatives.map((alternative) => ({
+    ...alternative,
+    recommended: alternative.name === selected.name,
+  }));
+  return revised;
+}
+
 function legacyProjectionPrompt(intent, answers, currentProfile) {
   return [
     "Interpret this project request for Foundry. This is reasoning, not keyword classification.",
@@ -1262,7 +1933,8 @@ function legacyProjectionPrompt(intent, answers, currentProfile) {
     "In constraints, record what you deliberately chose to leave out and why, phrased as intentional scope decisions a business owner would understand — for example that something is out of scope for a first version, or would need a service this machine does not have. Do not list vague caveats.",
     "In assumptions, record only the concrete project assumptions Foundry will use if the customer continues without answering. Keep them short enough to review in the final Decision Brief.",
     "Return two to four observations: things you noticed while reading this exact request that its owner would find genuinely insightful. Observations are not questions, assumptions, generic best practices, or implementation notes. Each must connect a specific user, workflow, risk, or goal in the request to why it matters.",
-    "Return three to seven genuinely different designAlternatives with exactly one marked recommended. Each direction must explain why it fits this exact project and provide its own layout, visual or interaction personality, density, navigation, mobile behavior, important tradeoff, confidence, and lightweight preview character. For APIs and other nonvisual work, use architecture, documentation, and interaction directions appropriate to that work instead of website styles.",
+    "Return three to seven genuinely different designAlternatives with exactly one marked recommended. Each direction must explain why it fits this exact project and provide its own layout, visual or interaction personality, density, navigation, mobile behavior, important tradeoff, confidence, and structured visualSystem. Make layoutType, navigationType, typographyCategory, density, colorRoles, spacingProfile, surfaceTreatment, contentEmphasis, imageStrategy, interactionModel, and buttonTreatment materially different—not title or accent-color variants. sampleLabels must use this project's language. For APIs and other nonvisual work, use documentation, endpoint-explorer, authentication, response-example, monitoring, or developer-workspace structures instead of website themes.",
+    "Every decision.customerFriendlyQuestion must ask about a customer-visible outcome or operating choice. Never ask the customer to choose HTTP methods, database engines, schemas, frameworks, authentication protocols, infrastructure, or other implementation mechanisms.",
     "Return at least three recommendations that are specific to this exact project and would make the customer think they would not have thought of that. Ground each rationale in a concrete benefit rather than generic best practice, and prefer a non-obvious idea over a familiar one.",
     `For capabilities, select only applicable identifiers from the certified web stack catalogue: ${WEB_STACK_MANIFEST.supportedCapabilities.join(", ")}.`,
     `All architecture decisions must remain within the selected stack manifest: ${JSON.stringify({
@@ -1295,20 +1967,22 @@ function understandingPrompt(intent, answers, currentDesign) {
   ];
   return [
     "Create Foundry's deep Project Design for this exact request. Reason from the customer's business, users, goals, workflow sequence, frequency, urgency, privacy, data sensitivity, growth, operational responsibilities, content, brand, trust, responsive priority, integrations, administration, failures, edge cases, and deliberate first-version exclusions. Never classify by keywords or reuse a project-category template.",
+    "Be concise enough for a fast customer-facing proposal: use one sentence per string, no more than five items in ordinary lists, exactly three design alternatives, exactly three recommendations, no more than two genuinely customer-blocking decisions, and no more than ten verification items. Omit decisions Foundry can safely make and record those choices in architectureDecisions instead.",
     "Return the strict schema only. Every field must contain concrete project-specific reasoning. Do not use generic audiences, journeys, summaries, feature lists, recommendations, questions, assumptions, or design directions.",
     "ProjectIntent must state the actual customer outcome, context, users, goal, measurable success, known constraints, and a confidence score from 0 through 1 with an honest rationale.",
     "UserExperiencePlan must describe sequenced journeys, critical and trust moments, realistic failures, repeated work, and administrator responsibility for this project.",
     "ProductProposal must separate essential, recommended, intentionally excluded, and future capabilities. Explain why this scope is the right first version, its dependencies, and the consequence for scope.",
     "DesignDirection must be an actual visual and interaction recommendation for these users and this use case. Explain personality, density, navigation, content, responsive behavior, accessibility, interaction style, and the tradeoff behind the choice.",
-    "Always return three to seven genuinely different designAlternatives and mark exactly one recommended. Make the recommended name and visualPersonality match designDirection.visualPersonality character-for-character. Every direction must explain why it fits this exact project and provide a distinct layoutApproach, visualPersonality, informationDensity, navigationApproach, mobileBehavior, concrete tradeoff, honest confidence, and lightweight preview character. For APIs and other nonvisual work, generate architecture, documentation, and interaction directions appropriate to that work instead of website styles. Reject cosmetic renames of the same direction.",
+    "Always return three to seven genuinely different designAlternatives and mark exactly one recommended. Give every alternative a short customer-facing name. Make the recommended alternative's visualPersonality match designDirection.visualPersonality character-for-character. Every direction must provide a distinct structured visualSystem across layout, navigation, typography, density, color roles, spacing, surfaces, content emphasis, imagery, interactions, buttons, and project-specific sample labels. For APIs and other nonvisual work, generate documentation and developer-tool directions, never website themes. Reject cosmetic renames of the same direction.",
     "FoundryInsights must contain non-obvious observations, opportunities, risks, ambiguities, and explicit assumptions grounded in this request. Every observation must contain at least one concrete noun or workflow phrase used in the original request so its grounding remains visible to the customer.",
     "Recommendations must be few, useful, and specific. Each specificValue must be at least six words and each whyThisProjectNeedsIt must be at least eight words. Both must explicitly name a user, workflow, risk, or goal from the original request. Each recommendation must also state scope/cost/security/integration impact, default selection, confidence, and dependencies. A recommendation that could apply unchanged to an unrelated project is invalid.",
     "Decisions are only choices that can materially change outcome, architecture, cost, integrations, or scope. Write questions in customer language, copy the recommended option character-for-character into the alternatives array, give exactly one consequence per alternative, and mark whether Foundry can safely decide. Never ask about APIs, databases, schemas, runtimes, middleware, persistence, or architecture.",
     `Use only these stable sourceRequirement values for customer requirements: ${requirementReferences.join(", ")}. Foundry-derived quality obligations may use foundry-derived followed by a descriptive identifier. Every essential capability must have an observable verification item traceable to one of those sources.`,
-    "VerificationPlan must describe observable outcomes, a supported acceptance method, exact evidence required, its stable source requirement, origin, and one-based dependency indexes. For traceability, create at least one verification item for every essential capability and begin that item's observableOutcome by copying the complete essential capability text character-for-character. Do not promise anything the acceptance method cannot prove.",
+    "VerificationPlan must describe observable outcomes, a supported acceptance method, exact evidence required, its stable source requirement, origin, and one-based dependency indexes. Dependency indexes must reference existing other items, must never reference the current item, and the dependency graph must be acyclic. For traceability, create at least one verification item for every essential capability and begin that item's observableOutcome by copying the complete essential capability text character-for-character. Do not promise anything the acceptance method cannot prove.",
+    "For a visual web project, add a foundry-derived browser-check verification item that makes the selected design direction observable. Its outcome must explicitly cover the approved information density, responsive priority, navigation behavior, and accessibility needs. Phone or responsive claims must fail for horizontal overflow, excessively tall ungrouped workflow states, or an unbounded concentration of interactive choices; technical completion alone is not design-quality proof.",
     `For capabilities, select only applicable identifiers discovered from the certified stack catalogue: ${WEB_STACK_MANIFEST.supportedCapabilities.join(", ")}.`,
     `Stay within this real certified stack capability boundary: ${JSON.stringify({ stackId: WEB_STACK_MANIFEST.stackId, stackVersion: WEB_STACK_MANIFEST.stackVersion, components: WEB_STACK_MANIFEST.components, knownLimitations: WEB_STACK_MANIFEST.knownLimitations })}.`,
-    "customerSuppliedContent is provenance only: copy concrete business facts or asset references verbatim from the request or answers. Never invent identity, contact details, locations, credentials, awards, testimonials, pricing, hours, or brand assets. Put truthful launch gaps in missingCustomerContent.",
+    "customerSuppliedContent is provenance only: copy concrete business facts or asset references verbatim from the request or answers. Never invent identity, contact details, locations, credentials, awards, testimonials, pricing, hours, or brand assets. missingCustomerContent is only for content the customer explicitly promised to provide later; return [] when Foundry can choose a professional default.",
     `Preserve the requested platform using exactly one of: ${PROJECT_PLATFORMS.join(", ")}. Foundry currently executes only web projects; do not silently convert unsupported work.`,
     `Original customer request [customer-intent-1]:\n${intent}`,
     answers.length === 0
@@ -1317,6 +1991,23 @@ function understandingPrompt(intent, answers, currentDesign) {
     currentDesign === null
       ? "There is no prior approved design."
       : `Revise this prior validated design without losing resolved customer input:\n${JSON.stringify(currentDesign)}`,
+  ].join("\n\n");
+}
+
+function fastUnderstandingPrompt(intent, answers) {
+  return [
+    "Create a concise, genuinely project-specific customer proposal as strict JSON. Infer users, workflows, scope, design, risks, and useful recommendations from this exact request; never use a category template or generic checklist.",
+    "Return exactly three meaningfully different design alternatives and exactly three non-obvious recommendations. Mark exactly one design alternative recommended. Keep each string to one short sentence.",
+    "Return no more than two decisions, and only when a customer-visible choice materially changes scope. Do not ask about APIs, databases, schemas, runtimes, middleware, persistence, or architecture. Omit choices Foundry can safely make.",
+    "For each essential capability, select the concrete acceptance method that can prove it. Preserve every requested behavior and deliberate exclusion. Do not invent business identity, contact details, credentials, pricing, hours, testimonials, or assets.",
+    "missingCustomerContent is only for content the customer explicitly promised to provide later. Return [] for unspecified details Foundry can safely choose with professional defaults.",
+    "When customer follow-up messages contain structured product-subtype selections, treat those generated subtype titles and any customer context as authoritative. If several compatible subtypes were selected, compose their distinct users, workflows, and outcomes into one coherent product rather than dropping any selection.",
+    `Select capabilities only from the live certified stack boundary: ${WEB_STACK_MANIFEST.supportedCapabilities.join(", ")}.`,
+    `Preserve platform using one of: ${PROJECT_PLATFORMS.join(", ")}. Foundry currently builds only web projects and must not silently convert another platform.`,
+    `Customer request:\n${intent}`,
+    answers.length === 0
+      ? "No customer follow-up messages have been supplied."
+      : `Customer follow-up messages:\n${JSON.stringify(answers)}`,
   ].join("\n\n");
 }
 
@@ -1348,6 +2039,346 @@ function understandingRevisionPrompt(
   ].join("\n\n");
 }
 
+function projectProductTypeDiscoveryCandidate(candidate) {
+  if (candidate === null || typeof candidate !== "object" || Array.isArray(candidate)) {
+    return candidate;
+  }
+  const interpretation = candidate.interpretation;
+  return {
+    interpretation:
+      interpretation === null ||
+      typeof interpretation !== "object" ||
+      Array.isArray(interpretation)
+        ? interpretation
+        : {
+            summary: interpretation.summary,
+            reasoning: interpretation.reasoning,
+            confidence: interpretation.confidence,
+          },
+    subtypes: Array.isArray(candidate.subtypes)
+      ? candidate.subtypes.map((subtype) =>
+          subtype === null || typeof subtype !== "object" || Array.isArray(subtype)
+            ? subtype
+            : {
+                title: subtype.title,
+                explanation: subtype.explanation,
+                likelyUsers: subtype.likelyUsers,
+                likelyPrimaryOutcome: subtype.likelyPrimaryOutcome,
+                whyItMayFit: subtype.whyItMayFit,
+                confidence: subtype.confidence,
+                recommended: subtype.recommended,
+                canCombine: subtype.canCombine,
+                combinationNote: subtype.combinationNote,
+                compatibilityTags: subtype.compatibilityTags,
+                deliveryPlatform: subtype.deliveryPlatform,
+                requiredCapabilities: subtype.requiredCapabilities,
+              },
+        )
+      : candidate.subtypes,
+  };
+}
+
+async function generateProductTypeDiscovery({
+  ledger,
+  orchestrator,
+  evidence,
+  facts,
+  modelFacts,
+  providerRegistry,
+  clock,
+  missionId,
+  intent,
+  cumulativeAnswers,
+  requestId,
+  eventId,
+  causationId,
+  selection,
+  candidateRoutes,
+  productTypeDiscoveryHistory,
+}) {
+  const context = cumulativeAnswers.map((answer) => answer.answer);
+  const baseRequest = {
+    taskClass: ModelTaskClass.PROJECT_UNDERSTANDING,
+    messages: [
+      {
+        role: "system",
+        content:
+          "You are Foundry's Product Intelligence authority. Resolve ambiguity before proposing a product. Return only validated, customer-friendly JSON; generate every interpretation from the supplied request rather than a category template.",
+      },
+      {
+        role: "user",
+        content: productTypeDiscoveryPrompt({ intent, context }),
+      },
+    ],
+    schemaName: "foundry_product_type_discovery_v1",
+    schema: PRODUCT_TYPE_DISCOVERY_SCHEMA,
+  };
+  let response = null;
+  let discovery = null;
+  let selectedRoute = null;
+  let failure = null;
+  for (let routeIndex = 0; routeIndex < candidateRoutes.length; routeIndex += 1) {
+    const route = candidateRoutes[routeIndex];
+    const routeAttempt = routeIndex + 1;
+    const startedAt = clock();
+    const routingReason = [
+      ...selection.rationale,
+      routeAttempt === 1
+        ? "primary eligible route for product-type discovery"
+        : `product-type discovery failover route ${routeAttempt}`,
+    ].join("; ");
+    const routeEvidence = evidence.capture({
+      evidenceId: `${requestId}.product-types.route-${routeAttempt}`,
+      missionId,
+      kind: ObservationKind.MODEL_CALL_RESULT,
+      captureMethod: "product-type-discovery-route-dispatch",
+      producingSubsystem: PROJECT_UNDERSTANDING_SOURCE,
+      timestamp: startedAt,
+      payload: {
+        requestId,
+        status: "STARTED",
+        structuredOutput: null,
+        detail: "A live product-type discovery request was dispatched.",
+      },
+      workspaceCheckpointReference: null,
+      commandReference: requestId,
+      workUnitReference: requestId,
+      metadata: {
+        provider: route.providerId,
+        modelId: route.modelId,
+        providerFamily: route.providerFamily,
+        taskClass: "PROJECT_UNDERSTANDING",
+        depthLevel: PROJECT_UNDERSTANDING_DEPTH,
+        routingReason,
+        routeAttempt,
+      },
+    });
+    modelFacts.recordResultFact({
+      missionId,
+      eventId: `${requestId}.product-types.route-${routeAttempt}.fact`,
+      causationId,
+      occurredAt: startedAt,
+      producingSubsystem: PROJECT_UNDERSTANDING_SOURCE,
+      statement: `Dispatched product-type discovery to eligible live route ${routeAttempt}.`,
+      evidenceReferences: [
+        { evidenceId: routeEvidence.evidenceId, workspaceCheckpointReference: null },
+      ],
+      workspaceCheckpointReference: null,
+      workUnitReference: requestId,
+      metadata: { modelRouteStart: routeEvidence.metadata },
+    });
+    try {
+      let routeRequest = baseRequest;
+      let candidateResponse = null;
+      let candidateDiscovery = null;
+      for (
+        let correctionAttempt = 1;
+        correctionAttempt <= MAX_PRODUCT_INTELLIGENCE_GENERATIONS;
+        correctionAttempt += 1
+      ) {
+        try {
+          candidateResponse = await providerRegistry.generate(
+            route.providerId,
+            routeRequest,
+            { modelId: route.modelId },
+          );
+          const validated = validateStructuredModelOutput(
+            projectProductTypeDiscoveryCandidate(candidateResponse.output),
+            PRODUCT_TYPE_DISCOVERY_SCHEMA,
+          );
+          candidateDiscovery = normalizeProductTypeDiscovery(validated, {
+            intent,
+            context,
+          });
+          const priorDiscoveries = productTypeDiscoveryHistory()
+            .filter(
+              (prior) =>
+                prior.originalRequest.toLowerCase() !== intent.toLowerCase(),
+            )
+            .slice(-20);
+          if (priorDiscoveries.length > 0) {
+            validateDiscoveryPortfolioDifferentiation([
+              ...priorDiscoveries,
+              candidateDiscovery,
+            ]);
+          }
+          break;
+        } catch (candidateError) {
+          const message = String(candidateError?.message ?? candidateError);
+          const providerFailure =
+            /(?:timed out|could not be reached|compiled grammar|rate limit|unauthori[sz]ed|forbidden|request failed|unknown agent)/iu.test(
+              message,
+            );
+          if (
+            correctionAttempt >= MAX_PRODUCT_INTELLIGENCE_GENERATIONS ||
+            providerFailure
+          ) throw candidateError;
+          routeRequest = {
+            ...baseRequest,
+            messages: [
+              ...baseRequest.messages,
+              {
+                role: "system",
+                content: `The subtype set failed Foundry's Product Intelligence Quality Gate: ${message.slice(0, 600)}. Regenerate the complete object with exactly 6 request-grounded, non-repetitive, feasible web-product interpretations. Change the reasoning strategy; do not merely rename the rejected choices.`,
+              },
+            ],
+          };
+        }
+      }
+      response = candidateResponse;
+      discovery = candidateDiscovery;
+      selectedRoute = {
+        ...route,
+        routeAttempt,
+        routingReason,
+        startTimestamp: startedAt,
+      };
+      failure = null;
+      break;
+    } catch (error) {
+      failure = error;
+      const failedAt = clock();
+      const disposition = classifyModelRouteFailure(error);
+      const failureEvidence = evidence.capture({
+        evidenceId: `${requestId}.product-types.route-${routeAttempt}.failure`,
+        missionId,
+        kind: ObservationKind.MODEL_CALL_RESULT,
+        captureMethod: "product-type-discovery-route-failure",
+        producingSubsystem: PROJECT_UNDERSTANDING_SOURCE,
+        timestamp: failedAt,
+        payload: {
+          requestId,
+          status: "FAILED",
+          structuredOutput: null,
+          detail: String(error?.message ?? error).slice(0, 240),
+        },
+        workspaceCheckpointReference: null,
+        commandReference: requestId,
+        workUnitReference: requestId,
+        metadata: {
+          provider: route.providerId,
+          modelId: route.modelId,
+          providerFamily: route.providerFamily,
+          taskClass: "PROJECT_UNDERSTANDING",
+          depthLevel: PROJECT_UNDERSTANDING_DEPTH,
+          routingReason,
+          routeAttempt,
+          failureCategory: disposition.category,
+          retryable: disposition.retryable,
+        },
+      });
+      facts.recordResultFact({
+        missionId,
+        eventId: `${requestId}.product-types.route-${routeAttempt}.failure.fact`,
+        causationId,
+        occurredAt: failedAt,
+        producingSubsystem: PROJECT_UNDERSTANDING_SOURCE,
+        statement: `Product-type discovery route ${routeAttempt} failed safely.`,
+        evidenceReferences: [
+          { evidenceId: failureEvidence.evidenceId, workspaceCheckpointReference: null },
+        ],
+        workspaceCheckpointReference: null,
+        workUnitReference: requestId,
+        metadata: { productTypeDiscoveryFailure: failureEvidence.metadata },
+      });
+    }
+  }
+  if (response === null || discovery === null || selectedRoute === null) {
+    throw failure ?? new Error("No live product-type discovery route completed.");
+  }
+  const occurredAt = clock();
+  const evidenceId = `${requestId}.product-types`;
+  evidence.capture({
+    evidenceId,
+    missionId,
+    kind: ObservationKind.MODEL_CALL_RESULT,
+    captureMethod: "live-provider-structured-product-type-discovery",
+    producingSubsystem: PROJECT_UNDERSTANDING_SOURCE,
+    timestamp: occurredAt,
+    payload: {
+      requestId,
+      status: "SUCCEEDED",
+      structuredOutput: discovery,
+      detail: "Live model output passed the Product Intelligence Quality Gate.",
+    },
+    metadata: {
+      providerId: selectedRoute.providerId,
+      modelId: selectedRoute.modelId,
+      providerFamily: selectedRoute.providerFamily,
+      routingRationale: selectedRoute.routingReason,
+      depthLevel: PROJECT_UNDERSTANDING_DEPTH,
+      tokenUsage: response.usage,
+    },
+    commandReference: requestId,
+    workUnitReference: requestId,
+  });
+  const modelCallRecord = normalizeModelCallRecord({
+    requestId,
+    missionId,
+    workUnitId: requestId,
+    purpose: "Generate validated interpretations for a broad product request.",
+    taskClass: ModelTaskClass.PROJECT_UNDERSTANDING,
+    modelId: selectedRoute.modelId,
+    modelTier: PROJECT_UNDERSTANDING_TIER,
+    provider: selectedRoute.providerId,
+    providerFamily: selectedRoute.providerFamily,
+    depthLevel: PROJECT_UNDERSTANDING_DEPTH,
+    routingReason: selectedRoute.routingReason,
+    idempotencyKey: `${requestId}-product-types-key`,
+    contextReferences: [],
+    expectedStructuredOutputSchema: PRODUCT_TYPE_DISCOVERY_SCHEMA,
+    structuredOutput: response.output,
+    tokenMetadata: {
+      inputTokens: response.usage?.inputTokens ?? 0,
+      outputTokens: response.usage?.outputTokens ?? 0,
+    },
+    costMetadata: {
+      attemptCount: selectedRoute.routeAttempt,
+      costUsd: response.usage?.costUsd ?? 0,
+    },
+    startTimestamp: selectedRoute.startTimestamp,
+    endTimestamp: occurredAt,
+    status: "SUCCEEDED",
+  });
+  modelFacts.recordResultFact({
+    missionId,
+    eventId: `${requestId}.product-types.model.fact`,
+    causationId,
+    occurredAt,
+    producingSubsystem: MODEL_GATEWAY_SOURCE,
+    statement: "Product-type discovery model request completed with operational status SUCCEEDED.",
+    evidenceReferences: [{ evidenceId, workspaceCheckpointReference: null }],
+    workspaceCheckpointReference: null,
+    workUnitReference: requestId,
+    metadata: { modelCallRecord },
+  });
+  facts.recordResultFact({
+    missionId,
+    eventId: `${eventId}.product-type-discovery`,
+    causationId,
+    producingSubsystem: PROJECT_UNDERSTANDING_SOURCE,
+    statement: "Broad project request interpreted into validated product subtype choices.",
+    evidenceReferences: [{ evidenceId, workspaceCheckpointReference: null }],
+    workUnitReference: requestId,
+    metadata: {
+      productTypeDiscovery: discovery,
+      originalCustomerRequest: intent,
+      clarificationAnswers: structuredClone(cumulativeAnswers),
+    },
+    occurredAt,
+  });
+  if (ledger.projectState(missionId).state === MissionState.INTAKE) {
+    orchestrator.transition({
+      missionId,
+      eventId: `${eventId}.product-type-clarifying`,
+      causationId: `${eventId}.product-type-discovery`,
+      to: MissionState.CLARIFYING,
+      reason: "The broad request needs a customer-visible product subtype choice.",
+    });
+  }
+  return Object.freeze({ productTypeDiscovery: discovery, routing: selection });
+}
+
 export function createProjectUnderstandingService({
   ledger,
   orchestrator,
@@ -1360,6 +2391,8 @@ export function createProjectUnderstandingService({
   router,
   providerRegistry,
   routeHistory = () => [],
+  productTypeDiscoveryHistory = () => [],
+  requireProductBlueprintApproval = false,
   clock,
 }) {
   return Object.freeze({
@@ -1371,8 +2404,152 @@ export function createProjectUnderstandingService({
       return latestProjectDesign(ledger, missionId);
     },
 
+    latestProductTypeDiscovery(missionId) {
+      return latestProductTypeDiscovery(ledger, missionId);
+    },
+
     verificationBindings(missionId) {
       return latestBindings(ledger, missionId);
+    },
+
+    recordSelections({
+      missionId,
+      answers,
+      requestId,
+      eventId,
+      causationId,
+    }) {
+      const state = ledger.projectState(missionId).state;
+      if (
+        state !== MissionState.INTAKE &&
+        state !== MissionState.CLARIFYING
+      ) {
+        throw new TypeError(
+          `Project selections are unavailable while mission is ${state}.`,
+        );
+      }
+      const current = latestProfile(ledger, missionId);
+      const currentDesign = latestProjectDesign(ledger, missionId);
+      const context = latestUnderstandingContext(ledger, missionId);
+      if (current === null || currentDesign === null || context === null) {
+        throw new TypeError(
+          "A validated project proposal is required before recording selections.",
+        );
+      }
+      const normalizedAnswers = normalizeCustomerFollowUpAnswers(answers);
+      if (
+        normalizedAnswers.length === 0 ||
+        normalizedAnswers.some(
+          (answer) =>
+            answer.selection === undefined ||
+            answer.selection.mode === "other" ||
+            answer.selection.kind === "customer-message",
+        )
+      ) {
+        throw new TypeError(
+          "Only generated-option selections can be recorded without project re-evaluation.",
+        );
+      }
+      validateStructuredSelectionsAgainstCurrent(
+        normalizedAnswers,
+        current,
+        currentDesign,
+      );
+      const cumulativeAnswers = cumulativeCustomerFollowUpAnswers(
+        ledger,
+        missionId,
+        normalizedAnswers,
+      );
+      const result = applyStructuredSelectionChoices(
+        understandingFromCurrent(current, currentDesign),
+        cumulativeAnswers,
+      );
+      const profile = profileFromUnderstanding(
+        missionId,
+        context.originalCustomerRequest,
+        cumulativeAnswers,
+        result,
+        current.profileVersion + 1,
+      );
+      const projectDesign = normalizeProjectDesign(
+        Object.fromEntries(
+          PROJECT_DESIGN_MODEL_FIELDS.map((key) => [key, result[key]]),
+        ),
+      );
+      const productBlueprint = createProductBlueprint({
+        missionId,
+        originalCustomerRequest: context.originalCustomerRequest,
+        profile,
+        projectDesign,
+        answers: cumulativeAnswers,
+        productTypeDiscovery: latestProductTypeDiscovery(ledger, missionId),
+      });
+      const verificationBindings = Object.fromEntries(
+        projectDesign.verificationPlan.map((obligation, index) => [
+          identifier("obligation", index),
+          obligation.acceptanceMethod,
+        ]),
+      );
+      const occurredAt = clock();
+      const evidenceId = `${requestId}.selections`;
+      evidence.capture({
+        evidenceId,
+        missionId,
+        kind: ObservationKind.WORK_UNIT_RESULT,
+        captureMethod: "customer-generated-option-selection",
+        producingSubsystem: PROJECT_UNDERSTANDING_SOURCE,
+        timestamp: occurredAt,
+        payload: {
+          actionType: "customer-selection",
+          status: "RECORDED",
+          detail: `${normalizedAnswers.length} generated-option selection(s) were applied without another model call.`,
+        },
+        workspaceCheckpointReference: null,
+        commandReference: requestId,
+        workUnitReference: requestId,
+        metadata: { profileVersion: profile.profileVersion },
+      });
+      facts.recordResultFact({
+        missionId,
+        eventId,
+        causationId,
+        producingSubsystem: PROJECT_UNDERSTANDING_SOURCE,
+        statement:
+          "Customer selections were applied to the validated proposal without project re-evaluation.",
+        evidenceReferences: [
+          { evidenceId, workspaceCheckpointReference: null },
+        ],
+        workUnitReference: requestId,
+        metadata: {
+          projectProfile: profile,
+          projectDesign,
+          productBlueprint,
+          originalCustomerRequest: context.originalCustomerRequest,
+          verificationBindings,
+          clarificationAnswers: structuredClone(cumulativeAnswers),
+          localSelectionApplication: true,
+        },
+        occurredAt,
+      });
+      const afterFactState = ledger.projectState(missionId).state;
+      if (
+        profile.openQuestions.length === 0 &&
+        afterFactState === MissionState.CLARIFYING
+      ) {
+        orchestrator.transition({
+          missionId,
+          eventId: `${eventId}.resolved`,
+          causationId: eventId,
+          to: MissionState.INTAKE,
+          reason: "Recorded customer selections resolved every open question.",
+        });
+      }
+      return Object.freeze({
+        profile,
+        projectDesign,
+        productBlueprint,
+        experience: profiles.experience(profile),
+      });
     },
 
     async understand({
@@ -1397,7 +2574,15 @@ export function createProjectUnderstandingService({
       }
       const current = latestProfile(ledger, missionId);
       const currentDesign = latestProjectDesign(ledger, missionId);
+      const currentProductTypeDiscovery = latestProductTypeDiscovery(
+        ledger,
+        missionId,
+      );
       const normalizedAnswers = normalizeCustomerFollowUpAnswers(answers);
+      validateProductSubtypeSelections(
+        normalizedAnswers,
+        currentProductTypeDiscovery,
+      );
       validateStructuredSelectionsAgainstCurrent(
         normalizedAnswers,
         current,
@@ -1502,21 +2687,51 @@ export function createProjectUnderstandingService({
           "No healthy project-understanding model remains after recorded model rejections.",
         );
       }
-      const basePrimaryRoute = candidateRoutes[0];
-      candidateRoutes = rankRoutesByPersistedTaskHistory(
-        candidateRoutes,
-        persistedRouteHistory,
-        ModelTaskClass.PROJECT_UNDERSTANDING,
-      );
       candidateRoutes = candidateRoutes.filter(
         (route, index, routes) =>
           routes.findIndex(
             (candidate) => candidate.providerId === route.providerId,
           ) === index,
       );
+      const needsProductTypeDiscovery =
+        current === null &&
+        currentDesign === null &&
+        shouldDiscoverProductType(intent, cumulativeAnswers);
+      if (needsProductTypeDiscovery) {
+        if (currentProductTypeDiscovery !== null) {
+          return Object.freeze({
+            productTypeDiscovery: currentProductTypeDiscovery,
+            routing: selection,
+          });
+        }
+        return generateProductTypeDiscovery({
+          ledger,
+          orchestrator,
+          evidence,
+          facts,
+          modelFacts,
+          providerRegistry,
+          clock,
+          missionId,
+          intent: intent.trim(),
+          cumulativeAnswers,
+          requestId,
+          eventId,
+          causationId,
+          selection,
+          candidateRoutes: candidateRoutes.slice(
+            0,
+            MAX_PRODUCT_INTELLIGENCE_ROUTES,
+          ),
+          productTypeDiscoveryHistory,
+        });
+      }
+      candidateRoutes = candidateRoutes.slice(
+        0,
+        MAX_PRODUCT_INTELLIGENCE_ROUTES,
+      );
       const historyAdjusted =
-        candidateRoutes[0]?.providerId !== basePrimaryRoute?.providerId ||
-        candidateRoutes[0]?.modelId !== basePrimaryRoute?.modelId;
+        selection.selectionFactors?.reliabilityHistoryApplied === true;
       const currentUnderstanding = isRevision
         ? understandingFromCurrent(current, currentDesign)
         : null;
@@ -1525,16 +2740,16 @@ export function createProjectUnderstandingService({
         : new Set();
       const requestSchema = isRevision
         ? understandingRevisionEnvelopeSchema
-        : understandingSchema;
+        : FAST_INITIAL_UNDERSTANDING_SCHEMA;
       const request = {
         taskClass: ModelTaskClass.PROJECT_UNDERSTANDING,
         messages: [
           {
             role: "system",
             content:
-              isRevision
-                ? "You are Foundry's Project Understanding authority. Return a minimal JSON Patch-style operations array that honors every customer follow-up. Use add, replace, or remove with a precise path. Put the JSON encoding of the new leaf value in valueJson; use the literal string null for remove."
-                : "You are Foundry's Project Understanding authority. Return a precise, domain-specific decision brief and observable verification plan as strict JSON.",
+               isRevision
+                 ? "You are Foundry's Project Understanding authority. Return a minimal JSON Patch-style operations array that honors every customer follow-up. Use add, replace, or remove with a precise path. Put the JSON encoding of the new leaf value in valueJson; use the literal string null for remove."
+                 : "You are Foundry's fast Project Understanding authority. Return a concise, project-specific proposal brief as strict JSON.",
           },
           {
             role: "user",
@@ -1545,16 +2760,12 @@ export function createProjectUnderstandingService({
                   currentUnderstanding,
                   allowedRevisionFields,
                 )
-              : understandingPrompt(
-                intent.trim(),
-                cumulativeAnswers,
-                currentDesign,
-              ),
+              : fastUnderstandingPrompt(intent.trim(), cumulativeAnswers),
           },
         ],
         schemaName: isRevision
           ? "foundry_project_understanding_revision"
-          : "foundry_project_understanding",
+          : "foundry_fast_project_brief",
         schema: requestSchema,
       };
       let response = null;
@@ -1627,7 +2838,10 @@ export function createProjectUnderstandingService({
           let candidateResult;
           let candidateProfile;
           let routeRequest = request;
-          const maximumCorrectionAttempts = 3;
+          // Quality failures get bounded correction attempts on the same route
+          // before Foundry fails over to another eligible provider.
+          const maximumCorrectionAttempts =
+            MAX_PRODUCT_INTELLIGENCE_GENERATIONS;
           for (
             let correctionAttempt = 1;
             correctionAttempt <= maximumCorrectionAttempts;
@@ -1639,9 +2853,12 @@ export function createProjectUnderstandingService({
                 routeRequest,
                 { modelId: route.modelId },
               );
+              const legacyFullInitialOutput =
+                !isRevision &&
+                candidateResponse.output?.projectIntent !== undefined;
               const validatedOutput = validateStructuredModelOutput(
                 candidateResponse.output,
-                requestSchema,
+                legacyFullInitialOutput ? understandingSchema : requestSchema,
               );
               candidateResult = isRevision
                 ? applyUnderstandingRevision(
@@ -1649,7 +2866,11 @@ export function createProjectUnderstandingService({
                     validatedOutput,
                     allowedRevisionFields,
                   )
-                : validatedOutput;
+                : normalizeUnderstandingCandidateBounds(
+                    legacyFullInitialOutput
+                      ? validatedOutput
+                      : expandFastInitialUnderstanding(validatedOutput),
+                  );
               validateProjectDesignQuality(
                 Object.fromEntries(
                   PROJECT_DESIGN_MODEL_FIELDS.map((key) => [
@@ -1657,7 +2878,12 @@ export function createProjectUnderstandingService({
                     candidateResult[key],
                   ]),
                 ),
-                { originalRequest: intent.trim() },
+                {
+                  originalRequest: projectGroundingContext(
+                    intent.trim(),
+                    cumulativeAnswers,
+                  ),
+                },
               );
               candidateProfile = profileFromUnderstanding(
                 missionId,
@@ -1679,7 +2905,7 @@ export function createProjectUnderstandingService({
                 /(?:Validation|Quality|StructuredOutput)/u.test(
                   candidateErrorName,
                 ) ||
-                /(?:must be empty or contain|must contain|must include|must match|is malformed|is not grounded|lacks a|has no traceable)/iu.test(
+                /(?:must be empty or contain|must contain|must include|must match|is malformed|is not grounded|lacks a|has no traceable|technical question)/iu.test(
                   candidateErrorMessage,
                 );
               const correctionIsUseful =
@@ -1795,6 +3021,14 @@ export function createProjectUnderstandingService({
           PROJECT_DESIGN_MODEL_FIELDS.map((key) => [key, result[key]]),
         ),
       );
+      const productBlueprint = createProductBlueprint({
+        missionId,
+        originalCustomerRequest: intent.trim(),
+        profile,
+        projectDesign,
+        answers: cumulativeAnswers,
+        productTypeDiscovery: currentProductTypeDiscovery,
+      });
       const verificationBindings = Object.fromEntries(
         projectDesign.verificationPlan.map((obligation, index) => [
           identifier("obligation", index),
@@ -1889,6 +3123,7 @@ export function createProjectUnderstandingService({
         metadata: {
           projectProfile: profile,
           projectDesign,
+          productBlueprint,
           originalCustomerRequest: intent.trim(),
           verificationBindings,
           clarificationAnswers: structuredClone(cumulativeAnswers),
@@ -1925,15 +3160,86 @@ export function createProjectUnderstandingService({
       return Object.freeze({
         profile,
         projectDesign,
+        productBlueprint,
         experience: profiles.experience(profile),
         routing: selection,
       });
+    },
+
+    blueprint(missionId) {
+      return latestProductBlueprint(ledger, missionId);
+    },
+
+    approveBlueprint({ missionId, answer, eventId, causationId }) {
+      const [normalized] = normalizeCustomerFollowUpAnswers([answer]);
+      const selection = normalized?.selection;
+      const blueprint = latestProductBlueprint(ledger, missionId);
+      if (
+        blueprint === null ||
+        selection?.kind !== "blueprint-approval" ||
+        selection.mode !== "confirm" ||
+        selection.subjectId !== "product-blueprint" ||
+        selection.value !== blueprint.integrityHash ||
+        selection.sourceProfileVersion !== blueprint.blueprintVersion
+      ) {
+        throw new TypeError("Blueprint approval must match the latest version and integrity hash.");
+      }
+      const occurredAt = clock();
+      const approval = Object.freeze({
+        blueprintVersion: blueprint.blueprintVersion,
+        integrityHash: blueprint.integrityHash,
+        approvalTimestamp: occurredAt,
+        selection: structuredClone(selection),
+      });
+      const approvalEvidence = evidence.capture({
+        evidenceId: `${eventId}.evidence`,
+        missionId,
+        kind: ObservationKind.WORK_UNIT_RESULT,
+        captureMethod: "customer-product-blueprint-approval",
+        producingSubsystem: PROJECT_UNDERSTANDING_SOURCE,
+        timestamp: occurredAt,
+        payload: {
+          actionType: "product-blueprint-approval",
+          status: "APPROVED",
+          detail: `Customer approved Product Blueprint v${blueprint.blueprintVersion} with integrity hash ${blueprint.integrityHash}.`,
+        },
+        workspaceCheckpointReference: null,
+        commandReference: eventId,
+        workUnitReference: eventId,
+        metadata: {
+          blueprintVersion: blueprint.blueprintVersion,
+          integrityHash: blueprint.integrityHash,
+        },
+      });
+      facts.recordResultFact({
+        missionId,
+        eventId,
+        causationId,
+        producingSubsystem: PROJECT_UNDERSTANDING_SOURCE,
+        statement: `Customer approved Product Blueprint v${blueprint.blueprintVersion}.`,
+        evidenceReferences: [
+          {
+            evidenceId: approvalEvidence.evidenceId,
+            workspaceCheckpointReference: null,
+          },
+        ],
+        workUnitReference: eventId,
+        metadata: {
+          productBlueprintApproval: approval,
+          customerFollowUpAnswers: [structuredClone(normalized)],
+          requestedProfileVersion: blueprint.blueprintVersion,
+        },
+        occurredAt,
+      });
+      return approval;
     },
 
     contract({ missionId, eventId, causationId }) {
       const profile = latestProfile(ledger, missionId);
       const projectDesign = latestProjectDesign(ledger, missionId);
       const context = latestUnderstandingContext(ledger, missionId);
+      const productBlueprint = latestProductBlueprint(ledger, missionId);
+      const blueprintApproval = latestBlueprintApproval(ledger, missionId);
       if (profile === null) {
         throw new TypeError("A recorded ProjectProfile is required.");
       }
@@ -1941,6 +3247,17 @@ export function createProjectUnderstandingService({
         throw new TypeError(
           "A validated deep Project Design is required before approval.",
         );
+      }
+      if (
+        requireProductBlueprintApproval &&
+        (
+          productBlueprint === null ||
+          blueprintApproval === null ||
+          blueprintApproval.integrityHash !== productBlueprint.integrityHash ||
+          blueprintApproval.blueprintVersion !== productBlueprint.blueprintVersion
+        )
+      ) {
+        throw new TypeError("The latest Product Blueprint must be explicitly approved before execution.");
       }
       if (profile.openQuestions.length > 0) {
         throw new TypeError(
@@ -1954,11 +3271,10 @@ export function createProjectUnderstandingService({
       }
       const draft = profiles.contractDraft(profile);
       const approvalTimestamp = clock();
-      const decisionSelections = resolvedDecisionSelections(
-        projectDesign,
-        context.clarificationAnswers,
-        profile.profileVersion,
-      );
+      const decisionSelections = [
+        ...resolvedDecisionSelections(projectDesign, context.clarificationAnswers, profile.profileVersion),
+        ...(blueprintApproval === null ? [] : [blueprintApproval.selection]),
+      ];
       const acceptedRecommendations = projectDesign.recommendations.filter(
         (recommendation) =>
           decisionSelections.some(
@@ -1991,6 +3307,11 @@ export function createProjectUnderstandingService({
         customerFollowUpMessages: [
           ...new Set(
             context.clarificationAnswers
+              .filter(
+                (answer) =>
+                  answer?.selection === undefined ||
+                  answer.selection.kind === "customer-message",
+              )
               .map((answer) => String(answer?.answer ?? "").trim())
               .filter(Boolean),
           ),
@@ -2018,10 +3339,10 @@ export function createProjectUnderstandingService({
         assumptions: projectDesign.foundryInsights.assumptions,
         explicitExclusions:
           projectDesign.productProposal.intentionallyExcludedCapabilities,
-        architectureConstraints: [
-          ...projectDesign.projectIntent.constraints,
-          ...profile.architectureDecisions,
-        ],
+        architectureConstraints: approvedArchitectureConstraints(
+          projectDesign,
+          profile,
+        ),
         supportedPlatform: profile.platform,
         selectedStackCapability: {
           stackId: profile.selectedStack.stackId,
@@ -2036,6 +3357,7 @@ export function createProjectUnderstandingService({
           }),
         ),
         verificationPlan: projectDesign.verificationPlan,
+        ...(blueprintApproval === null ? {} : { productBlueprint }),
         decisionSelections,
         contractVersion:
           (approvedContracts.latest(missionId)?.contractVersion ?? 0) + 1,

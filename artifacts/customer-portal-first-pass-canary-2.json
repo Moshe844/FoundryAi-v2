@@ -1,0 +1,54 @@
+{
+  "startedAt": "2026-08-03T03:54:54.853Z",
+  "execute": true,
+  "resumed": false,
+  "inputs": [
+    {
+      "input": "Customer portal",
+      "missionId": "mission-1785728960009-df8baff2",
+      "subtypeCount": 6,
+      "selectedSubtype": "Customer Account Hub",
+      "blueprintVersion": 2,
+      "blueprintHash": "b9b926308df58712b3a55a970df39aa4e67376b1f9c668bf4e16b2136562ddc6",
+      "primaryWorkflows": [
+        "Open the account hub on a phone and identify the next available action.",
+        "Review account information or activity from the main overview.",
+        "Encounter a consequential error and understand how to recover."
+      ],
+      "requiredSurfaces": [
+        "Customers can navigate the account hub and complete its primary workflow on a phone-sized viewport.",
+        "The interface presents account context, available tasks, and status information without requiring desktop width.",
+        "Consequential errors identify what happened and provide a clear recovery action.",
+        "Primary navigation and error-state behavior remain consistent across supported portal views.",
+        "The finished web portal produces a successful production build."
+      ],
+      "designDirections": [
+        "Account Dashboard",
+        "Guided Account Flow",
+        "Customer Workspace"
+      ],
+      "minimumVisualDifferences": 9,
+      "recommendations": [
+        "Preserve orientation",
+        "Turn errors into guidance",
+        "Prioritize the next step"
+      ],
+      "customMessagePresent": true,
+      "selectedSubtypePresent": true,
+      "executionState": "SUCCEEDED",
+      "contractBlueprintHash": "b9b926308df58712b3a55a970df39aa4e67376b1f9c668bf4e16b2136562ddc6",
+      "finishedMatchesApprovedBlueprint": true,
+      "firstPass": true,
+      "firstPassMetrics": {
+        "repairModelCalls": 0,
+        "reinstallCount": 0,
+        "rebuildCount": 1,
+        "runtimeRestartCount": 0
+      },
+      "recoveredFromLedger": true
+    }
+  ],
+  "completedAt": "2026-08-03T03:54:55.957Z",
+  "passed": 1,
+  "failed": 0
+}

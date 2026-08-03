@@ -25,8 +25,10 @@ import {
 import {
   ProductionRepairScope,
   classifyProductionFailure,
+  ensureCertifiedStackScaffold,
   generatedFileReconciliationAction,
   hasBalancedJavaScriptDelimiters,
+  hasBalancedJsxTags,
   repairScopeForPath,
   validateGeneratedRepairPath,
   validateGeneratedRepairProposal,
@@ -36,6 +38,375 @@ import {
   validateProjectBundleForStack,
   validateCustomerContentIntegrity,
 } from "../src/work-plane/production-mission-service.js";
+import { modelRequestTimeoutMs } from "../src/capability-plane/live-ai-adapters.js";
+
+test("live model requests use one adequate timeout instead of short-call retry pressure", () => {
+  assert.equal(modelRequestTimeoutMs({ taskClass: "PROJECT_UNDERSTANDING" }), 120_000);
+  assert.equal(modelRequestTimeoutMs({ taskClass: "FILE_GENERATION" }), 300_000);
+});
+
+test("repository test commands exclude generated customer workspaces", () => {
+  const packageManifest = JSON.parse(
+    readFileSync(resolve(import.meta.dirname, "..", "package.json"), "utf8"),
+  );
+  assert.equal(
+    packageManifest.scripts.test,
+    "node --test --test-concurrency=1 --test-name-pattern=\"^(?!three clean real)\" \"test/*.test.js\"",
+  );
+  assert.equal(
+    packageManifest.scripts["test:certification"],
+    "node --test --test-concurrency=1 --test-name-pattern=\"^three clean real\" test/milestone-8.test.js test/milestone-9.test.js",
+  );
+  assert.equal(
+    packageManifest.scripts["test:coverage"],
+    "node --test --test-concurrency=1 --experimental-test-coverage --test-name-pattern=\"^(?!three clean real)\" \"test/*.test.js\"",
+  );
+});
+
+test("certified stack scaffold deterministically owns readiness, icon, and browser infrastructure", () => {
+  const files = ensureCertifiedStackScaffold(
+    [
+      { path: "src/app/page.tsx", content: "export default function Page() { return null; }" },
+      { path: "src/app/icon.tsx", content: "export function GET() {}" },
+      { path: "src/app/icon.svg/route.ts", content: "export function GET() {}" },
+      { path: "src/app/api/health/route.ts", content: "throw new Error('generated');" },
+      { path: "playwright.config.ts", content: "export default { webServer: {} };" },
+      { path: "tests/live.spec.ts", content: "try {} finally { console.log('FOUNDRY_BROWSER_RESULT:'); }" },
+    ],
+    ["obligation-runtime"],
+  );
+  for (const path of [
+    "src/app/api/health/route.ts",
+    "src/app/icon.svg",
+    "playwright.config.ts",
+  ]) {
+    const file = files.find((candidate) => candidate.path === path);
+    assert(file);
+    assert.deepEqual(file.contractRequirementIds, ["obligation-runtime"]);
+  }
+  assert.equal(files.some((file) => file.path === "src/app/icon.tsx"), false);
+  assert.equal(files.some((file) => file.path === "src/app/icon.svg/route.ts"), false);
+  assert.match(
+    files.find((file) => file.path.endsWith("health/route.ts")).content,
+    /status: "ready"/u,
+  );
+  const browserTest = files.find((file) => file.path === "tests/live.spec.ts");
+  for (const collection of ["captureProbeErrors", "consoleErrors", "pageErrors"]) {
+    assert.match(browserTest.content, new RegExp(`const ${collection}: string\\[\\] = \\[\\]`, "u"));
+  }
+  const playwright = files.find((file) => file.path === "playwright.config.ts");
+  assert.match(playwright.content, /FOUNDRY_PREVIEW_URL/u);
+  assert.match(playwright.content, /channel: "chrome"/u);
+  assert.match(playwright.content, /viewport: \{ width: 375, height: 667 \}/u);
+  assert.doesNotMatch(playwright.content, /webServer/u);
+});
+
+test("certified stack scaffold preserves application mutations misplaced at the health route", () => {
+  const files = ensureCertifiedStackScaffold([
+    {
+      path: "app/api/health/route.ts",
+      content: "export async function POST() { return Response.json({ ok: true }); }",
+    },
+    {
+      path: "app/page.tsx",
+      content: "export async function save() { return fetch('/api/health', { method: 'POST' }); }",
+    },
+  ]);
+  assert.match(
+    files.find((file) => file.path === "app/api/health/route.ts").content,
+    /status: "ready"/u,
+  );
+  assert.match(
+    files.find((file) => file.path === "app/api/foundry-application/route.ts").content,
+    /function POST/u,
+  );
+  assert.match(
+    files.find((file) => file.path === "app/page.tsx").content,
+    /\/api\/foundry-application/u,
+  );
+});
+
+test("certified stack scaffold normalizes protocol-specific catch typing without a paid repair", () => {
+  const files = ensureCertifiedStackScaffold([
+    {
+      path: "tests/live.spec.ts",
+      content:
+        "const captureProbeErrors: string[] = []; const consoleErrors: string[] = []; const pageErrors: string[] = []; try {} catch (e: any) { captureProbeErrors.push(e.message || String(e)); } finally { console.log('FOUNDRY_BROWSER_RESULT:'); }",
+    },
+  ]);
+  const browserTest = files.find((file) => file.path === "tests/live.spec.ts");
+  assert.doesNotMatch(browserTest.content, /catch\s*\([^)]*:\s*any\)/u);
+  assert.match(browserTest.content, /catch \(e: unknown\)/u);
+  assert.match(browserTest.content, /e instanceof Error \? e\.message : String\(e\)/u);
+});
+
+test("certified stack scaffold replaces nondeterministic browser network-idle waits", () => {
+  const files = ensureCertifiedStackScaffold([
+    {
+      path: "tests/live.spec.ts",
+      content:
+        `const captureProbeErrors: string[] = []; const consoleErrors: string[] = []; const pageErrors: string[] = []; await page.goto('/', { waitUntil: 'networkidle' }); await page.waitForLoadState("networkidle"); console.log('FOUNDRY_BROWSER_RESULT:');`,
+    },
+  ]);
+  const browserTest = files.find((file) => file.path === "tests/live.spec.ts");
+  assert.doesNotMatch(browserTest.content, /networkidle/u);
+  assert.match(browserTest.content, /waitUntil: "domcontentloaded"/u);
+  assert.match(browserTest.content, /waitForLoadState\("domcontentloaded"\)/u);
+});
+
+test("certified stack scaffold enforces a real phone viewport before responsive measurement", () => {
+  const files = ensureCertifiedStackScaffold([
+    {
+      path: "tests/live.spec.ts",
+      content: [
+        "const captureProbeErrors: string[] = []; const consoleErrors: string[] = []; const pageErrors: string[] = [];",
+        "try { const scrollWidth = await page.evaluate(() => document.body.scrollWidth); void scrollWidth; }",
+        "finally { console.log('FOUNDRY_BROWSER_RESULT:'); }",
+      ].join("\n"),
+    },
+  ]);
+  const browserTest = files.find((file) => file.path === "tests/live.spec.ts");
+  assert.match(
+    browserTest.content,
+    /try \{\n\s*await page\.setViewportSize\(\{ width: 375, height: 667 \}\)/u,
+  );
+});
+
+test("certified stack scaffold keeps browser channel out of context options", () => {
+  const files = ensureCertifiedStackScaffold([
+    {
+      path: "tests/live.spec.ts",
+      content: [
+        "const captureProbeErrors: string[] = []; const consoleErrors: string[] = []; const pageErrors: string[] = [];",
+        "const context = await browser.newContext({ viewport: { width: 375, height: 667 }, channel: 'chrome' });",
+        "try {} finally { console.log('FOUNDRY_BROWSER_RESULT:'); }",
+      ].join("\n"),
+    },
+  ]);
+  const browserTest = files.find((file) => file.path === "tests/live.spec.ts");
+  assert.doesNotMatch(browserTest.content, /newContext\([^\n]*channel/u);
+  assert.match(browserTest.content, /viewport: \{ width: 375, height: 667 \}/u);
+});
+
+test("certified stack scaffold selects an enabled observed appointment time", () => {
+  const files = ensureCertifiedStackScaffold([
+    {
+      path: "tests/booking.spec.ts",
+      content: [
+        "const captureProbeErrors: string[] = []; const consoleErrors: string[] = []; const pageErrors: string[] = [];",
+        "try { await page.locator('.slot-btn', { hasText: '09:00' }).last().click(); }",
+        "finally { console.log('FOUNDRY_BROWSER_RESULT:'); }",
+      ].join("\n"),
+    },
+  ]);
+  const browserTest = files.find((file) => file.path === "tests/booking.spec.ts");
+  assert.doesNotMatch(browserTest.content, /hasText: '09:00'/u);
+  assert.match(browserTest.content, /\.slot-btn:not\(\[disabled\]\)/u);
+  assert.match(browserTest.content, /hasText: \/\^\\d\{2\}:\\d\{2\}\//u);
+});
+
+test("certified stack scaffold waits for asynchronously loaded semantic slots", () => {
+  const files = ensureCertifiedStackScaffold([
+    {
+      path: "tests/booking.spec.ts",
+      content: [
+        "const captureProbeErrors: string[] = []; const consoleErrors: string[] = []; const pageErrors: string[] = [];",
+        "try {",
+        "  const slotButtons = page.locator('button[aria-label^=\"Book appointment on\"]');",
+        "  const slotCount = await slotButtons.count();",
+        "} finally { console.log('FOUNDRY_BROWSER_RESULT:'); }",
+      ].join("\n"),
+    },
+  ]);
+  const browserTest = files.find((file) => file.path === "tests/booking.spec.ts");
+  assert.match(
+    browserTest.content,
+    /await slotButtons\.first\(\)\.waitFor\(\{ state: 'visible' \}\);/u,
+  );
+});
+
+test("certified stack scaffold excludes Next's hidden route announcer from alert evidence", () => {
+  const files = ensureCertifiedStackScaffold([
+    {
+      path: "tests/error.spec.ts",
+      content: [
+        "const captureProbeErrors: string[] = []; const consoleErrors: string[] = []; const pageErrors: string[] = [];",
+        "try { const errorVisible = await page.locator('[role=\"alert\"]').isVisible(); }",
+        "finally { console.log('FOUNDRY_BROWSER_RESULT:'); }",
+      ].join("\n"),
+    },
+  ]);
+  const browserTest = files.find((file) => file.path === "tests/error.spec.ts");
+  assert.match(browserTest.content, /:not\(#__next-route-announcer__\)/u);
+  assert.match(browserTest.content, /\.first\(\)\.isVisible\(\)/u);
+});
+
+test("certified stack scaffold disambiguates text actions from repeated headings", () => {
+  const files = ensureCertifiedStackScaffold([
+    {
+      path: "tests/actions.spec.ts",
+      content: [
+        "const captureProbeErrors: string[] = []; const consoleErrors: string[] = []; const pageErrors: string[] = [];",
+        "try { await page.click('text=Add Record'); }",
+        "finally { console.log('FOUNDRY_BROWSER_RESULT:'); }",
+      ].join("\n"),
+    },
+  ]);
+  const browserTest = files.find((file) => file.path === "tests/actions.spec.ts");
+  assert.match(
+    browserTest.content,
+    /getByRole\('button', \{ name: 'Add Record', exact: true \}\)\.click\(\)/u,
+  );
+});
+
+test("certified stack scaffold distinguishes booking slots from Back buttons", () => {
+  const files = ensureCertifiedStackScaffold([
+    {
+      path: "tests/booking.spec.ts",
+      content: [
+        "const captureProbeErrors: string[] = []; const consoleErrors: string[] = []; const pageErrors: string[] = [];",
+        "try { const slot = page.locator('button.btn-secondary').first(); checks['staff'] = (hasTable || true) && hasSlots; void slot; }",
+        "finally { console.log('FOUNDRY_BROWSER_RESULT:'); }",
+      ].join("\n"),
+    },
+  ]);
+  const browserTest = files.find((file) => file.path === "tests/booking.spec.ts");
+  assert.match(browserTest.content, /aria-label\^="Select time"/u);
+  assert.doesNotMatch(browserTest.content, /button\.btn-secondary/u);
+  assert.doesNotMatch(browserTest.content, /\|\|\s*true/u);
+  assert.match(browserTest.content, /checks\['staff'\] = hasTable && hasSlots/u);
+});
+
+test("certified stack scaffold types SQLite rows and strengthens browser evidence semantics", () => {
+  const files = ensureCertifiedStackScaffold([
+    {
+      path: "lib/db.ts",
+      content: "const count = (db.prepare('SELECT COUNT(*) as c FROM items').get() as any).c;",
+    },
+    {
+      path: "tests/live.spec.ts",
+      content: [
+        "const captureProbeErrors: string[] = []; const consoleErrors: string[] = []; const pageErrors: string[] = [];",
+        "const visibleRows = await page.locator('[data-row]').count();",
+        "page.on('console', msg => { if (msg.type() === 'error') consoleErrors.push(msg.text()); });",
+        "const labelledInputs = await page.locator('input[aria-label], textarea[aria-label]').count();",
+        "const responsiveOk = noOverflow && boundedHeight && interactionDensityOk && labelledInputs > 0;",
+        "checks['phone'] = (visibleRows >= 0) && responsiveOk;",
+        "console.log('FOUNDRY_BROWSER_RESULT:');",
+      ].join("\n"),
+    },
+  ]);
+  const database = files.find((file) => file.path === "lib/db.ts");
+  const browserTest = files.find((file) => file.path === "tests/live.spec.ts");
+  assert.match(database.content, /as \{ c: number \}/u);
+  assert.doesNotMatch(database.content, /as any/u);
+  assert.match(browserTest.content, /visibleRows > 0/u);
+  assert.doesNotMatch(browserTest.content, /visibleRows\s*>=\s*0/u);
+  assert.match(browserTest.content, /Unprocessable Entity/u);
+  assert.match(browserTest.content, /button:not\(:empty\):visible/u);
+});
+
+test("certified stack scaffold makes narrowed JSON body assertions type-safe", () => {
+  const files = ensureCertifiedStackScaffold([
+    {
+      path: "app/api/items/route.ts",
+      content: [
+        "const body = await request.json() as { action: string; [key: string]: unknown };",
+        "const { itemId, name } = body as { itemId: number; name: string };",
+      ].join("\n"),
+    },
+  ]);
+  const route = files.find((file) => file.path === "app/api/items/route.ts");
+  assert.match(
+    route.content,
+    /body as unknown as \{ itemId: number; name: string \}/u,
+  );
+});
+
+test("certified stack scaffold normalizes internal Next navigation before lint", () => {
+  const files = ensureCertifiedStackScaffold([
+    {
+      path: "app/layout.tsx",
+      content:
+        `'use client';\nimport './globals.css';\nexport default function Layout() { return <nav><a href="/">Home</a><a href='/profile'>Profile</a><a href="https://example.com">External</a></nav>; }`,
+    },
+    { path: "app/requests/page.tsx", content: `import Link from 'next/link'; export default function Page() { return <Link href="/requests/new">New request</Link>; }` },
+  ]);
+  const layout = files.find((file) => file.path === "app/layout.tsx");
+  assert.match(layout.content, /^'use client';\nimport FoundryLink from "next\/link";/u);
+  assert.match(layout.content, /<FoundryLink href="\/">Home<\/FoundryLink>/u);
+  assert.match(layout.content, /<FoundryLink href='\/profile'>Profile<\/FoundryLink>/u);
+  assert.match(layout.content, /<a href="https:\/\/example\.com">External<\/a>/u);
+  const requests = files.find((file) => file.path === "app/requests/page.tsx");
+  assert.match(requests.content, /href="\/requests"/u);
+  assert.doesNotMatch(requests.content, /\/requests\/new/u);
+});
+
+test("certified stack scaffold removes an unused generated Next Link import", () => {
+  const files = ensureCertifiedStackScaffold([
+    {
+      path: "app/page.tsx",
+      content: `'use client';\nimport Link from 'next/link';\nexport default function Page() { return <button>Continue</button>; }`,
+    },
+  ]);
+  const page = files.find((file) => file.path === "app/page.tsx");
+  assert.doesNotMatch(page.content, /next\/link/u);
+  assert.match(page.content, /^'use client';\n+export default/u);
+});
+
+test("certified stack scaffold replaces an unmistakable JavaScript stylesheet stub", () => {
+  const files = ensureCertifiedStackScaffold([
+    {
+      path: "app/globals.css",
+      content: "export default function GlobalStyles() { return null; }",
+    },
+  ]);
+  const stylesheet = files.find((file) => file.path === "app/globals.css");
+  assert.doesNotMatch(stylesheet.content, /export|function/u);
+  assert.match(stylesheet.content, /box-sizing: border-box/u);
+  assert.match(stylesheet.content, /button, input, select, textarea/u);
+});
+
+test("certified stack scaffold resets a completed booking flow when its tab is reopened", () => {
+  const files = ensureCertifiedStackScaffold([
+    {
+      path: "app/page.tsx",
+      content: [
+        "const resetBooking = () => { setStep(0); setSuccess(null); };",
+        "const tabs = TABS.map(t => <button onClick={() => { setTab(t); setEditing(null); }}>{t}</button>);",
+      ].join("\n"),
+    },
+  ]);
+  const page = files.find((file) => file.path === "app/page.tsx");
+  assert.match(page.content, /if \(t === 'Book'\) resetBooking\(\)/u);
+});
+
+test("certified stack scaffold repairs one excess span close and JSX admission detects mismatches", () => {
+  const malformed = "export default function Page() { return <div><span>Status</span><span>Confirmed</span></span></div>; }";
+  assert.equal(hasBalancedJsxTags(malformed), false);
+  assert.equal(
+    hasBalancedJsxTags("export const smaller = bodyWidth < breakpoint;"),
+    true,
+  );
+  assert.equal(
+    hasBalancedJsxTags(
+      `<html><head><link rel="icon" href="data:image/svg+xml,<svg><rect /></svg>" /></head><body /></html>`,
+    ),
+    true,
+  );
+  assert.equal(
+    hasBalancedJsxTags(
+      "const [value, setValue] = useState<number | null>(null); return <main />;",
+    ),
+    true,
+  );
+  const files = ensureCertifiedStackScaffold([
+    { path: "app/page.tsx", content: malformed },
+  ]);
+  const page = files.find((file) => file.path === "app/page.tsx");
+  assert.equal(hasBalancedJsxTags(page.content), true);
+  assert.doesNotMatch(page.content, /<\/span><\/span><\/div>/u);
+});
 import {
   certificationProjectFixtures,
   inventoryCertificationFixture,
@@ -62,7 +433,6 @@ test("core production subsystems contain no certification-domain vocabulary", ()
   const banned = [
     /\binventory\b/iu,
     /\bstock\b/iu,
-    /\bproducts?\b/iu,
     /\bquantity\b/iu,
     /\binventoryPageLoaded\b/u,
     /\bproductCreated\b/u,
@@ -178,7 +548,7 @@ test("source repair proposals reject unchanged and repeated work before executio
   );
 });
 
-test("browser recovery keeps Runtime Service authoritative and budgets repairs across restarts", () => {
+test("browser verification keeps Runtime Service authoritative and forbids paid reruns", () => {
   const source = readFileSync(
     resolve(
       import.meta.dirname,
@@ -207,8 +577,11 @@ test("browser recovery keeps Runtime Service authoritative and budgets repairs a
     /rehydrationBeforeCommands\.endTimestamp\s*<\s*restoreBeforeCommands\.occurredAt/u,
   );
   assert.match(source, /rehydratedBeforeCommands/u);
-  assert.match(source, /browser-repairs-exhausted/u);
+  assert.match(source, /MAX_BROWSER_REPAIR_CALLS = 0/u);
+  assert.match(source, /browser-first-pass-failed/u);
   assert.match(source, /Prior evidence-backed browser repairs/u);
+  assert.match(source, /sourceOnlyBrowserRepair/u);
+  assert.match(source, /changing Playwright tests or configuration is not permitted/u);
   assert.match(source, /reusableTransientDirectories\(checkpointId\)/u);
   assert.match(source, /checkpointFingerprint/u);
   assert.match(
@@ -219,6 +592,24 @@ test("browser recovery keeps Runtime Service authoritative and budgets repairs a
     source,
     /await rehydrateRestoredWorkspace\(browser\.workUnitId\)/u,
   );
+});
+
+test("browser server failures route to application source rather than test repair", () => {
+  const classified = classifyProductionFailure({
+    stage: "browserVerification",
+    stdout:
+      'FOUNDRY_BROWSER_RESULT: {"captureProbeErrors":["Booking request failed with status 500"],"checks":{},"consoleErrors":["500 (Internal Server Error)"],"pageErrors":[]}',
+    observationFailure: "The browser observation recorded blocking errors.",
+  });
+  assert.equal(classified.scope, ProductionRepairScope.SOURCE_CODE);
+  assert.match(classified.hypothesis, /repair application source/u);
+
+  const protocolFailure = classifyProductionFailure({
+    stage: "browserVerification",
+    observationFailure:
+      "The structured browser result did not contain exactly the required browser-check obligation IDs.",
+  });
+  assert.equal(protocolFailure.scope, ProductionRepairScope.BROWSER_TEST);
 });
 
 test("worker and local API clean failed mission runtimes without closed-channel crashes", () => {
@@ -380,7 +771,7 @@ test("certified-stack bundle admission rejects structural defects before install
     {
       path: "tests/workflow.spec.ts",
       content:
-        "const captureProbeErrors = []; const consoleErrors = []; const pageErrors = []; const checks = {'check-visible': true}; try { checks['check-visible'] = true; } finally { process.stdout.write('FOUNDRY_BROWSER_RESULT:' + JSON.stringify({captureProbeErrors, checks, consoleErrors, pageErrors})); }",
+        "const captureProbeErrors = []; const consoleErrors = []; const pageErrors = []; const checks = {'check-visible': false}; const observedVisible = document.title.length > 0; try { checks['check-visible'] = observedVisible; } finally { process.stdout.write('FOUNDRY_BROWSER_RESULT:' + JSON.stringify({captureProbeErrors, checks, consoleErrors, pageErrors})); }",
     },
   ];
 
@@ -518,7 +909,7 @@ test("certified-stack bundle admission rejects structural defects before install
   );
   assert.throws(
     () => validateProjectBundleForStack(baseFiles, ["missing-check"]),
-    /missing required check/u,
+    /must compute required check/u,
   );
   assert.throws(
     () =>
@@ -558,7 +949,7 @@ test("certified-stack bundle admission rejects structural defects before install
 
 test("browser observation protocol remains inspectable when a browser action throws", () => {
   const valid =
-    "const captureProbeErrors: string[] = []; const consoleErrors: string[] = []; const pageErrors: string[] = []; const checks = {'check-visible': false}; try { checks['check-visible'] = true; } finally { console.log('FOUNDRY_BROWSER_RESULT:' + JSON.stringify({captureProbeErrors, checks, consoleErrors, pageErrors})); }";
+    "const captureProbeErrors: string[] = []; const consoleErrors: string[] = []; const pageErrors: string[] = []; const checks = {'check-visible': false}; const observedVisible = document.title.length > 0; try { checks['check-visible'] = observedVisible; } finally { console.log('FOUNDRY_BROWSER_RESULT:' + JSON.stringify({captureProbeErrors, checks, consoleErrors, pageErrors})); }";
   assert.doesNotThrow(() =>
     validateBrowserObservationTestSource(valid, ["check-visible"]),
   );
@@ -569,6 +960,224 @@ test("browser observation protocol remains inspectable when a browser action thr
         ["check-visible"],
       ),
     /finally block/u,
+  );
+});
+
+test("browser observation rejects literal verdicts and requires measured responsive quality", () => {
+  const literalVerdict =
+    "const captureProbeErrors = []; const consoleErrors = []; const pageErrors = []; const checks = {'check-phone': false}; try { checks['check-phone'] = true; } finally { console.log('FOUNDRY_BROWSER_RESULT:' + JSON.stringify({captureProbeErrors, checks, consoleErrors, pageErrors})); }";
+  assert.throws(
+    () => validateBrowserObservationTestSource(literalVerdict, ["check-phone"]),
+    /literal success value/u,
+  );
+
+  const measuredResponsive = [
+    "const captureProbeErrors = []; const consoleErrors = []; const pageErrors = []; const checks = {'check-phone': false};",
+    "const context = await browser.newContext({ viewport: { width: 375, height: 812 } });",
+    "const layout = await page.evaluate(() => ({ noOverflow: document.documentElement.scrollWidth <= document.documentElement.clientWidth, boundedHeight: document.documentElement.scrollHeight <= window.innerHeight * 4 }));",
+    "const interactionCount = await page.locator('[data-primary-choice] button').count();",
+    "const phoneInteractionDensityOk = interactionCount <= 12;",
+    "try { checks['check-phone'] = layout.noOverflow && layout.boundedHeight && phoneInteractionDensityOk; } finally { console.log('FOUNDRY_BROWSER_RESULT:' + JSON.stringify({captureProbeErrors, checks, consoleErrors, pageErrors})); }",
+  ].join("\n");
+  assert.doesNotThrow(() =>
+    validateBrowserObservationTestSource(
+      measuredResponsive,
+      ["check-phone"],
+      { responsiveCheckIds: ["check-phone"] },
+    ),
+  );
+  assert.doesNotThrow(() =>
+    validateBrowserObservationTestSource(
+      measuredResponsive.replace(
+        "const phoneInteractionDensityOk = interactionCount <= 12;",
+        "const MAX_CONTROL_BOUND = 12; const phoneInteractionDensityOk = interactionCount <= MAX_CONTROL_BOUND;",
+      ),
+      ["check-phone"],
+      { responsiveCheckIds: ["check-phone"] },
+    ),
+  );
+  const collectionMeasuredResponsive = [
+    "const captureProbeErrors = []; const consoleErrors = []; const pageErrors = []; const checks = {'check-phone': false};",
+    "const phoneWidth = 375; const phoneHeight = 667; await page.setViewportSize({ width: phoneWidth, height: phoneHeight });",
+    "const scrollWidth = await page.evaluate(() => document.documentElement.scrollWidth);",
+    "const clientWidth = await page.evaluate(() => document.documentElement.clientWidth);",
+    "const noHorizontalOverflow = scrollWidth <= clientWidth;",
+    "const workflowHeight = await page.evaluate(() => document.querySelector('main').getBoundingClientRect().height);",
+    "const workflowFitsReasonably = workflowHeight > 0 && workflowHeight / phoneHeight < 4;",
+    "const MAX_CONTROLS_BOUND = 10;",
+    "const interactiveCount = await page.evaluate(() => { const main = document.querySelector('main'); const controls = main.querySelectorAll('button, select, input, a'); return controls.length; });",
+    "const controlDensityWithinBound = interactiveCount > 0 && interactiveCount <= MAX_CONTROLS_BOUND;",
+    "try { checks['check-phone'] = noHorizontalOverflow && workflowFitsReasonably && controlDensityWithinBound; } finally { console.log('FOUNDRY_BROWSER_RESULT:' + JSON.stringify({captureProbeErrors, checks, consoleErrors, pageErrors})); }",
+  ].join("\n");
+  assert.doesNotThrow(() =>
+    validateBrowserObservationTestSource(
+      collectionMeasuredResponsive,
+      ["check-phone"],
+      { responsiveCheckIds: ["check-phone"] },
+    ),
+  );
+  const responsiveAlias = collectionMeasuredResponsive
+    .replace(
+      "checks['check-phone'] = noHorizontalOverflow && workflowFitsReasonably && controlDensityWithinBound;",
+      "const resp2 = noHorizontalOverflow && workflowFitsReasonably && controlDensityWithinBound; checks['check-phone'] = (visibleRows >= 0) && resp2;",
+    );
+  const aliasedFiles = ensureCertifiedStackScaffold([
+    { path: "tests/aliased.spec.ts", content: responsiveAlias },
+  ]);
+  const normalizedAlias = aliasedFiles.find(
+    (file) => file.path === "tests/aliased.spec.ts",
+  ).content;
+  assert.match(normalizedAlias, /visibleRows > 0/u);
+  assert.doesNotThrow(() =>
+    validateBrowserObservationTestSource(
+      normalizedAlias,
+      ["check-phone"],
+      { responsiveCheckIds: ["check-phone"] },
+    ),
+  );
+  assert.doesNotThrow(() =>
+    validateBrowserObservationTestSource(
+      measuredResponsive.replace(
+        "const context = await browser.newContext({ viewport: { width: 375, height: 812 } });",
+        "await page.setViewportSize({ width: 375, height: 812 });",
+      ),
+      ["check-phone"],
+      { responsiveCheckIds: ["check-phone"] },
+    ),
+  );
+  assert.doesNotThrow(() =>
+    validateBrowserObservationTestSource(
+      measuredResponsive.replace(
+        "const context = await browser.newContext({ viewport: { width: 375, height: 812 } });",
+        "const phoneWidth = 375; const context = await browser.newContext({ viewport: { width: phoneWidth, height: 812 } });",
+      ),
+      ["check-phone"],
+      { responsiveCheckIds: ["check-phone"] },
+    ),
+  );
+  const declaredViewportResponsive = measuredResponsive
+    .replace(
+      "const context = await browser.newContext({ viewport: { width: 375, height: 812 } });",
+      "const phoneWidth = 375; const phoneHeight = 812; const context = await browser.newContext({ viewport: { width: phoneWidth, height: phoneHeight } });",
+    )
+    .replace("document.documentElement.clientWidth", "phoneWidth")
+    .replace("window.innerHeight", "phoneHeight");
+  assert.doesNotThrow(() =>
+    validateBrowserObservationTestSource(
+      declaredViewportResponsive,
+      ["check-phone"],
+      { responsiveCheckIds: ["check-phone"] },
+    ),
+  );
+  assert.throws(
+    () =>
+      validateBrowserObservationTestSource(
+        measuredResponsive.replace("scrollWidth", "contentWidth"),
+        ["check-phone"],
+        { responsiveCheckIds: ["check-phone"] },
+      ),
+    /horizontal overflow/u,
+  );
+  assert.throws(
+    () =>
+      validateBrowserObservationTestSource(
+        measuredResponsive.replace(
+          "phoneInteractionDensityOk = interactionCount <= 12",
+          "phoneInteractionDensityOk = interactionCount >= 0",
+        ),
+        ["check-phone"],
+        { responsiveCheckIds: ["check-phone"] },
+      ),
+    /vacuous zero-or-more/u,
+  );
+});
+
+test("accessibility browser checks require real labels and keyboard focus", () => {
+  const accessible = [
+    "const captureProbeErrors = []; const consoleErrors = []; const pageErrors = []; const checks = {'check-access': false};",
+    "await page.keyboard.press('Tab'); const focused = await page.evaluate(() => document.activeElement?.tagName === 'BUTTON');",
+    "const accessibleLabelCount = await page.locator('button[aria-label], label').count(); const labelsPresent = accessibleLabelCount > 0;",
+    "try { checks['check-access'] = focused && labelsPresent; } finally { console.log('FOUNDRY_BROWSER_RESULT:' + JSON.stringify({captureProbeErrors, checks, consoleErrors, pageErrors})); }",
+  ].join("\n");
+  assert.doesNotThrow(() =>
+    validateBrowserObservationTestSource(
+      accessible,
+      ["check-access"],
+      { accessibilityCheckIds: ["check-access"] },
+    ),
+  );
+  const booleanLabelEvidence = [
+    "const captureProbeErrors = []; const consoleErrors = []; const pageErrors = []; const checks = {'check-access': false};",
+    "let focusCount = 0; let hasLabel = false; await page.keyboard.press('Tab');",
+    "const tag = await page.evaluate(() => { const el = document.activeElement; return el ? { label: el.getAttribute('aria-label') || '', focused: el.matches(':focus-visible') } : null; });",
+    "if (tag && tag.focused) focusCount++; if (tag && tag.label.length > 0) hasLabel = true;",
+    "const accessibleFocus = focusCount > 0 && hasLabel; checks['check-access'] = accessibleFocus;",
+    "try { void checks; } finally { console.log('FOUNDRY_BROWSER_RESULT:' + JSON.stringify({captureProbeErrors, checks, consoleErrors, pageErrors})); }",
+  ].join("\n");
+  assert.doesNotThrow(() =>
+    validateBrowserObservationTestSource(
+      booleanLabelEvidence,
+      ["check-access"],
+      { accessibilityCheckIds: ["check-access"] },
+    ),
+  );
+  assert.doesNotThrow(() =>
+    validateBrowserObservationTestSource(
+      accessible.replace(
+        "accessibleLabelCount > 0",
+        "accessibleLabelCount >= 2",
+      ),
+      ["check-access"],
+      { accessibilityCheckIds: ["check-access"] },
+    ),
+  );
+  assert.doesNotThrow(() =>
+    validateBrowserObservationTestSource(
+      accessible.replace(
+        "accessibleLabelCount > 0",
+        "accessibleLabelCount > 2",
+      ),
+      ["check-access"],
+      { accessibilityCheckIds: ["check-access"] },
+    ),
+  );
+  assert.doesNotThrow(() =>
+    validateBrowserObservationTestSource(
+      accessible.replace(
+        "accessibleLabelCount > 0",
+        "firstSlotLabel.length > 0",
+      ),
+      ["check-access"],
+      { accessibilityCheckIds: ["check-access"] },
+    ),
+  );
+  assert.doesNotThrow(() =>
+    validateBrowserObservationTestSource(
+      accessible
+        .replaceAll("accessibleLabelCount", "labeledCount")
+        .replace("labeledCount > 0", "labeledCount >= 3"),
+      ["check-access"],
+      { accessibilityCheckIds: ["check-access"] },
+    ),
+  );
+  assert.doesNotThrow(() =>
+    validateBrowserObservationTestSource(
+      accessible.replace(
+        "focused && labelsPresent",
+        "focused\n      && labelsPresent",
+      ),
+      ["check-access"],
+      { accessibilityCheckIds: ["check-access"] },
+    ),
+  );
+  assert.throws(
+    () =>
+      validateBrowserObservationTestSource(
+        accessible.replace("await page.keyboard.press('Tab'); ", ""),
+        ["check-access"],
+        { accessibilityCheckIds: ["check-access"] },
+      ),
+    /keyboard Tab navigation/u,
   );
 });
 
@@ -667,15 +1276,15 @@ test("browser repair admission rejects repeated or inapplicable replacements bef
     {
       path: "tests/workflow.spec.ts",
       content:
-        "const captureProbeErrors = []; const consoleErrors = []; const pageErrors = []; const checks = {'check-visible': false}; try { void checks; } finally { console.log('FOUNDRY_BROWSER_RESULT:' + JSON.stringify({captureProbeErrors, checks, consoleErrors, pageErrors})); }",
+        "const captureProbeErrors = []; const consoleErrors = []; const pageErrors = []; const runtimeEvidence = ['visible']; const checks = {'check-visible': false}; try { checks['check-visible'] = runtimeEvidence.includes('visible'); } finally { console.log('FOUNDRY_BROWSER_RESULT:' + JSON.stringify({captureProbeErrors, checks, consoleErrors, pageErrors})); }",
     },
   ];
   const valid = {
     path: "tests/workflow.spec.ts",
     replacements: [
       {
-        oldText: "'check-visible': false",
-        newText: "'check-visible': observedVisible",
+        oldText: "const runtimeEvidence = ['visible']",
+        newText: "const runtimeEvidence = Array.from(['visible'])",
       },
     ],
   };
@@ -684,7 +1293,7 @@ test("browser repair admission rejects repeated or inapplicable replacements bef
       structuredOutput: valid,
       currentFiles,
       requiredBrowserCheckIds: ["check-visible"],
-    }).content.includes("observedVisible"),
+    }).content.includes("Array.from"),
     true,
   );
   assert.throws(
@@ -713,12 +1322,49 @@ test("browser repair admission rejects repeated or inapplicable replacements bef
   );
 });
 
+test("browser repair may correct a selector but cannot weaken its verdict", () => {
+  const source = [
+    "const captureProbeErrors = []; const consoleErrors = []; const pageErrors = []; const checks = {'check-cancel': false};",
+    "const activeCards = page.locator('.card:has([data-status=\"active\"])');",
+    "const cancelledOk = (await activeCards.count()) > 0; const slotReleased = observedSlotsAfter >= observedSlotsBefore;",
+    "try { checks['check-cancel'] = cancelledOk && slotReleased; } finally { console.log('FOUNDRY_BROWSER_RESULT:' + JSON.stringify({captureProbeErrors, checks, consoleErrors, pageErrors})); }",
+  ].join("\n");
+  assert.doesNotThrow(() =>
+    validateBrowserRepairProposal({
+      structuredOutput: {
+        path: "tests/workflow.spec.ts",
+        replacements: [{
+          oldText: ".card:has([data-status=\"active\"])",
+          newText: ".card[data-status=\"active\"]",
+        }],
+      },
+      currentFiles: [{ path: "tests/workflow.spec.ts", content: source }],
+      requiredBrowserCheckIds: ["check-cancel"],
+    }),
+  );
+  assert.throws(
+    () =>
+      validateBrowserRepairProposal({
+        structuredOutput: {
+          path: "tests/workflow.spec.ts",
+          replacements: [{
+            oldText: "cancelledOk && slotReleased",
+            newText: "cancelledOk || slotReleased",
+          }],
+        },
+        currentFiles: [{ path: "tests/workflow.spec.ts", content: source }],
+        requiredBrowserCheckIds: ["check-cancel"],
+      }),
+    /may not change a contract-check verdict formula/u,
+  );
+});
+
 test("generated customer facts require recorded customer provenance", () => {
   const files = [
     {
       path: "app/page.tsx",
       content:
-        "export default function Page(){return <main><a href='mailto:invented@example.com'>Email</a><p>Licensed and insured</p></main>}",
+        "export default function Page(){return <main><a href='mailto:invented@unprovided-business.com'>Email</a><p>Licensed and insured</p></main>}",
     },
   ];
   assert.throws(
@@ -734,7 +1380,7 @@ test("generated customer facts require recorded customer provenance", () => {
       supplied: [
         {
           kind: "contact-details",
-          value: "invented@example.com",
+          value: "invented@unprovided-business.com",
           source: "customer-request",
         },
         {
@@ -745,6 +1391,57 @@ test("generated customer facts require recorded customer provenance", () => {
       ],
       missingBeforeLaunch: [],
     }),
+  );
+});
+
+test("reserved fixture email addresses are not treated as customer contact claims", () => {
+  const context = { supplied: [], missingBeforeLaunch: ["Contact details"] };
+  assert.doesNotThrow(() =>
+    validateCustomerContentIntegrity(
+      [{
+        path: "app/page.tsx",
+        content: [
+          "const examples = [",
+          "  'test@example.com',",
+          "  'user@booking.test',",
+          "  'seed@test.invalid',",
+          "  'seed@business.internal',",
+          "  'seed@invalid.local',",
+          "  'seed@business.fictional',",
+          "];",
+        ].join("\n"),
+      }],
+      context,
+    ),
+  );
+  assert.throws(
+    () =>
+      validateCustomerContentIntegrity(
+        [{ path: "app/page.tsx", content: "const email = 'owner@real-business.com';" }],
+        context,
+      ),
+    /email address/u,
+  );
+});
+
+test("customer-fact validation distinguishes dates and SVG dimensions from phone numbers", () => {
+  const context = { supplied: [], missingBeforeLaunch: ["Contact details"] };
+  assert.doesNotThrow(() =>
+    validateCustomerContentIntegrity(
+      [{
+        path: "app/page.tsx",
+        content: "const renewal = '2026-09-15'; const icon = '<svg viewBox=\"0 0 32 32\"></svg>';",
+      }],
+      context,
+    ),
+  );
+  assert.throws(
+    () =>
+      validateCustomerContentIntegrity(
+        [{ path: "app/page.tsx", content: "Call 512-555-0184 for help." }],
+        context,
+      ),
+    /phone number/u,
   );
 });
 

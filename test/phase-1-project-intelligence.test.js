@@ -14,6 +14,195 @@ import {
   openMissionControl,
   validateProjectDesignQuality,
 } from "../src/index.js";
+import {
+  FAST_INITIAL_UNDERSTANDING_SCHEMA,
+  approvedArchitectureConstraints,
+  expandFastInitialUnderstanding,
+  normalizeUnderstandingCandidateBounds,
+  normalizeFastDecisionAlternatives,
+  projectGroundingContext,
+} from "../src/understanding-plane/project-understanding-service.js";
+
+test("fast decisions collapse duplicates before deep project validation", () => {
+  assert.deepEqual(
+    normalizeFastDecisionAlternatives("Inline alerts", [
+      "Inline alerts",
+      "Full-screen guidance",
+      "Escalate to support",
+    ]),
+    ["Inline alerts", "Full-screen guidance", "Escalate to support"],
+  );
+  assert.deepEqual(
+    normalizeFastDecisionAlternatives("Inline alerts", [
+      "Inline alerts",
+      "Inline alerts",
+      "Full-screen guidance",
+    ]),
+    [],
+  );
+});
+
+test("project grounding includes recorded subtype and customer context", () => {
+  const grounding = projectGroundingContext("Customer portal", [
+    {
+      answer: "Customer Self-Service Hub",
+      selection: {
+        value: "Customer Self-Service Hub",
+        reason: "Customers manage account tasks without staff assistance.",
+      },
+    },
+    {
+      answer: "Explain consequential errors on a phone.",
+    },
+  ]);
+  assert.match(grounding, /Customer Self-Service Hub/u);
+  assert.match(grounding, /consequential errors on a phone/u);
+});
+
+test("approved architecture constraints remove overlap between intent and profile", () => {
+  assert.deepEqual(
+    approvedArchitectureConstraints(
+      { projectIntent: { constraints: ["Local persistence", "No payments"] } },
+      { architectureDecisions: ["Local persistence", "SQLite"] },
+    ),
+    ["Local persistence", "No payments", "SQLite"],
+  );
+});
+
+test("understanding keeps the recommended direction when a provider overproduces alternatives", () => {
+  const alternatives = Array.from({ length: 8 }, (_, index) => ({
+    name: `Direction ${index + 1}`,
+    recommended: index === 7,
+  }));
+  const candidate = { designAlternatives: alternatives };
+  const normalized = normalizeUnderstandingCandidateBounds(candidate);
+  assert.equal(normalized.designAlternatives.length, 7);
+  assert.equal(
+    normalized.designAlternatives.some((alternative) => alternative.recommended),
+    true,
+  );
+  assert.equal(candidate.designAlternatives.length, 8);
+});
+
+test("understanding safely normalizes technical questions and duplicate decision choices", () => {
+  const normalized = normalizeUnderstandingCandidateBounds({
+    projectIntent: { intendedUsers: ["restaurant operators"] },
+    decisions: [{
+      customerFriendlyQuestion: "Which API architecture should the database use?",
+      alternatives: ["Keep a stable conflict response", "Keep a stable conflict response", "Return a waitlist response", "Ask an operator to resolve it"],
+      consequenceOfEachChoice: ["The same conflict stays stable.", "The same conflict stays stable.", "The caller receives a waitlist state.", "An operator handles the conflict."],
+    }],
+  });
+  assert.equal(
+    normalized.decisions[0].customerFriendlyQuestion,
+    "Which customer-visible outcome should Foundry prioritize for restaurant operators?",
+  );
+  assert.deepEqual(normalized.decisions[0].alternatives, [
+    "Keep a stable conflict response",
+    "Return a waitlist response",
+    "Ask an operator to resolve it",
+  ]);
+  assert.equal(normalized.decisions[0].consequenceOfEachChoice.length, 3);
+});
+
+test("initial understanding is bounded for a fast customer-facing proposal", () => {
+  const source = readFileSync(
+    new URL("../src/understanding-plane/project-understanding-service.js", import.meta.url),
+    "utf8",
+  );
+  assert.match(source, /FAST_INITIAL_UNDERSTANDING_SCHEMA/u);
+  assert.match(source, /maxItems: 3/u);
+  assert.match(source, /maxItems: 2/u);
+  assert.match(source, /expandFastInitialUnderstanding/u);
+  assert.match(source, /exactly three design alternatives/u);
+  assert.match(source, /Omit decisions Foundry can safely make/u);
+});
+
+test("fast understanding schema is portable to strict structured-output providers", () => {
+  const visit = (schema, path = "$") => {
+    if (schema?.type === "object") {
+      const propertyNames = Object.keys(schema.properties ?? {}).sort();
+      const required = [...(schema.required ?? [])].sort();
+      assert.deepEqual(required, propertyNames, `${path} has optional strict-schema properties`);
+      for (const [name, property] of Object.entries(schema.properties ?? {})) {
+        visit(property, `${path}.${name}`);
+      }
+    }
+    if (schema?.type === "array") visit(schema.items, `${path}[]`);
+  };
+  visit(FAST_INITIAL_UNDERSTANDING_SCHEMA);
+});
+
+test("fast customer proposal expands into a valid deep project design", () => {
+  const expanded = expandFastInitialUnderstanding({
+    name: "Ember Table API",
+    family: "api-service",
+    platform: "web",
+    customerOutcome: "Restaurant operators manage valid table reservations through documented workflows.",
+    intendedUsers: ["restaurant operators"],
+    primaryGoal: "Prevent conflicting restaurant reservations while keeping operator actions understandable.",
+    primaryJourneys: ["Operators check availability, create a reservation, retrieve it, and cancel it."],
+    essentialCapabilities: [
+      { statement: "Operators create and retrieve valid restaurant reservations", acceptanceMethod: "structured-tests" },
+      { statement: "Operators use an interactive reservation documentation page", acceptanceMethod: "browser-check" },
+    ],
+    explicitExclusions: ["Payments and third-party restaurant integrations remain outside the first version"],
+    designDirection: {
+      visualPersonality: "Warm technical clarity for restaurant operators",
+      layoutStrategy: "Endpoint navigation beside focused request and response details",
+      informationDensity: "Dense information grouped by one restaurant workflow at a time",
+      navigationApproach: "Grouped navigation for availability, reservations, and errors",
+      responsivePriority: "Phone controls stack without horizontal page overflow",
+      accessibilityNeeds: ["Keyboard focus remains visible throughout reservation workflows"],
+      rationale: "Restaurant operators need quick endpoint lookup and unambiguous reservation outcomes.",
+    },
+    designAlternatives: [
+      { name: "Operator Reference", whyItFits: "Restaurant operators quickly execute and inspect every reservation endpoint workflow.", visualPersonality: "Warm technical clarity for restaurant operators", layoutApproach: "Endpoint rail beside request details", tradeoff: "Prioritizes endpoint lookup over decorative restaurant storytelling", recommended: true },
+      { name: "Service Timeline", whyItFits: "Restaurant operators inspect table availability and reservation conflicts as a schedule.", visualPersonality: "Schedule-first operational warmth", layoutApproach: "Capacity timeline above reservation details", tradeoff: "Adds schedule density before endpoint documentation", recommended: false },
+      { name: "Diagnostic Desk", whyItFits: "Restaurant operators investigate validation and reservation conflict failures from evidence.", visualPersonality: "Evidence-led diagnostic focus", layoutApproach: "Health and errors above request details", tradeoff: "Makes ordinary reservation creation less prominent", recommended: false },
+    ],
+    observations: ["Reservation overlap protection is the central restaurant operator trust moment."],
+    opportunities: ["Seed examples can make every reservation outcome immediately testable."],
+    risks: ["Ambiguous reservation time boundaries can produce conflicting operator expectations."],
+    assumptions: ["Operators are the first-version users."],
+    recommendations: [
+      { title: "Explicit reservation errors", specificValue: "Give operators stable error codes for every rejected reservation request.", whyThisProjectNeedsIt: "Restaurant operators must distinguish overlap, capacity, and validation failures quickly.", selectedByDefault: true },
+      { title: "Executable examples", specificValue: "Let operators run seeded reservation examples directly inside documentation.", whyThisProjectNeedsIt: "Restaurant operators need to prove availability and reservation behavior without setup.", selectedByDefault: true },
+      { title: "Durability proof", specificValue: "Show operators that saved restaurant reservations survive application restarts.", whyThisProjectNeedsIt: "Restaurant operators need confidence that retrieval and cancellation remain dependable.", selectedByDefault: true },
+    ],
+    decisions: [],
+    capabilities: ["web-application", "typescript", "sqlite-persistence", "browser-verification"],
+    dataConcepts: ["restaurant tables", "opening windows", "reservations"],
+    architectureDecisions: ["Use the certified web stack and local SQLite storage"],
+    customerSuppliedContent: [],
+    missingCustomerContent: [],
+  });
+  const design = Object.fromEntries(
+    [
+      "projectIntent",
+      "userExperiencePlan",
+      "productProposal",
+      "designDirection",
+      "designAlternatives",
+      "foundryInsights",
+      "decisions",
+      "recommendations",
+      "verificationPlan",
+    ].map((key) => [key, expanded[key]]),
+  );
+  assert.doesNotThrow(() =>
+    validateProjectDesignQuality(design, {
+      originalRequest: "Restaurant reservation API for operators",
+    }),
+  );
+  assert.equal(expanded.designAlternatives.length, 3);
+  assert.equal(expanded.recommendations.length, 3);
+  assert.equal(expanded.verificationPlan.length, 5);
+  assert.match(
+    expanded.verificationPlan[2].observableOutcome,
+    /responsive|keyboard|accessible/iu,
+  );
+});
 
 function projectDesign({
   audience = "insurance policyholders",
@@ -263,6 +452,19 @@ test("Phase 1 rejects generic, duplicate, technical, contradictory, and unsuppor
   const unsupported = projectDesign();
   unsupported.verificationPlan[0].acceptanceMethod = "trust-the-model";
   assert.throws(() => normalizeProjectDesign(unsupported), /unsupported/u);
+
+  const selfDependent = projectDesign();
+  selfDependent.verificationPlan[0].dependencyIndexes = [1];
+  assert.throws(() => normalizeProjectDesign(selfDependent), /cannot reference itself/u);
+
+  const cyclic = projectDesign();
+  cyclic.verificationPlan.push({
+    ...structuredClone(cyclic.verificationPlan[0]),
+    observableOutcome: "A second observable policy workflow completes in Chromium.",
+    dependencyIndexes: [1],
+  });
+  cyclic.verificationPlan[0].dependencyIndexes = [2];
+  assert.throws(() => normalizeProjectDesign(cyclic), /contain a cycle/u);
 });
 
 test("ApprovedProjectContract is immutable, content-addressed, versioned, and replayable", (t) => {

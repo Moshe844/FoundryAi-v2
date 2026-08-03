@@ -8,6 +8,7 @@ import {
   WEB_STACK_MANIFEST,
   approvedContractRequirementCatalogue,
   approvedDesignDirectionHash,
+  bindMissingApprovedRequirementTraces,
   contractBoundModelPrompt,
   createApprovedProjectContract,
   createModelTaskContract,
@@ -213,6 +214,14 @@ test("Phase 2 gives every model call a complete binding task contract", () => {
     expectedOutputSchema: CONTRACT_BOUND_BUNDLE_SCHEMA,
   });
   assert.equal(task.approvedContract.contentHash, contract.contentHash);
+  assert.equal(
+    task.approvedContract.selectedDesignDirectionHash,
+    approvedDesignDirectionHash(contract),
+  );
+  assert.deepEqual(
+    task.approvedContract.explicitExclusionIds,
+    catalogue.exclusionRequirements.map((item) => item.requirementId),
+  );
   assert.equal(task.currentCheckpoint, "phase-2-baseline");
   assert.deepEqual(task.verificationPlan, contract.verificationPlan);
   assert.equal(task.expectedOutputSchema, CONTRACT_BOUND_BUNDLE_SCHEMA);
@@ -220,9 +229,14 @@ test("Phase 2 gives every model call a complete binding task contract", () => {
     task.relevantRequirements.length,
     catalogue.implementationRequirements.length,
   );
+  assert.deepEqual(
+    task.requiredImplementationRequirementIds,
+    catalogue.implementationRequirements.map((item) => item.requirementId),
+  );
   const prompt = contractBoundModelPrompt(task, ["Return the exact schema."]);
   assert.match(prompt, /BINDING/u);
   assert.match(prompt, /Do not reinterpret the original request/u);
+  assert.match(prompt, /Never calculate, abbreviate, or reinterpret/u);
   assert(prompt.includes(contract.contentHash));
 });
 
@@ -279,6 +293,23 @@ test("Phase 2 rejects omissions, reinterpretation, expansion, drift, and weak tr
   );
 });
 
+test("Phase 2 binds an omitted trace only to a file that preserves its subject", () => {
+  const contract = contractFixture();
+  const plan = validPlan(contract);
+  const missingId = plan.files[0].contractRequirementIds.pop();
+  const requirement = approvedContractRequirementCatalogue(contract)
+    .implementationRequirements.find((item) => item.requirementId === missingId);
+  plan.files[0].content += `\n${requirement.statement}`;
+  const bound = bindMissingApprovedRequirementTraces(plan, contract);
+  assert(bound.files[0].contractRequirementIds.includes(missingId));
+  assert.doesNotThrow(() => validateContractBoundMissionPlan(bound, contract));
+
+  const unrelated = validPlan(contract);
+  unrelated.files[0].contractRequirementIds.pop();
+  const unchanged = bindMissingApprovedRequirementTraces(unrelated, contract);
+  assert.equal(unchanged.files[0].contractRequirementIds.includes(missingId), false);
+});
+
 test("Phase 2 rejects repair traces outside the exact approved task scope", () => {
   const contract = contractFixture();
   const catalogue = approvedContractRequirementCatalogue(contract);
@@ -316,6 +347,7 @@ test("Phase 2 production has one contract gateway and no hard-coded model catalo
   );
   assert.equal(production.match(/models\.request\(/gu)?.length, 2);
   assert((production.match(/requestModel\(/gu)?.length ?? 0) >= 4);
-  assert.match(production, /contractTraceSchema\(\s*browserRepairPatchSchema/u);
+  assert.match(production, /contractTraceSchema\(\s*scopedBrowserRepairPatchSchema/u);
+  assert.match(production, /combined file content below 18,000 characters/u);
   assert.doesNotMatch(binding, /\b(?:claude|gemini|gpt|opus)[-_\d]/iu);
 });

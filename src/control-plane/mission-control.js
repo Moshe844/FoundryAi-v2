@@ -2041,6 +2041,7 @@ export function openMissionControl({
   repairBudget,
   repairStrategyCatalog = {},
   executionFaultInjector = null,
+  requireProductBlueprintApproval = false,
   clock = () => new Date().toISOString(),
 }) {
   if (typeof ledgerDirectory !== "string" || ledgerDirectory.length === 0) {
@@ -2111,10 +2112,10 @@ export function openMissionControl({
   if (
     !Number.isSafeInteger(maxModelProviderAttempts) ||
     maxModelProviderAttempts < 1 ||
-    maxModelProviderAttempts > 3
+    maxModelProviderAttempts > 4
   ) {
     throw new InvalidInputError(
-      "maxModelProviderAttempts must be from 1 through 3.",
+      "maxModelProviderAttempts must be from 1 through 4.",
     );
   }
   if (
@@ -2156,7 +2157,11 @@ export function openMissionControl({
     providers: aiRegistry.providers,
     models: aiRegistry.models,
     capabilities: aiRegistry.capabilities,
-    router: createModelRouter({ registry: aiRegistry, clock }),
+    router: createModelRouter({
+      registry: aiRegistry,
+      clock,
+      routeHistory: persistedModelRouteHistory,
+    }),
     prompts: createPromptBuilder(),
     context: createContextBuilder(),
     responses: createModelResponseValidator(),
@@ -2422,12 +2427,26 @@ export function openMissionControl({
         return history;
       });
   }
+  function persistedProductTypeDiscoveryHistory() {
+    return readdirSync(ledgerDirectory)
+      .filter((name) => name.endsWith(".jsonl"))
+      .flatMap((name) => {
+        const missionId = name.slice(0, -6);
+        const records = internalLedger.publicLedger.reportEvents(missionId);
+        for (let index = records.length - 1; index >= 0; index -= 1) {
+          const discovery = records[index]?.fact?.metadata?.productTypeDiscovery;
+          if (discovery !== undefined) return [discovery];
+        }
+        return [];
+      });
+  }
   const models = createModelGateway({
     ledger: internalLedger.publicLedger,
     evidence,
     facts: executionFacts,
     workspaces,
     providerRegistry: aiRegistry.execution,
+    modelRouter: ai.router,
     routeHistory: persistedModelRouteHistory,
     maxProviderAttempts: maxModelProviderAttempts,
     clock,
@@ -2476,6 +2495,8 @@ export function openMissionControl({
     router: ai.router,
     providerRegistry: aiRegistry.execution,
     routeHistory: persistedModelRouteHistory,
+    productTypeDiscoveryHistory: persistedProductTypeDiscoveryHistory,
+    requireProductBlueprintApproval,
     clock,
   });
   const production = createProductionMissionService({

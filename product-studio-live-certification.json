@@ -1,0 +1,88 @@
+{
+  "startedAt": "2026-08-03T02:03:59.755Z",
+  "execute": true,
+  "resumed": true,
+  "inputs": [
+    {
+      "input": "Inventory",
+      "attempts": 3,
+      "error": "Inventory project design: anthropic timed out after 30 seconds."
+    },
+    {
+      "input": "Website",
+      "missionId": "mission-1785722732553-b0fc5544",
+      "subtypeCount": 6,
+      "selectedSubtype": "Information Website",
+      "blueprintVersion": 2,
+      "blueprintHash": "d34a5382d8bdfa5a53c72f728a8397cd84ed06d69d5c6187256880ebecdbac4b",
+      "primaryWorkflows": [
+        "Visitors load the website and navigate through available information content.",
+        "Visitors encounter errors and receive clear explanations on how to proceed."
+      ],
+      "requiredSurfaces": [
+        "Visitors load the website and navigate through available information content.",
+        "Visitors encounter errors and receive clear explanations on how to proceed."
+      ],
+      "designDirections": [
+        "Minimal Editorial",
+        "Corporate Portal",
+        "Modern Card Grid"
+      ],
+      "minimumVisualDifferences": 6,
+      "recommendations": [
+        "Mobile-First Usability Audit",
+        "Explicit Error Messaging System",
+        "Lightweight Asset Optimization"
+      ],
+      "customMessagePresent": true,
+      "selectedSubtypePresent": true,
+      "executionState": "SUCCEEDED",
+      "contractBlueprintHash": "d34a5382d8bdfa5a53c72f728a8397cd84ed06d69d5c6187256880ebecdbac4b",
+      "finishedMatchesApprovedBlueprint": true,
+      "attempts": 1
+    },
+    {
+      "input": "Customer portal",
+      "attempts": 3,
+      "error": "fetch failed"
+    },
+    {
+      "input": "Booking system",
+      "attempts": 3,
+      "error": "fetch failed"
+    },
+    {
+      "input": "Photographer portfolio",
+      "attempts": 3,
+      "error": "fetch failed"
+    },
+    {
+      "input": "REST API",
+      "attempts": 3,
+      "error": "fetch failed"
+    },
+    {
+      "input": "Internal tool",
+      "attempts": 3,
+      "error": "fetch failed"
+    },
+    {
+      "input": "School portal",
+      "attempts": 3,
+      "error": "fetch failed"
+    },
+    {
+      "input": "Expense system",
+      "attempts": 3,
+      "error": "fetch failed"
+    },
+    {
+      "input": "AI assistant",
+      "attempts": 3,
+      "error": "fetch failed"
+    }
+  ],
+  "completedAt": "2026-08-03T02:26:07.950Z",
+  "passed": 1,
+  "failed": 9
+}

@@ -392,8 +392,13 @@ function project(records) {
             discoveredAt: record.occurredAt,
             discoveryEventId: record.eventId,
             governance: {
+              family: eligible.family ?? validation.family ?? null,
+              familyRuleId: eligible.familyRuleId ?? validation.familyRuleId ?? null,
+              familyPolicyVersion:
+                eligible.familyPolicyVersion ?? validation.familyPolicyVersion ?? null,
               allowedTaskClasses: eligible.allowedTaskClasses,
               capabilityAliases: eligible.capabilityAliases,
+              capabilitySupport: eligible.capabilitySupport ?? [],
               eligibilityReasons: eligible.eligibilityReasons,
               pricing: eligible.pricing,
               validation,

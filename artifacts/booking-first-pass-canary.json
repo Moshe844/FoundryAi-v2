@@ -1,0 +1,15 @@
+{
+  "startedAt": "2026-08-03T12:38:48.418Z",
+  "execute": true,
+  "resumed": true,
+  "inputs": [
+    {
+      "input": "Booking system",
+      "attempts": 1,
+      "error": "Booking system project design: Project design quality validation failed: designDirection is not grounded in this project."
+    }
+  ],
+  "completedAt": "2026-08-03T12:39:19.986Z",
+  "passed": 0,
+  "failed": 1
+}

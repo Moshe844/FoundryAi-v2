@@ -5,10 +5,16 @@ import test from "node:test";
 import {
   approvedContractRequirementCatalogue,
   createApprovedProjectContract,
+  createProductBlueprint,
+  normalizeProductBlueprint,
   createModelTaskContract,
   validateApprovedProjectContractConsistency,
   validateProjectDesignQuality,
 } from "../src/index.js";
+import {
+  findUnresolvedBlueprintLanguage,
+  hasUnresolvedBlueprintLanguage,
+} from "../src/domain/product-blueprint.js";
 import { normalizeCustomerFollowUpAnswers } from "../src/understanding-plane/project-understanding-service.js";
 
 const cases = [
@@ -25,6 +31,23 @@ const cases = [
 ].map(([slug, request, users, subject, action, direction, options]) => ({
   slug, request, users, subject, action, direction, options,
 }));
+
+test("blueprint quality distinguishes unresolved placeholders from anti-placeholder policy", () => {
+  assert.equal(hasUnresolvedBlueprintLanguage("placeholder"), true);
+  assert.equal(hasUnresolvedBlueprintLanguage("TODO: choose content"), true);
+  assert.deepEqual(
+    findUnresolvedBlueprintLanguage({ design: { copy: "placeholder" } }),
+    { path: "blueprint.design.copy", value: "placeholder" },
+  );
+  assert.equal(
+    hasUnresolvedBlueprintLanguage({ contentPolicy: "Avoid placeholder content and list missing customer assets honestly." }),
+    false,
+  );
+  assert.equal(
+    hasUnresolvedBlueprintLanguage("Do not ship TBD or TODO copy."),
+    false,
+  );
+});
 
 function projectDesign(spec) {
   const directions = [
@@ -221,6 +244,44 @@ function approvedContract(spec, design) {
     approvalTimestamp: "2026-07-31T16:00:00.000Z",
   });
 }
+
+test("a complete immutable Product Blueprint is projected from live project intelligence", () => {
+  const spec = cases[0];
+  const design = projectDesign(spec);
+  const blueprint = createProductBlueprint({
+    missionId: "blueprint-customer-portal",
+    originalCustomerRequest: spec.request,
+    profile: {
+      profileVersion: 3,
+      family: "web-application",
+      name: "Customer Resolution Portal",
+      dataConcepts: ["customer account", "service request"],
+      architectureDecisions: ["Persist request state locally", "Render an accessible web application"],
+      selectedStack: { stackId: "nextjs-typescript-sqlite-npm-playwright", version: "1.0.0" },
+    },
+    projectDesign: design,
+    answers: [{
+      questionId: "product-subtype-subtype-1",
+      answer: "Customer self-service portal",
+      selection: {
+        kind: "product-subtype", subjectId: "product-type", mode: "select-option",
+        optionId: "subtype-1", value: "Customer self-service portal",
+        reason: "Customers need to resolve service requests.", classification: "product subtype",
+        sourceProfileVersion: 1,
+      },
+    }],
+  });
+  assert.equal(blueprint.blueprintVersion, 3);
+  assert.deepEqual(blueprint.selectedSubtypes, ["Customer self-service portal"]);
+  assert.equal(blueprint.integrityHash.length, 64);
+  assert.ok(Object.isFrozen(blueprint));
+  const changed = structuredClone(blueprint);
+  changed.businessGoal = "A silently changed goal";
+  assert.throws(
+    () => normalizeProductBlueprint(changed),
+    /integrity hash/u,
+  );
+});
 
 test("ten materially different requests produce distinct, rich decision surfaces", () => {
   const designs = cases.map((spec) => validateProjectDesignQuality(projectDesign(spec), { originalRequest: spec.request }));

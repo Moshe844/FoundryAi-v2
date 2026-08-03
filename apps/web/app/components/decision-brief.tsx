@@ -6,6 +6,7 @@ import type {
   ClarificationDecision,
   CustomerFollowUpAnswer,
   DecisionBrief as DecisionBriefModel,
+  ProductBlueprint,
 } from "../../experience/contracts";
 
 type ClarifyAnswer = CustomerFollowUpAnswer;
@@ -123,6 +124,7 @@ function DecisionEditor({
 
 export function DecisionBrief({
   brief,
+  blueprint,
   busy,
   missionRunning,
   onClarify,
@@ -130,9 +132,10 @@ export function DecisionBrief({
   onStart,
 }: Readonly<{
   brief: DecisionBriefModel;
+  blueprint: ProductBlueprint | null;
   busy: boolean;
   missionRunning: boolean;
-  onClarify: (answers: ClarifyAnswer[]) => Promise<void>;
+  onClarify: (answers: ClarifyAnswer[]) => Promise<boolean>;
   profileVersion: number;
   onStart: () => Promise<boolean>;
 }>) {
@@ -177,6 +180,26 @@ export function DecisionBrief({
   async function beginBuilding() {
     setDeparting(true);
     await new Promise((resolve) => window.setTimeout(resolve, 180));
+    if (blueprint !== null) {
+      const approved = await onClarify([{
+        questionId: `product-blueprint-approval-v${blueprint.blueprintVersion}`,
+        answer: `Approve Product Blueprint v${blueprint.blueprintVersion} with integrity hash ${blueprint.integrityHash}.`,
+        selection: {
+          kind: "blueprint-approval",
+          subjectId: "product-blueprint",
+          mode: "confirm",
+          optionId: `blueprint-v${blueprint.blueprintVersion}`,
+          value: blueprint.integrityHash,
+          reason: "The customer approved the complete versioned Product Blueprint shown before execution.",
+          classification: "blueprint approval",
+          sourceProfileVersion: blueprint.blueprintVersion,
+        },
+      }]);
+      if (!approved) {
+        setDeparting(false);
+        return;
+      }
+    }
     const accepted = await onStart();
     if (!accepted) setDeparting(false);
   }
@@ -197,6 +220,20 @@ export function DecisionBrief({
       </div>
 
       <dl className="decision-brief-fields">
+        {blueprint !== null && (
+          <div className="field-row blueprint-identity">
+            <dt>Approved product shape</dt>
+            <dd>
+              <p className="t-body-m">
+                <strong>{blueprint.selectedSubtypes.join(" + ")}</strong>
+                {" — "}{blueprint.oneSentenceOutcome}
+              </p>
+              <p className="t-caption ink-tertiary">
+                Blueprint v{blueprint.blueprintVersion} · {blueprint.integrityHash.slice(0, 12)}
+              </p>
+            </dd>
+          </div>
+        )}
         <div className="field-row">
           <dt>What I&rsquo;ll build</dt>
           <dd className="t-body-m">
@@ -204,6 +241,44 @@ export function DecisionBrief({
             {brief.whatWillBeBuilt.value}
           </dd>
         </div>
+        {blueprint !== null && (
+          <>
+            <div className="field-row">
+              <dt>Product structure</dt>
+              <dd>
+                <p className="t-body-s ink-secondary">Required surfaces</p>
+                <ul className="bullets t-body-m stack-list">
+                  {blueprint.requiredSurfaces.map((surface) => <li key={surface}>{surface}</li>)}
+                </ul>
+                <p className="t-body-s ink-secondary">
+                  {blueprint.navigationApproach} · {blueprint.contentStructure}
+                </p>
+              </dd>
+            </div>
+            <div className="field-row">
+              <dt>Operational needs</dt>
+              <dd>
+                <p className="t-body-m">Data: {blueprint.dataAndPersistenceNeeds.join(", ")}</p>
+                <p className="t-body-s ink-secondary">
+                  Security: {blueprint.securityConsiderations.join(" · ")}
+                </p>
+                <p className="t-body-s ink-secondary">
+                  Responsive: {blueprint.responsivePriorities}
+                </p>
+              </dd>
+            </div>
+            {blueprint.recommendedLater.length > 0 && (
+              <div className="field-row">
+                <dt>Recommended later</dt>
+                <dd>
+                  <ul className="bullets t-body-m stack-list">
+                    {blueprint.recommendedLater.map((item) => <li key={item}>{item}</li>)}
+                  </ul>
+                </dd>
+              </div>
+            )}
+          </>
+        )}
         <div className="field-row">
           <dt>Who it&rsquo;s for</dt>
           <dd className="t-body-m">
@@ -498,7 +573,7 @@ export function DecisionBrief({
           onClick={() => void beginBuilding()}
           type="button"
         >
-          {working ? "Starting\u2026" : "Start building"}
+          {working ? "Starting\u2026" : "Approve blueprint · Start building"}
         </button>
         <button
           className="btn-quiet small"
