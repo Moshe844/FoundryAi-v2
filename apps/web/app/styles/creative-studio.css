@@ -1,0 +1,320 @@
+/*
+ * Creative-direction studio.
+ *
+ * The previous surface was a tall single column of large cards with a
+ * competing right rail. This uses the full width for comparison, puts the
+ * boards first, and pushes every secondary detail behind progressive
+ * disclosure so the page reads as a studio wall, not a settings screen.
+ */
+
+.studio {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  container-type: inline-size;
+}
+
+.studio-masthead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  padding-block-end: 16px;
+  border-block-end: 1px solid var(--hairline, rgb(0 0 0 / 0.1));
+}
+
+.studio-thesis { max-inline-size: 62ch; }
+.studio-thesis > h2 { margin-block: 2px 6px; }
+.studio-thesis > p { margin: 0; }
+
+.studio-status {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  text-align: end;
+}
+
+.studio-distinct {
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, currentColor 8%, transparent);
+}
+
+/* ---- boards ------------------------------------------------------------ */
+
+.studio-boards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(288px, 1fr));
+  gap: 18px;
+  align-items: start;
+}
+
+.studio-board {
+  display: flex;
+  flex-direction: column;
+  min-inline-size: 0;
+  border-radius: 14px;
+  transition: transform 180ms ease, box-shadow 180ms ease;
+}
+
+.studio-board[data-selected="true"] {
+  outline: 2px solid currentColor;
+  outline-offset: 4px;
+}
+
+.studio-board-select {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 0 12px;
+  border: 0;
+  background: none;
+  text-align: start;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+  min-inline-size: 0;
+}
+
+.studio-board-select:disabled { cursor: not-allowed; opacity: 0.55; }
+
+.studio-board-select > .art-board-v2 { margin-block-end: 6px; }
+
+.studio-board-select:hover:not(:disabled) .art-board-v2 {
+  transform: translateY(-3px);
+  transition: transform 200ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+.studio-board-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.studio-board-thesis {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin: 0;
+}
+
+.studio-board-distinction {
+  opacity: 0.72;
+  text-transform: lowercase;
+}
+
+.studio-board-tradeoff { opacity: 0.8; }
+.studio-board-tradeoff > b { font-weight: 650; margin-inline-end: 4px; }
+
+.studio-board-more {
+  align-self: flex-start;
+  padding: 4px 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  opacity: 0.75;
+  color: inherit;
+}
+.studio-board-more:hover { opacity: 1; }
+
+.studio-brief {
+  display: grid;
+  gap: 6px;
+  margin: 8px 0 0;
+  padding: 12px;
+  border-radius: 10px;
+  background: color-mix(in srgb, currentColor 5%, transparent);
+  font-size: 0.8rem;
+}
+.studio-brief > div { display: grid; grid-template-columns: 9rem 1fr; gap: 10px; }
+.studio-brief dt { font-weight: 600; opacity: 0.7; }
+.studio-brief dd { margin: 0; }
+
+/* ---- actions ----------------------------------------------------------- */
+
+.studio-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+/* ---- comparison -------------------------------------------------------- */
+
+.studio-compare-scroll { overflow-x: auto; }
+
+.studio-compare {
+  inline-size: 100%;
+  min-inline-size: 34rem;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+.studio-compare th, .studio-compare td {
+  padding: 8px 10px;
+  text-align: start;
+  vertical-align: top;
+  border-block-end: 1px solid color-mix(in srgb, currentColor 12%, transparent);
+}
+.studio-compare thead th { font-weight: 650; }
+.studio-compare tbody th { font-weight: 600; opacity: 0.66; white-space: nowrap; }
+
+/* ---- combine ideas ----------------------------------------------------- */
+
+.studio-custom {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px;
+  border-radius: 14px;
+  background: color-mix(in srgb, currentColor 4%, transparent);
+}
+
+.studio-custom-head > h3 { margin: 0 0 4px; }
+.studio-custom-head > p { margin: 0; }
+
+.studio-combos { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.studio-combo {
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, currentColor 26%, transparent);
+  background: none;
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+  color: inherit;
+}
+.studio-combo:hover { background: color-mix(in srgb, currentColor 8%, transparent); }
+
+.studio-trait-axes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 12px 18px;
+}
+
+.studio-trait-axis > p { margin: 0 0 5px; }
+.studio-trait-row { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.studio-trait {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+  background: none;
+  font: inherit;
+  font-size: 0.78rem;
+  line-height: 1.15;
+  text-align: start;
+  cursor: pointer;
+  color: inherit;
+}
+.studio-trait > small { font-size: 0.66rem; opacity: 0.6; }
+.studio-trait[aria-pressed="true"] {
+  background: color-mix(in srgb, currentColor 88%, transparent);
+  color: canvas;
+  border-color: transparent;
+}
+
+.studio-custom-preview {
+  padding: 14px;
+  border-radius: 10px;
+  background: color-mix(in srgb, currentColor 5%, transparent);
+}
+.studio-custom-preview > p { margin: 0 0 6px; }
+.studio-custom-rules { margin: 0; padding-inline-start: 18px; font-size: 0.8rem; }
+.studio-custom-rules > li { margin-block-end: 3px; }
+
+.studio-conflict, .studio-incompatible { margin: 8px 0 0; opacity: 0.85; }
+.studio-incompatible { font-weight: 600; }
+
+/* ---- mobile ------------------------------------------------------------ */
+
+@container (max-width: 640px) {
+  .studio-boards {
+    grid-auto-flow: column;
+    grid-auto-columns: 84%;
+    grid-template-columns: none;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    scroll-padding-inline: 4px;
+    padding-block-end: 8px;
+  }
+  .studio-board { scroll-snap-align: start; }
+  .studio-masthead { flex-direction: column; align-items: flex-start; }
+  .studio-status { align-items: flex-start; text-align: start; }
+  .studio-actions {
+    position: sticky;
+    inset-block-end: 0;
+    z-index: 2;
+    padding-block: 10px;
+    background: canvas;
+  }
+  .studio-brief > div { grid-template-columns: 1fr; gap: 2px; }
+}
+
+/* ---- calm suggestion panel --------------------------------------------- */
+
+.suggestion-region { display: flex; flex-direction: column; gap: 8px; }
+
+.suggestion-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.suggestion-item {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+}
+
+.suggestion-chip {
+  flex: 1;
+  padding: 7px 11px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+  background: none;
+  font: inherit;
+  font-size: 0.8rem;
+  line-height: 1.25;
+  text-align: start;
+  cursor: pointer;
+  color: inherit;
+}
+.suggestion-chip:hover:not(:disabled) {
+  background: color-mix(in srgb, currentColor 7%, transparent);
+}
+
+.suggestion-dismiss {
+  flex: 0 0 auto;
+  inline-size: 26px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: none;
+  font: inherit;
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.45;
+  color: inherit;
+}
+.suggestion-dismiss:hover:not(:disabled) {
+  opacity: 1;
+  background: color-mix(in srgb, currentColor 8%, transparent);
+}

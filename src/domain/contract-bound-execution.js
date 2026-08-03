@@ -101,7 +101,7 @@ function entry(requirementId, kind, statement) {
   return { requirementId, kind, statement: text(statement, `${requirementId}.statement`) };
 }
 
-function addBlueprintDesignRequirements(add, implementation, blueprint) {
+function addBlueprintDesignRequirements(add, implementation, exclusions, blueprint) {
   const design = blueprint.designSpecification;
   if (design === null || typeof design !== "object") return;
   const composition = design.composition ?? {};
@@ -117,6 +117,39 @@ function addBlueprintDesignRequirements(add, implementation, blueprint) {
   for (const [id, kind, statement] of additions) {
     if (typeof statement === "string" && statement.trim().length > 2) {
       add(implementation, entry(id, kind, statement));
+    }
+  }
+  // Structural design DNA. Without these the builder receives a mood and a
+  // palette, which is how a "selected direction" ends up recognizable only by
+  // its accent colour. Each entry below is independently verifiable against
+  // the finished application.
+  const dna = design.creativeDNA ?? null;
+  if (dna !== null && typeof dna === "object") {
+    const structural = [
+      ["blueprint-design-primitive", "design-composition-primitive",
+        `Compose every customer-facing surface as a ${String(dna.compositionPrimitive).replaceAll("-", " ")}. This structure is binding, not a suggestion.`],
+      ["blueprint-design-sequence", "design-surface-sequence",
+        `Lay out the primary surface in this order: ${(dna.surfaceSequence ?? []).join(" then ")}.`],
+      ["blueprint-design-typescale", "design-typography",
+        `Set type in a ${String(dna.typeVoice).replaceAll("-", " ")} voice at a ${dna.typeScale} scale, with a matching modular scale for every heading level.`],
+      ["blueprint-design-imagery", "design-imagery",
+        `Treat imagery as ${String(dna.imageryTreatment).replaceAll("-", " ")}.`],
+      ["blueprint-design-motion", "design-motion",
+        `Motion character must be ${dna.motionStrategy}, and must respect prefers-reduced-motion.`],
+      ["blueprint-design-rhythm", "design-spacing",
+        `Use a ${String(dna.spacingRhythm).replaceAll("-", " ")} spacing rhythm derived from a single spacing scale.`],
+      ["blueprint-design-surface-depth", "design-surface",
+        `Render surfaces as ${String(dna.surfaceDepth).replaceAll("-", " ")}.`],
+      ["blueprint-design-responsive-transform", "design-responsive",
+        `On phone viewports the layout must ${String(dna.responsiveTransform).replaceAll("-", " ")} without horizontal overflow.`],
+    ];
+    for (const [id, kind, statement] of structural) {
+      if (typeof statement === "string" && statement.trim().length > 2) {
+        add(implementation, entry(id, kind, statement));
+      }
+    }
+    for (const [index, exclusion] of (dna.exclusions ?? []).entries()) {
+      add(exclusions, entry(`blueprint-design-exclusion-${index + 1}`, "design-exclusion", exclusion));
     }
   }
   for (const [index, requirement] of (design.accessibilityRequirements ?? design.accessibilityNeeds ?? []).entries()) {
@@ -172,7 +205,7 @@ export function approvedContractRequirementCatalogue(contractInput) {
       implementation,
       entry(`blueprint-acceptance-${index + 1}`, "acceptance", requirement),
     ));
-    addBlueprintDesignRequirements(add, implementation, blueprint);
+    addBlueprintDesignRequirements(add, implementation, exclusions, blueprint);
     blueprint.excludedFromV1.forEach((statement, index) => add(
       exclusions,
       entry(`blueprint-exclusion-${index + 1}`, "blueprint-exclusion", statement),
@@ -450,8 +483,8 @@ export function contractBoundModelPrompt(taskContract, instructions) {
     JSON.stringify(taskContract),
     "DESIGN-DIRECTED GENERATION — BINDING",
     "Implement the approved designExecutionBrief as the real structural design of the application, not as descriptive copy. Translate its composition, navigation, hierarchy, typography, color roles, spacing density, interaction behavior, imagery strategy, mobile transformation, accessibility requirements, and customer instructions into concrete source. The finished project must be recognizably the approved direction. Reusing a generic dashboard, card stack, or universal shell that merely changes colors or labels is a contract violation.",
-    "The structured output must include designFidelity explaining exactly where each design rule is implemented. designFidelity.sourceFiles must identify the actual customer-facing layout and style files. The generated Playwright test must capture screenshots at both phone and desktop widths and must measure rendered composition, typography, color, and responsive transformation using real DOM/computed-style evidence. A screenshot alone is not a passing verdict, but screenshots are mandatory evidence for review and repair.",
-    "Copy authoritative contractHash, contractVersion, supportedPlatform, designDirectionHash, and explicitExclusionIds values exactly from the binding task contract when the output schema requests them. Never calculate, abbreviate, or reinterpret those values. Return exactly one requirementClaims entry for every requiredImplementationRequirementIds value and trace every one of those identifiers to at least one generated file. In each implementationSummary, preserve at least one exact distinctive subject word from that requirement; for a production-build requirement, explicitly describe the production compilation, packaging, or bundle.",
+    "The structured output must include designFidelity explaining exactly where each design rule is implemented. designFidelity.sourceFiles must identify the actual customer-facing layout and style files. Customer-facing source must contain an inspectable responsive strategy: an explicit breakpoint or container transformation, a wrapping/auto-fit layout, or intrinsic fluid sizing with a real maximum bound. The generated Playwright test must capture screenshots at both phone and desktop widths and must measure rendered composition, typography, color, and responsive transformation using real DOM/computed-style evidence. A screenshot alone is not a passing verdict, but screenshots are mandatory evidence for review and repair.",
+    "Copy authoritative contractHash, contractVersion, supportedPlatform, designDirectionHash, and explicitExclusionIds values exactly from the binding task contract when the output schema requests them. Never calculate, abbreviate, or reinterpret those values. Return exactly one requirementClaims entry for every requiredImplementationRequirementIds value and trace every one of those identifiers to at least one generated file. Begin each implementationSummary by quoting the requirement's statement verbatim, then ' — implemented by ' and a concrete description of where and how it is implemented; never paraphrase the quoted statement, because admission verifies its exact words. For a production-build requirement, additionally describe the production compilation, packaging, or bundle.",
     "INSTRUCTIONS",
     ...instructions.map((instruction, index) => `${index + 1}. ${text(instruction, `instructions[${index}]`)}`),
     "Do not reinterpret the original request. Do not omit an approved requirement, add an unapproved major feature, change platform or design direction, ignore a customer message, violate an exclusion, or weaken verification.",

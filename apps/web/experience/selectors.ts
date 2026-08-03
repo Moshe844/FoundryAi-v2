@@ -80,6 +80,23 @@ function sourced<T>(
   });
 }
 
+/**
+ * Compresses a recommendation into a short, scannable action label. A chip is
+ * a thing the customer can ask for, not a paragraph explaining a default.
+ */
+function suggestionLabel(value: string) {
+  const firstClause = value
+    .split(/[.;:]/u)[0]
+    .replace(/^(?:foundry|we|the app|the site)\s+(?:will|should|can|may)\s+/iu, "")
+    .replace(/^(?:add|include|provide|give|let|allow|show|make)\s+/iu, (match) =>
+      match.toLowerCase(),
+    )
+    .trim();
+  const words = firstClause.split(/\s+/u);
+  const trimmed = words.length > 7 ? `${words.slice(0, 7).join(" ")}…` : firstClause;
+  return trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
+}
+
 export function customerPhase(mission: Mission): CustomerPhaseView {
   switch (mission.state) {
     case "INTAKE":
@@ -505,6 +522,7 @@ function proposal(mission: Mission): FoundryProposal {
             ),
           }),
           visualSystem: alternative.visualSystem,
+          creativeDNA: alternative.creativeDNA,
           recommended: sourced(
             alternative.recommended,
             "model-recommendation",
@@ -561,15 +579,27 @@ function proposal(mission: Mission): FoundryProposal {
         }),
       ),
     ),
+    // Suggestions are customer ACTIONS only.
+    //
+    // Previously this mixed three contextualSuggestions — already shown in
+    // full as Foundry recommendations, so the chip was a duplicate — with two
+    // raw assumptions like "owner will showcase work", which are Foundry's
+    // own defaults and not something a customer can usefully "add". Labels
+    // were the long `value` sentence, which is why the chips were enormous.
+    //
+    // Now: a recommendation only appears as a chip if the customer has NOT
+    // already accepted it, assumptions are excluded entirely, and every label
+    // is compressed to a short imperative.
     smartSuggestions: Object.freeze(
-      [
-        ...profile.contextualSuggestions.slice(0, 3).map((item) =>
+      profile.contextualSuggestions
+        .filter((item) => item.selectedByDefault !== true)
+        .map((item) =>
           Object.freeze({
             id: `smart-${item.suggestionId}`,
             label: sourced(
-              item.value ?? item.label,
+              suggestionLabel(item.label ?? item.value ?? ""),
               "model-recommendation",
-              `mission.profile.contextualSuggestions.${item.suggestionId}`,
+              `mission.profile.contextualSuggestions.${item.suggestionId}.label`,
             ),
             reason: sourced(
               item.rationale,
@@ -578,22 +608,6 @@ function proposal(mission: Mission): FoundryProposal {
             ),
           }),
         ),
-        ...profile.assumptions.slice(0, 2).map((item, index) =>
-          Object.freeze({
-            id: `smart-assumption-${index + 1}`,
-            label: sourced(
-              item,
-              "foundry-assumption",
-              `mission.profile.assumptions[${index}]`,
-            ),
-            reason: sourced(
-              item,
-              "foundry-assumption",
-              `mission.profile.assumptions[${index}]`,
-            ),
-          }),
-        ),
-      ].slice(0, 5),
     ),
   });
 }

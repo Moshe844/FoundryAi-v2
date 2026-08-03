@@ -142,6 +142,26 @@ function validPlan(contract) {
     contractVersion: contract.contractVersion,
     supportedPlatform: contract.supportedPlatform,
     designDirectionHash: approvedDesignDirectionHash(contract),
+    designFidelity: {
+      compositionImplementation:
+        "Lead with current status and next action in a calm evidence-led grid layout.",
+      typographyImplementation:
+        "Use precise reassuring typography with an explicit readable type scale.",
+      colorImplementation:
+        "Use a calm evidence-led color system that preserves status trust.",
+      responsiveImplementation:
+        "Keep urgent status and next actions usable on a phone with a responsive transformation.",
+      interactionImplementation:
+        "Confirm consequential actions and keep review interactions immediate.",
+      sourceFiles: ["app/page.tsx", "app/styles.css"],
+      browserEvidence: {
+        capturesScreenshots: true,
+        measuresComposition: true,
+        measuresTypography: true,
+        measuresColor: true,
+        measuresResponsiveTransformation: true,
+      },
+    },
     requirementClaims: catalogue.implementationRequirements.map(
       (requirement) => ({
         requirementId: requirement.requirementId,
@@ -151,11 +171,26 @@ function validPlan(contract) {
     explicitExclusionIds: catalogue.exclusionRequirements.map(
       (requirement) => requirement.requirementId,
     ),
-    files: [{
-      path: "app/page.tsx",
-      content: "export default function Page() { return null; }",
-      contractRequirementIds: ids,
-    }],
+    files: [
+      {
+        path: "app/page.tsx",
+        content:
+          "export default function Page() { return <main className=\"policy-grid\">Current policy status and next required action</main>; }",
+        contractRequirementIds: ids,
+      },
+      {
+        path: "app/styles.css",
+        content:
+          ":root { --trust-blue: #24597a; } .policy-grid { display: grid; font-family: system-ui; font-size: 1rem; color: var(--trust-blue); } @media (max-width: 414px) { .policy-grid { grid-template-columns: 1fr; } }",
+        contractRequirementIds: [ids[0]],
+      },
+      {
+        path: "tests/design.spec.ts",
+        content:
+          "await page.setViewportSize({ width: 390, height: 844 }); await page.screenshot({ path: 'phone.png' }); const phone = await page.locator('main').evaluate((el) => { const style = getComputedStyle(el); return { box: el.getBoundingClientRect(), fontFamily: style.fontFamily, fontSize: style.fontSize, backgroundColor: style.backgroundColor, color: style.color }; }); await page.setViewportSize({ width: 1280, height: 900 }); await page.screenshot({ path: 'desktop.png' }); const desktop = await page.locator('main').boundingBox();",
+        contractRequirementIds: [ids[0]],
+      },
+    ],
   };
 }
 
@@ -306,8 +341,66 @@ test("Phase 2 binds an omitted trace only to a file that preserves its subject",
 
   const unrelated = validPlan(contract);
   unrelated.files[0].contractRequirementIds.pop();
+  for (const file of unrelated.files) {
+    file.content = "mechanical fixture content without product subject terms";
+  }
   const unchanged = bindMissingApprovedRequirementTraces(unrelated, contract);
   assert.equal(unchanged.files[0].contractRequirementIds.includes(missingId), false);
+});
+
+test("Phase 2 normalizes mechanical generation bookkeeping before semantic admission", () => {
+  const contract = contractFixture();
+  const plan = validPlan(contract);
+  const missingClaim = plan.requirementClaims.pop();
+  plan.files[0].contractRequirementIds = plan.files[0].contractRequirementIds
+    .filter((requirementId) => requirementId !== missingClaim.requirementId);
+  plan.files[0].contractRequirementIds.push("invented-design-trace");
+  plan.files[0].content += `\n${approvedContractRequirementCatalogue(contract)
+    .implementationRequirements.find(
+      (requirement) => requirement.requirementId === missingClaim.requirementId,
+    ).statement}`;
+  plan.files.push({
+    ...structuredClone(plan.files[0]),
+    content: `${plan.files[0].content}\n// final duplicate occurrence`,
+  });
+
+  const normalized = bindMissingApprovedRequirementTraces(plan, contract);
+  const accepted = validateContractBoundMissionPlan(normalized, contract);
+  assert.equal(accepted.files.length, 3);
+  assert.equal(
+    accepted.files.filter((file) => file.path === "app/page.tsx").length,
+    1,
+  );
+  assert.equal(
+    accepted.files[0].contractRequirementIds.includes("invented-design-trace"),
+    false,
+  );
+  assert(
+    accepted.requirementClaims.some(
+      (claim) => claim.requirementId === missingClaim.requirementId,
+    ),
+  );
+  assert(
+    accepted.files[0].contractRequirementIds.includes(
+      missingClaim.requirementId,
+    ),
+  );
+});
+
+test("Phase 2 admits intrinsic responsive sizing and still rejects no responsive strategy", () => {
+  const contract = contractFixture();
+  const intrinsic = validPlan(contract);
+  intrinsic.files.find((file) => file.path === "app/styles.css").content =
+    ":root { --trust-blue: #24597a; } .policy-grid { display: grid; width: 100%; max-width: 48rem; margin: 0 auto; padding: 1rem; font-family: system-ui; font-size: 1rem; color: var(--trust-blue); }";
+  assert.doesNotThrow(() => validateContractBoundMissionPlan(intrinsic, contract));
+
+  const fixedOnly = validPlan(contract);
+  fixedOnly.files.find((file) => file.path === "app/styles.css").content =
+    ":root { --trust-blue: #24597a; } .policy-grid { display: grid; width: 48rem; font-family: system-ui; font-size: 1rem; color: var(--trust-blue); }";
+  assert.throws(
+    () => validateContractBoundMissionPlan(fixedOnly, contract),
+    /responsive transformation/u,
+  );
 });
 
 test("Phase 2 rejects repair traces outside the exact approved task scope", () => {

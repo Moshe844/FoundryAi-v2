@@ -1,10 +1,12 @@
 import type {
+  CreativeDNA,
   CustomerFollowUpAnswer,
   DecisionSelection,
   DesignAlternative,
   DesignVisualSystem,
   ProjectDesignDirection,
 } from "./contracts";
+import type { CustomDesignComposition } from "./custom-direction";
 
 export type ApprovedDesignContract = Readonly<{
   schemaVersion: 1;
@@ -28,6 +30,14 @@ export type ApprovedDesignContract = Readonly<{
     spacingDensity: string;
   }>;
   visualSystem: DesignVisualSystem | null;
+  // Structural design DNA is what makes a direction recognizable in the built
+  // application. Carrying only a name, a mood and a palette is exactly how a
+  // build ends up "borrowing the colour" and nothing else.
+  creativeDNA: CreativeDNA | null;
+  compositionPrimitive: string | null;
+  surfaceSequence: readonly string[];
+  exclusions: readonly string[];
+  customComposition: CustomDesignComposition | null;
   accessibilityRequirements: readonly string[];
   tradeoff: string | null;
   confidence: number | null;
@@ -70,6 +80,7 @@ export function buildApprovedDesignContract({
   mode,
   optionId,
   customValue,
+  customComposition,
   sourceProfileVersion,
 }: Readonly<{
   alternatives: readonly DesignAlternative[];
@@ -77,6 +88,7 @@ export function buildApprovedDesignContract({
   mode: "recommended" | "alternative" | "other";
   optionId?: string;
   customValue?: string;
+  customComposition?: CustomDesignComposition;
   sourceProfileVersion: number;
 }>): ApprovedDesignContract {
   const selected = selectedAlternative(alternatives, mode, optionId);
@@ -143,7 +155,19 @@ export function buildApprovedDesignContract({
         "Use spacing that supports the approved information density.",
       ),
     },
-    visualSystem: base?.visualSystem ?? null,
+    visualSystem: customComposition?.visualSystem ?? base?.visualSystem ?? null,
+    creativeDNA: customComposition?.creativeDNA ?? base?.creativeDNA ?? null,
+    compositionPrimitive:
+      customComposition?.creativeDNA?.compositionPrimitive ??
+      base?.creativeDNA?.compositionPrimitive ??
+      null,
+    surfaceSequence: [
+      ...(customComposition?.creativeDNA?.surfaceSequence ??
+        base?.creativeDNA?.surfaceSequence ??
+        []),
+    ],
+    exclusions: [...(base?.creativeDNA?.exclusions ?? [])],
+    customComposition: customComposition ?? null,
     accessibilityRequirements: [
       ...direction.accessibilityConsiderations.value,
     ],

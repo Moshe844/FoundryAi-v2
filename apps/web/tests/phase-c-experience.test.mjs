@@ -27,7 +27,7 @@ test("Phase C is a modular sourced experience, not a page-local prototype", asyn
     "<DesignDirection",
     "<FoundryRecommendations",
     "<ClarificationQuestions",
-    "Anything else?",
+    "Anything else Foundry should know?",
     "Ready when you are",
   ].map((needle) => [needle, discovery.indexOf(needle)]);
   ordered[2][1] = discovery.indexOf("<DesignDirection", ordered[1][1] + 1);
@@ -85,7 +85,7 @@ test("Phase C guards customer copy and preserves non-blocking submission", async
     /kind: "recommendation"/,
   );
   assert.match(discovery, /customer-proposal-confirmation/);
-  assert.match(discovery, /Updating the plan\\u2026/);
+  assert.match(discovery, /Updating the plan\u2026/);
 });
 
 test("the first live profile is reviewed even when no questions are needed", async () => {

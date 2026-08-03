@@ -25,7 +25,7 @@ export const COMPOSITION_PRIMITIVES = Object.freeze({
   "narrative-scroll": Object.freeze({
     label: "Narrative scroll",
     surfaceRoles: Object.freeze(["opening-statement", "chapter-band", "chapter-band", "closing-call"]),
-    suits: Object.freeze(["portfolio", "brand", "marketing"]),
+    suits: Object.freeze(["portfolio", "brand", "marketing", "content", "developer"]),
     density: "spacious",
   }),
   "modular-gallery": Object.freeze({
@@ -124,6 +124,33 @@ export const COMPOSITION_PRIMITIVE_IDS = Object.freeze(
   Object.keys(COMPOSITION_PRIMITIVES),
 );
 
+/**
+ * Maps ProjectFamily values (and loose synonyms) onto the `suits` vocabulary.
+ * Without this the derivation silently falls back to "application" and a
+ * photographer's portfolio is offered a calendar board.
+ */
+const FAMILY_ALIASES = Object.freeze({
+  "web-application": "application",
+  "marketing-website": "marketing",
+  "api-service": "developer",
+  "developer-tool": "developer",
+  "content-site": "content",
+  "portfolio-site": "portfolio",
+  portfolio: "portfolio",
+  marketing: "marketing",
+  brand: "brand",
+  application: "application",
+  operations: "operations",
+  developer: "developer",
+  content: "content",
+  catalog: "catalog",
+});
+
+export function normalizeDesignFamily(family) {
+  const key = String(family ?? "").toLowerCase();
+  return FAMILY_ALIASES[key] ?? "application";
+}
+
 export const CREATIVE_DNA_ENUMS = Object.freeze({
   compositionPrimitive: COMPOSITION_PRIMITIVE_IDS,
   typeScale: ["dramatic", "editorial", "measured", "utilitarian", "monumental"],
@@ -213,18 +240,28 @@ function stringList(value, label, { min = 1, max = 6, unique = true } = {}) {
  * legitimately reject.
  */
 export function deriveCreativeDNA(alternative, { family = "application", index = 0 } = {}) {
-  const source = [
+  const resolvedFamily = normalizeDesignFamily(family);
+  const lower = (values) =>
+    values
+      .filter((value) => typeof value === "string")
+      .join(" ")
+      .toLowerCase();
+  // Layout intent is authoritative; the rest is only a tie-breaker.
+  const layoutSource = lower([alternative?.layoutApproach, alternative?.name]);
+  const source = lower([
     alternative?.name,
     alternative?.layoutApproach,
     alternative?.visualPersonality,
     alternative?.navigationApproach,
     alternative?.whyItFits,
-  ]
-    .filter((value) => typeof value === "string")
-    .join(" ")
-    .toLowerCase();
+  ]);
 
-  const primitive = inferCompositionPrimitive(source, family, index);
+  const primitive = inferCompositionPrimitive(
+    layoutSource,
+    resolvedFamily,
+    index,
+    source,
+  );
   const spec = COMPOSITION_PRIMITIVES[primitive];
   return Object.freeze({
     thesis: text(
@@ -264,7 +301,8 @@ export function deriveCreativeDNA(alternative, { family = "application", index =
  * derives the whole set and de-collides both the composition primitive and the
  * secondary axes, so a derived set is honestly differentiated.
  */
-export function deriveCreativeDNASet(alternatives, { family = "application" } = {}) {
+export function deriveCreativeDNASet(alternatives, options = {}) {
+  const family = normalizeDesignFamily(options.family);
   const list = Array.isArray(alternatives) ? alternatives : [];
   const taken = new Set();
   const spread = new Map();
@@ -319,7 +357,7 @@ export function deriveCreativeDNASet(alternatives, { family = "application" } = 
 const PRIMITIVE_HINTS = Object.freeze([
   [/full[- ]?screen|immersive|cinematic|photograph|film|reel/u, "immersive-hero"],
   [/editorial|magazine|spread|journal|essay|type[- ]led/u, "editorial-spread"],
-  [/narrative|story|scroll|sequence|chapter/u, "narrative-scroll"],
+  [/narrative|story|scroll|chapter|essay/u, "narrative-scroll"],
   [/gallery|grid|contact sheet|tile|portfolio wall/u, "modular-gallery"],
   [/asymmetric|offset|diagonal|split/u, "asymmetric-split"],
   [/identity|studio|about|bio|practice/u, "identity-work-canvas"],
@@ -337,9 +375,12 @@ const PRIMITIVE_HINTS = Object.freeze([
   [/dashboard|workspace|console|operations|queue|approval/u, "task-workspace"],
 ]);
 
-function inferCompositionPrimitive(source, family, index) {
+function inferCompositionPrimitive(layoutSource, family, index, wideSource = layoutSource) {
   for (const [pattern, primitive] of PRIMITIVE_HINTS) {
-    if (pattern.test(source)) return primitive;
+    if (pattern.test(layoutSource)) return primitive;
+  }
+  for (const [pattern, primitive] of PRIMITIVE_HINTS) {
+    if (pattern.test(wideSource)) return primitive;
   }
   const suitable = COMPOSITION_PRIMITIVE_IDS.filter((id) =>
     COMPOSITION_PRIMITIVES[id].suits.includes(family),

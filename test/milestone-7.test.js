@@ -710,7 +710,7 @@ test("records structured model calls, deterministic routing, bounded failover, c
   );
 });
 
-test("semantic structured-output validation fails over before a repair is persisted", async (t) => {
+test("unfixable semantic output stops before another provider is charged", async (t) => {
   const attempts = [];
   const invalidProvider = createDeterministicLocalModelProvider({
     providerId: "semantic-a-invalid",
@@ -739,19 +739,61 @@ test("semantic structured-output validation fails over before a repair is persis
   const missionId = "semantic-model-failover";
   prepareExecutingMission(control, missionId);
 
+  await assert.rejects(
+    control.models.request({
+      ...modelInput(missionId),
+      structuredOutputValidator(output) {
+        if (output.content !== HELLO) {
+          throw new Error("The proposed repair is not applicable.");
+        }
+      },
+    }),
+    /failed semantic validation/u,
+  );
+
+  assert.deepEqual(attempts, ["invalid"]);
+  const [call] = control.models.listCalls(missionId);
+  assert.equal(call.provider, "semantic-a-invalid");
+  assert.equal(call.costMetadata.attemptCount, 1);
+  const failure = control.evidence
+    .findByMission(missionId)
+    .find((record) => record.captureMethod === "model-gateway-route-failure");
+  assert.equal(failure.metadata.failureCategory, "SEMANTIC_ADMISSION_FAILURE");
+});
+
+test("semantic normalization accepts and persists the first provider output", async (t) => {
+  let attempts = 0;
+  const provider = createDeterministicLocalModelProvider({
+    providerId: "semantic-normalized",
+    handler() {
+      attempts += 1;
+      return {
+        output: { path: "hello.txt", content: "mechanically-fixable" },
+        usage: { inputTokens: 2, outputTokens: 2, costUsd: 0 },
+      };
+    },
+  });
+  const control = openControl(temporaryStores(t), {
+    modelProviders: [provider],
+    maxModelProviderAttempts: 2,
+  });
+  const missionId = "semantic-model-normalization";
+  prepareExecutingMission(control, missionId);
+
   const result = await control.models.request({
     ...modelInput(missionId),
     structuredOutputValidator(output) {
-      if (output.content !== HELLO) {
-        throw new Error("The proposed repair is not applicable.");
-      }
+      return { ...output, content: HELLO };
     },
   });
 
-  assert.deepEqual(attempts, ["invalid", "valid"]);
+  assert.equal(attempts, 1);
   assert.equal(result.structuredOutput.content, HELLO);
-  assert.equal(result.costMetadata.attemptCount, 2);
-  assert.equal(control.models.listCalls(missionId)[0].provider, "semantic-b-valid");
+  assert.equal(result.costMetadata.attemptCount, 1);
+  assert.equal(
+    control.models.listCalls(missionId)[0].structuredOutput.content,
+    HELLO,
+  );
 });
 
 test("routes normal application generation to a balanced model instead of a thorough model", async (t) => {

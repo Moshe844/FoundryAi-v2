@@ -33,18 +33,21 @@ test("the proposal is a progressive pre-build conversation", async () => {
   assert.match(proposal, /What I&rsquo;d build/);
   assert.match(proposal, /What I&rsquo;d include automatically/);
   assert.match(proposal, /conversation-details/);
-  assert.match(design, /Choose how this project should feel/);
-  assert.match(design, /Foundry recommends/);
-  assert.match(design, /directions were created for this project/);
-  assert.match(design, /Describe your own style/);
+  assert.match(design, /Project-specific art directions, not reusable templates/);
+  assert.match(design, /Recommended/);
+  assert.match(design, /Combine ideas/);
+  // The board must be driven by the direction's own creative DNA, not by one
+  // shared layout with a different colour.
+  assert.match(design, /ArtDirectionBoard/);
+  assert.match(design, /creativeDNA/);
   assert.match(questions, /Let Foundry choose/);
   assert.doesNotMatch(questions, /Skip for now/);
   assert.match(questions, /Something else/);
-  assert.match(discovery, /Anything else\?/);
+  assert.match(discovery, /Anything else Foundry should know\?/);
   assert.match(discovery, /Continue with Foundry&rsquo;s recommendations/);
   assert.match(composer, /data-contract-field="customer-note"/);
   assert.match(discovery, /kind: "design-direction"/);
-  assert.match(discovery, /Why I recommend this/);
+  assert.match(discovery, /Why Foundry recommends this/);
 });
 
 test("project proposal content is sourced and contains no admin sample copy", async () => {

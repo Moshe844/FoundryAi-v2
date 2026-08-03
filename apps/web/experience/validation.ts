@@ -93,6 +93,25 @@ function designVisualSystem(value: unknown, path: string) {
   };
 }
 
+function creativeDna(value: unknown, path: string) {
+  const input = object(value, path);
+  return {
+    thesis: text(input.thesis, `${path}.thesis`),
+    emotionalGoal: text(input.emotionalGoal, `${path}.emotionalGoal`),
+    audienceResponse: text(input.audienceResponse, `${path}.audienceResponse`),
+    compositionPrimitive: text(input.compositionPrimitive, `${path}.compositionPrimitive`),
+    typeScale: text(input.typeScale, `${path}.typeScale`),
+    typeVoice: text(input.typeVoice, `${path}.typeVoice`),
+    imageryTreatment: text(input.imageryTreatment, `${path}.imageryTreatment`),
+    motionStrategy: text(input.motionStrategy, `${path}.motionStrategy`),
+    spacingRhythm: text(input.spacingRhythm, `${path}.spacingRhythm`),
+    surfaceDepth: text(input.surfaceDepth, `${path}.surfaceDepth`),
+    responsiveTransform: text(input.responsiveTransform, `${path}.responsiveTransform`),
+    surfaceSequence: textList(input.surfaceSequence, `${path}.surfaceSequence`),
+    exclusions: textList(input.exclusions, `${path}.exclusions`),
+  };
+}
+
 function projectProfile(value: unknown, path: string): ProjectProfile {
   const input = object(value, path);
   return {
@@ -287,6 +306,10 @@ function projectProfile(value: unknown, path: string): ProjectProfile {
                   alternative.visualSystem === undefined
                     ? undefined
                     : designVisualSystem(alternative.visualSystem, `${itemPath}.visualSystem`),
+                creativeDNA:
+                  alternative.creativeDNA === undefined
+                    ? undefined
+                    : creativeDna(alternative.creativeDNA, `${itemPath}.creativeDNA`),
                 recommended: bool(
                   alternative.recommended,
                   `${itemPath}.recommended`,

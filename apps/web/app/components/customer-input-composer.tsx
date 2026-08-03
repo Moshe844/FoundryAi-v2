@@ -58,7 +58,21 @@ export function CustomerInputComposer({
 }>) {
   const [message, setMessage] = useState("");
   const [correcting, setCorrecting] = useState<string | null>(null);
+  const [dismissed, setDismissed] = useState<ReadonlySet<string>>(() => new Set());
+  const [accepted, setAccepted] = useState<ReadonlySet<string>>(() => new Set());
+  const [showAll, setShowAll] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // At most three high-value suggestions are visible. Anything the customer has
+  // already accepted or dismissed is gone for good, so the surface gets calmer
+  // as the conversation progresses instead of accumulating pills.
+  const liveSuggestions = proposal.smartSuggestions.filter(
+    (suggestion) => !dismissed.has(suggestion.id) && !accepted.has(suggestion.id),
+  );
+  const visibleSuggestions = showAll
+    ? liveSuggestions
+    : liveSuggestions.slice(0, 3);
+  const remainingCount = liveSuggestions.length - visibleSuggestions.length;
 
   async function send(value = message.trim(), classification: string | null = null) {
     const normalized = value.trim();
@@ -83,23 +97,52 @@ export function CustomerInputComposer({
         </p>
       </div>
 
-      {proposal.smartSuggestions.length > 0 && (
-        <div className="smart-suggestion-region" aria-label="Suggestions for this project">
-          <p className="t-caption ink-tertiary">Useful things to add</p>
-          <div className="smart-suggestion-list">
-            {proposal.smartSuggestions.map((suggestion) => (
-              <button
-                type="button"
-                className="smart-suggestion-chip"
-                disabled={busy}
-                title={suggestion.reason.value}
-                key={suggestion.id}
-                onClick={() => void send(suggestion.label.value)}
-              >
-                {suggestion.label.value}
-              </button>
+      {visibleSuggestions.length > 0 && (
+        <div className="suggestion-region" aria-label="Suggestions for this project">
+          <p className="t-caption ink-tertiary">You may also want to</p>
+          <ul className="suggestion-list">
+            {visibleSuggestions.map((suggestion) => (
+              <li className="suggestion-item" key={suggestion.id}>
+                <button
+                  type="button"
+                  className="suggestion-chip"
+                  disabled={busy}
+                  title={suggestion.reason.value}
+                  onClick={() => {
+                    setAccepted((current) => new Set(current).add(suggestion.id));
+                    void send(suggestion.reason.value);
+                  }}
+                >
+                  {suggestion.label.value}
+                </button>
+                <button
+                  type="button"
+                  className="suggestion-dismiss"
+                  aria-label={`Dismiss: ${suggestion.label.value}`}
+                  disabled={busy}
+                  onClick={() =>
+                    setDismissed((current) => new Set(current).add(suggestion.id))
+                  }
+                >
+                  ×
+                </button>
+              </li>
             ))}
-          </div>
+          </ul>
+          {remainingCount > 0 && !showAll && (
+            <button
+              type="button"
+              className="btn-quiet small"
+              onClick={() => setShowAll(true)}
+            >
+              More ideas ({remainingCount})
+            </button>
+          )}
+          {accepted.size > 0 && (
+            <p className="t-caption ink-tertiary" role="status">
+              {accepted.size} suggestion{accepted.size === 1 ? "" : "s"} added to your plan.
+            </p>
+          )}
         </div>
       )}
 

@@ -21,6 +21,32 @@ function overlapCount(left, right) {
   return count;
 }
 
+function hasResponsiveSourceStrategy(sourceText) {
+  if (
+    /(?:@media|@container|clamp\s*\(|minmax\s*\(|container-type|useMediaQuery|\b(?:sm|md|lg|xl|2xl):[a-z])/iu.test(
+      sourceText,
+    )
+  ) {
+    return true;
+  }
+  if (
+    /(?:flex-wrap\s*:\s*wrap|grid-template-columns\s*:\s*repeat\s*\(\s*auto-(?:fit|fill))/iu.test(
+      sourceText,
+    )
+  ) {
+    return true;
+  }
+  const hasBoundedWidth =
+    /(?:max-width\s*:|max-inline-size\s*:|\bmaxWidth\s*:|\bmaxInlineSize\s*:|\bmax-w-[a-z0-9[\]./]+)/iu.test(
+      sourceText,
+    );
+  const hasFluidWidth =
+    /(?:\b(?:width|inline-size)\s*:\s*["']?(?:100%|100vw|100dvw|min\s*\()|\b(?:width|inlineSize)\s*:\s*["']100%["']|\bw-full\b|\bmargin\s*:\s*[^;{}]*auto|\bpadding(?:-inline)?\s*:)/iu.test(
+      sourceText,
+    );
+  return hasBoundedWidth && hasFluidWidth;
+}
+
 function designSpecification(contract) {
   const blueprint = contract.productBlueprint;
   const specification = blueprint?.designSpecification;
@@ -67,6 +93,7 @@ export function designExecutionBrief(contract) {
       spacingDensity: specification.informationDensity,
     },
     visualSystem: specification.visualSystem ?? null,
+    creativeDNA: specification.creativeDNA ?? null,
     accessibilityRequirements:
       specification.accessibilityRequirements ?? specification.accessibilityNeeds ?? [],
     interactionStyle:
@@ -160,7 +187,7 @@ export function validateGeneratedDesignFidelity(plan, contract, fail) {
   if (!/(?:--[a-z0-9-]+\s*:|#[a-f0-9]{3,8}\b|(?:rgb|hsl)a?\s*\()/iu.test(sourceText)) {
     fail("Customer-facing source does not implement an explicit color system.");
   }
-  if (!/(?:@media|clamp\s*\(|minmax\s*\(|container-type|useMediaQuery)/iu.test(sourceText)) {
+  if (!hasResponsiveSourceStrategy(sourceText)) {
     fail("Customer-facing source does not implement a responsive transformation.");
   }
 
@@ -181,8 +208,41 @@ export function validateGeneratedDesignFidelity(plan, contract, fail) {
     fail("Browser verification must measure rendered color roles.");
   }
   const viewportCount = browserSource.match(/setViewportSize\s*\(|viewport\s*:\s*\{/gu)?.length ?? 0;
-  if (viewportCount < 2 || !/(?:375|390|414)/u.test(browserSource) || !/(?:1024|1280|1440)/u.test(browserSource)) {
-    fail("Design-fidelity verification must compare at least one phone and one desktop viewport.");
+  const hasPhone = /(?:375|390|414)/u.test(browserSource);
+  const hasTablet = /(?:768|810|834|1024)/u.test(browserSource);
+  const hasDesktop = /(?:1280|1440|1512|1728)/u.test(browserSource);
+  if (viewportCount < 3 || !hasPhone || !hasTablet || !hasDesktop) {
+    fail("Design-fidelity verification must capture phone, tablet, and desktop viewports.");
+  }
+  // A layout that overflows horizontally on a phone has failed its responsive
+  // transform regardless of what the fidelity declaration claims.
+  if (!/scrollWidth|clientWidth|documentElement/u.test(browserSource)) {
+    fail("Design-fidelity verification must prove the phone viewport has no horizontal overflow.");
+  }
+  if (!/focus\s*\(|:focus|focus-visible|activeElement/u.test(browserSource)) {
+    fail("Design-fidelity verification must prove keyboard focus remains visible.");
+  }
+
+  // Structural DNA must be verified, not just the palette.
+  const dna = specification.creativeDNA;
+  if (dna !== null && dna !== undefined) {
+    const sequenceTerms = (dna.surfaceSequence ?? []).filter(
+      (region) => typeof region === "string" && region.length > 3,
+    );
+    if (
+      sequenceTerms.length > 0 &&
+      overlapCount(sequenceTerms.join(" "), `${sourceText} ${implementationText}`) === 0
+    ) {
+      fail(
+        `Customer-facing source shows no trace of the approved surface sequence (${sequenceTerms.join(" → ")}).`,
+      );
+    }
+    if (dna.motionStrategy !== "static" && !/prefers-reduced-motion/u.test(sourceText)) {
+      fail("An approved motion strategy requires a prefers-reduced-motion fallback in the customer-facing source.");
+    }
+    if (dna.imageryTreatment === "none" && /<img\b|next\/image/u.test(sourceText)) {
+      fail("The approved direction excludes imagery, but the generated source renders images.");
+    }
   }
 
   return Object.freeze({

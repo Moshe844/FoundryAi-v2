@@ -1300,6 +1300,7 @@ function profileFromUnderstanding(
     Object.fromEntries(
       PROJECT_DESIGN_MODEL_FIELDS.map((key) => [key, result[key]]),
     ),
+    { designFamily: result.family },
   );
   const obligations = projectDesign.verificationPlan;
   if (obligations.length === 0) {
@@ -1402,6 +1403,7 @@ function profileFromUnderstanding(
         confidence: alternative.confidence,
         preview: alternative.preview,
         visualSystem: alternative.visualSystem,
+        creativeDNA: alternative.creativeDNA,
         recommended: alternative.recommended,
       }),
     ),
@@ -2905,6 +2907,7 @@ export function createProjectUnderstandingService({
                   ]),
                 ),
                 {
+                  designFamily: candidateResult.family,
                   originalRequest: projectGroundingContext(
                     intent.trim(),
                     cumulativeAnswers,

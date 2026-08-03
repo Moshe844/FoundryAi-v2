@@ -63,6 +63,22 @@ export type DesignVisualSystem = Readonly<{
   sampleLabels: readonly string[];
 }>;
 
+export type CreativeDNA = Readonly<{
+  thesis: string;
+  emotionalGoal: string;
+  audienceResponse: string;
+  compositionPrimitive: string;
+  typeScale: string;
+  typeVoice: string;
+  imageryTreatment: string;
+  motionStrategy: string;
+  spacingRhythm: string;
+  surfaceDepth: string;
+  responsiveTransform: string;
+  surfaceSequence: readonly string[];
+  exclusions: readonly string[];
+}>;
+
 export type DesignAlternative = Readonly<{
   id: string;
   name: Sourced<string>;
@@ -82,6 +98,7 @@ export type DesignAlternative = Readonly<{
     hierarchy: Sourced<string>;
   }>;
   visualSystem?: DesignVisualSystem;
+  creativeDNA?: CreativeDNA;
   recommended: Sourced<boolean>;
 }>;
 
@@ -395,6 +412,7 @@ export type ProjectDesignAlternative = Readonly<{
     hierarchy: string;
   }>;
   visualSystem?: DesignVisualSystem;
+  creativeDNA?: CreativeDNA;
   recommended: boolean;
 }>;
 

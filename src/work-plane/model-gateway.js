@@ -134,6 +134,12 @@ export function classifyModelRouteFailure(errorOrMessage) {
   const status = Number.isSafeInteger(errorOrMessage?.status)
     ? errorOrMessage.status
     : null;
+  if (message.startsWith("structured output failed semantic validation:")) {
+    return Object.freeze({
+      category: "SEMANTIC_ADMISSION_FAILURE",
+      retryable: false,
+    });
+  }
   const permanentlyUnavailable =
     /(?:no longer available|model (?:is )?(?:unavailable|deprecated|retired)|unknown (?:model|agent)|model(?: .*?)? not found|unsupported model|does not exist|background=true is required for agent interactions|requires the use of .{0,80} tool)/u.test(
       message,
@@ -561,9 +567,18 @@ export function createModelGateway({
             `Model request "${existing.requestId}" previously failed.`,
           );
         }
+        let structuredOutput = existing.structuredOutput;
         if (input.structuredOutputValidator !== undefined) {
           try {
-            input.structuredOutputValidator(existing.structuredOutput);
+            const semanticOutput = input.structuredOutputValidator(
+              structuredOutput,
+            );
+            if (semanticOutput !== undefined) {
+              structuredOutput = validateStructuredModelOutput(
+                semanticOutput,
+                schema,
+              );
+            }
           } catch (error) {
             throw new ModelOutputValidationError(
               `Persisted structured output failed the caller's semantic validator: ${String(error?.message ?? error)}`,
@@ -572,7 +587,7 @@ export function createModelGateway({
         }
         return freezeExecutionValue({
           requestId: existing.requestId,
-          structuredOutput: existing.structuredOutput,
+          structuredOutput,
           tokenMetadata: existing.tokenMetadata,
           costMetadata: existing.costMetadata,
         });
@@ -668,6 +683,31 @@ export function createModelGateway({
           input.taskClass,
         );
       }
+      // Providers keep advertising retired models in their list APIs, so a
+      // route can be "available" by discovery and fail every real call. Drop
+      // routes whose model is already recorded as permanently unavailable in
+      // the persisted route history; if that empties the list, keep the
+      // originals so the terminal error names the provider's real message.
+      const persistedRejectedModelIds = new Set(
+        (routeHistory() ?? [])
+          .filter(
+            (entry) =>
+              entry?.kind === "failure" &&
+              entry.failureCategory === "MODEL_UNAVAILABLE" &&
+              entry.retryable === false &&
+              typeof entry.modelId === "string",
+          )
+          .map((entry) => entry.modelId),
+      );
+      if (persistedRejectedModelIds.size > 0) {
+        const survivingRoutes = routedProviders.filter(
+          (provider) =>
+            !persistedRejectedModelIds.has(
+              providerRepairMetadata(provider).modelId,
+            ),
+        );
+        if (survivingRoutes.length > 0) routedProviders = survivingRoutes;
+      }
       const historyAdjusted =
         routedProviders[0]?.providerId !==
         baseRoutedProviders[0]?.providerId;
@@ -675,6 +715,10 @@ export function createModelGateway({
         routedProviders.map((provider) => provider.providerId),
       ).size;
       const attemptedProviderIds = new Set();
+      // Models that fail non-retryably during THIS request (retired, unknown,
+      // unauthorized) are excluded from the remaining attempts so a bounded
+      // retry budget is never spent re-calling a route that cannot succeed.
+      const inFlightRejectedModelIds = new Set();
       let lastAttemptedProvider = null;
       for (let attempt = 0; attempt < maxProviderAttempts; attempt += 1) {
         attemptCount += 1;
@@ -682,9 +726,22 @@ export function createModelGateway({
           priorSafeOutputFailure !== null &&
           lastAttemptedProvider !== null &&
           attemptedProviderIds.size >= eligibleProviderCount;
-        const provider = repeatFinalValidationRoute
-          ? lastAttemptedProvider
-          : routedProviders[attempt % Math.max(routedProviders.length, 1)];
+        let provider;
+        if (repeatFinalValidationRoute) {
+          provider = lastAttemptedProvider;
+        } else {
+          const viableRoutes = routedProviders.filter(
+            (candidate) =>
+              !inFlightRejectedModelIds.has(
+                providerRepairMetadata(candidate).modelId,
+              ),
+          );
+          if (viableRoutes.length === 0) break;
+          provider =
+            viableRoutes.find(
+              (candidate) => !attemptedProviderIds.has(candidate.providerId),
+            ) ?? viableRoutes[attempt % viableRoutes.length];
+        }
         if (provider === undefined) {
           failure = new ModelProviderError(
             "No production model provider is configured.",
@@ -786,7 +843,13 @@ export function createModelGateway({
           output = validateStructuredModelOutput(response.output, schema);
           if (input.structuredOutputValidator !== undefined) {
             try {
-              input.structuredOutputValidator(output);
+              const semanticOutput = input.structuredOutputValidator(output);
+              if (semanticOutput !== undefined) {
+                output = validateStructuredModelOutput(
+                  semanticOutput,
+                  schema,
+                );
+              }
             } catch (error) {
               throw new ModelOutputValidationError(
                 `Structured output failed semantic validation: ${String(error?.message ?? error)}`,
@@ -818,6 +881,81 @@ export function createModelGateway({
           } else {
             priorSafeOutputFailure = null;
           }
+          const failureDisposition = classifyModelRouteFailure(failure);
+          if (
+            !failureDisposition.retryable &&
+            typeof selectedModelId === "string"
+          ) {
+            inFlightRejectedModelIds.add(selectedModelId);
+          }
+          // Persist every attempt's failure, not only the last one. Without
+          // this, a three-provider request that dies records a single detail
+          // and the first two causes are undiagnosable. The recorded
+          // modelRouteFailure also feeds the persisted route history, so a
+          // permanently unavailable model is excluded from future requests.
+          try {
+            const failureTimestamp = clock();
+            const failureEvidence = evidence.capture({
+              evidenceId: `${input.requestId}.route-${routeAttempt}.failure`,
+              missionId: input.missionId,
+              kind: ObservationKind.MODEL_CALL_RESULT,
+              captureMethod: "model-gateway-route-failure",
+              producingSubsystem: MODEL_GATEWAY_SOURCE,
+              timestamp: failureTimestamp,
+              payload: {
+                requestId: input.requestId,
+                status: "FAILED",
+                structuredOutput: null,
+                detail: failure.message.slice(0, 500),
+              },
+              sensitiveValues: input.sensitiveValues,
+              workspaceCheckpointReference: workspace.currentCheckpointId,
+              obligationReference: null,
+              verificationRequestReference: null,
+              commandReference: input.requestId,
+              workUnitReference: input.workUnitId,
+              metadata: {
+                provider: selectedProvider,
+                modelId: selectedModelId,
+                providerFamily: selectedProviderFamily,
+                taskClass: input.taskClass,
+                routeAttempt,
+                failureCategory: failureDisposition.category,
+                retryable: failureDisposition.retryable,
+              },
+            });
+            facts.recordResultFact({
+              missionId: input.missionId,
+              eventId: `${input.requestId}.route-${routeAttempt}.failure.fact`,
+              causationId: input.idempotencyKey,
+              occurredAt: failureTimestamp,
+              producingSubsystem: MODEL_GATEWAY_SOURCE,
+              statement: `Model route attempt ${routeAttempt} for request "${input.requestId}" failed: ${failure.message.slice(0, 180)}`,
+              evidenceReferences: [
+                {
+                  evidenceId: failureEvidence.evidenceId,
+                  workspaceCheckpointReference: workspace.currentCheckpointId,
+                },
+              ],
+              workspaceCheckpointReference: workspace.currentCheckpointId,
+              workUnitReference: input.workUnitId,
+              metadata: {
+                modelRouteFailure: {
+                  requestId: input.requestId,
+                  provider: selectedProvider,
+                  modelId: selectedModelId,
+                  taskClass: input.taskClass,
+                  routeAttempt,
+                  failureCategory: failureDisposition.category,
+                  retryable: failureDisposition.retryable,
+                },
+              },
+            });
+          } catch {
+            // A failed failure-record must never mask the request's own
+            // failure handling; the terminal detail is still preserved by the
+            // request-level record below.
+          }
           if (
             input.sensitiveValues.some((secret) =>
               failure.message.includes(secret),
@@ -826,6 +964,18 @@ export function createModelGateway({
             failure = new ModelProviderError(
               "Model provider call failed without a persistable detail.",
             );
+          }
+          // A provider failover can recover an outage or malformed transport,
+          // but it cannot change this request's deterministic contract. The
+          // semantic validator may normalize mechanical bookkeeping above; if
+          // the normalized result still fails, buying the same generation
+          // from more providers only repeats the defect and delays the truth.
+          if (
+            failure.message.startsWith(
+              "Structured output failed semantic validation:",
+            )
+          ) {
+            break;
           }
         }
       }

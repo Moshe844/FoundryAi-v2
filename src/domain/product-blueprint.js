@@ -197,9 +197,17 @@ function buildDesignSpecification(projectDesign, answers) {
       visualPersonality:
         alternative?.visualPersonality ?? direction.visualPersonality,
       intendedEmotionalResponse:
-        alternative?.description ?? direction.rationale,
+        alternative?.creativeDNA?.emotionalGoal ??
+        alternative?.description ??
+        direction.rationale,
       rationale: alternative?.whyItFits ?? direction.rationale,
     },
+    // The approved direction's structural DNA travels with the blueprint so the
+    // build contract can bind composition, sequence, type, imagery, motion,
+    // rhythm, depth and responsive transform — not just a name and a palette.
+    creativeDNA: alternative?.creativeDNA
+      ? structuredClone(alternative.creativeDNA)
+      : null,
     composition: {
       layoutStrategy: alternative?.layoutApproach ?? direction.layoutStrategy,
       informationDensity:

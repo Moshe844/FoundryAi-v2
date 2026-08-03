@@ -77,11 +77,11 @@ test("the production experience consumes replayed ProjectProfile data", async ()
     // Foundry proposes before it interrogates.
     "Here&rsquo;s what I think you need",
     "What I&rsquo;d build",
-    "Choose how this project should feel",
+    "Project-specific art directions, not reusable templates",
     "What I&rsquo;d include automatically",
     "I&rsquo;d also recommend",
     "decisions that actually matter",
-    "Anything else?",
+    "Anything else Foundry should know?",
     "Continue with Foundry&rsquo;s recommendations",
     // Every question offers a recommendation, generated options, and custom input.
     "Let Foundry choose",
@@ -143,7 +143,7 @@ test("Foundry proposes before it asks", async () => {
   const design = discovery.indexOf("<DesignDirection", proposal + 1);
   const recommend = discovery.indexOf("<FoundryRecommendations");
   const questions = discovery.indexOf("<ClarificationQuestions");
-  const optional = discovery.indexOf("Anything else?");
+  const optional = discovery.indexOf("Anything else Foundry should know?");
   const confirm = discovery.indexOf("Ready when you are");
   for (const [name, index] of Object.entries({
     proposal, design, recommend, questions, optional, confirm,
@@ -173,7 +173,7 @@ test("clarification never blocks the customer on a decision", async () => {
   // Unanswered questions are submitted as Foundry's professional default,
   // so Continue is never disabled by an unanswered decision.
   assert.match(source, /Foundry decides\. Recommended: \$\{recommended\}/);
-  assert.match(source, /left to me/);
+  assert.match(source, /left to Foundry/);
   // Selected ideas still travel through the existing clarification contract.
   assert.match(
     source,

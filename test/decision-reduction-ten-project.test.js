@@ -76,6 +76,7 @@ function projectDesign(spec) {
       nav: `Navigation follows ${spec.subject} from overview to action`,
       mobile: `The next ${spec.action} remains prominent on a phone`,
       mood: "Focused and trustworthy",
+      why: `Returning ${spec.users} recognise the shape of ${spec.subject} instantly and act without re-reading it.`,
     },
     {
       name: `${spec.slug} guided journey`,
@@ -83,6 +84,7 @@ function projectDesign(spec) {
       nav: `A guided sequence explains ${spec.subject} before action`,
       mobile: `Each ${spec.subject} step becomes a focused mobile screen`,
       mood: "Warm and explanatory",
+      why: `First-time ${spec.users} are walked through one decision at a time so nothing about ${spec.subject} is guessed at.`,
     },
     {
       name: `${spec.slug} expert workspace`,
@@ -90,6 +92,7 @@ function projectDesign(spec) {
       nav: `A compact workspace exposes related ${spec.subject} together`,
       mobile: `Dense ${spec.subject} groups collapse into prioritized summaries`,
       mood: "Efficient and operational",
+      why: `Daily operators keep every related ${spec.subject} signal on screen together and never lose position while working.`,
     },
   ];
   const recommendations = [
@@ -140,8 +143,8 @@ function projectDesign(spec) {
     },
     designAlternatives: directions.map((item, index) => ({
       name: item.name,
-      description: `${item.name} organizes ${spec.subject} for ${spec.users} around the real decision sequence.`,
-      whyItFits: `${spec.users} need a distinct way to understand ${spec.subject} before they ${spec.action} confidently.`,
+      description: item.why,
+      whyItFits: item.why,
       layoutApproach: index === 0
         ? `A ${spec.subject} overview followed by consequence and action`
         : `A ${item.name} layout grounded in ${spec.subject}`,

@@ -27,9 +27,11 @@ export const MAX_CREATIVE_DIRECTION_ATTEMPTS = 3;
 const GENERIC_LANGUAGE =
   /\b(?:clean|modern|professional|responsive|user[- ]friendly|easy to use|intuitive|sleek|beautiful|simple interface|best practices|cutting[- ]edge)\b/giu;
 
+// Compositions that only make sense as a brand or campaign site. A narrative
+// scroll is deliberately NOT here: a guided integration walkthrough is a real
+// developer-documentation pattern, not marketing decoration.
 const MARKETING_ONLY_PRIMITIVES = new Set([
   "immersive-hero",
-  "narrative-scroll",
   "asymmetric-split",
 ]);
 

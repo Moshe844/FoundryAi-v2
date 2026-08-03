@@ -40,17 +40,23 @@ function normalize(value: unknown) {
     .trim();
 }
 
+// Mirrors src/domain/creative-direction-quality.js. Creative DNA is preferred
+// over the prose fields, because prose can differ while the built structure is
+// identical — which is exactly the failure this gate exists to catch.
 function signature(direction: DesignAlternative): DirectionSignature {
   const system = direction.visualSystem;
+  const dna = direction.creativeDNA;
   const colors = system?.colorRoles;
   return Object.freeze({
-    composition: normalize(system?.layoutType ?? direction.layoutApproach.value),
+    composition: normalize(dna?.compositionPrimitive ?? system?.layoutType ?? direction.layoutApproach.value),
     navigation: normalize(system?.navigationType ?? direction.navigationApproach.value),
-    typography: normalize(system?.typographyCategory ?? direction.preview.typographyCharacter.value),
+    typography: normalize(
+      dna ? `${dna.typeVoice} ${dna.typeScale}` : system?.typographyCategory ?? direction.preview.typographyCharacter.value,
+    ),
     density: normalize(system?.density ?? direction.informationDensity.value),
-    imagery: normalize(system?.imageStrategy ?? direction.preview.hierarchy.value),
-    interaction: normalize(system?.interactionModel ?? direction.visualPersonality.value),
-    surfaces: normalize(system?.surfaceTreatment ?? direction.preview.spacingDensity.value),
+    imagery: normalize(dna?.imageryTreatment ?? system?.imageStrategy ?? direction.preview.hierarchy.value),
+    interaction: normalize(dna?.motionStrategy ?? system?.interactionModel ?? direction.visualPersonality.value),
+    surfaces: normalize(dna?.surfaceDepth ?? system?.surfaceTreatment ?? direction.preview.spacingDensity.value),
     colorKey: normalize(colors ? Object.values(colors).join(" ") : direction.preview.colorMood.value),
   });
 }
@@ -128,7 +134,7 @@ export function assessCreativeDirectionSet(
       });
     }
     const system = left.visualSystem;
-    if (!system || !system.layoutType || !system.typographyCategory || !system.imageStrategy || !system.interactionModel) {
+    if (!system || !left.creativeDNA || !system.layoutType || !system.typographyCategory || !system.imageStrategy || !system.interactionModel) {
       issues.push({
         code: "under-specified",
         message: `${left.name.value} is missing execution-ready visual-system detail.`,

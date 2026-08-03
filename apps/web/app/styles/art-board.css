@@ -1,0 +1,420 @@
+/*
+ * Art-direction board renderer.
+ *
+ * Every rule here is driven by a machine-readable creative-DNA attribute
+ * (data-primitive / data-depth / data-motion / data-imagery / data-transform)
+ * so a board is a rendering of the proposed visual system rather than a
+ * decorative placeholder shared by every direction.
+ */
+
+.art-board-v2 {
+  --ab-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin: 0;
+  overflow: hidden;
+  border-radius: var(--ab-radius);
+  background: var(--ab-bg);
+  color: var(--ab-text);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.06), 0 8px 24px -18px rgb(0 0 0 / 0.5);
+  contain: paint;
+}
+
+.ab-canvas {
+  position: relative;
+  display: grid;
+  grid-template-areas: var(--ab-grid);
+  gap: var(--ab-beat);
+  padding: calc(var(--ab-beat) * 1.5);
+  aspect-ratio: 4 / 3;
+  min-block-size: 0;
+}
+
+.art-board-v2[data-compact] .ab-canvas {
+  aspect-ratio: 16 / 9;
+  padding: var(--ab-beat);
+}
+
+.ab-slot {
+  min-inline-size: 0;
+  min-block-size: 0;
+  overflow: hidden;
+}
+
+.ab-region {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--ab-beat) * 0.6);
+  block-size: 100%;
+  min-block-size: 0;
+  padding: calc(var(--ab-beat) * 0.5);
+  border-radius: calc(var(--ab-radius) - 4px);
+  background: var(--ab-surface);
+}
+
+/* ---- surface depth --------------------------------------------------- */
+
+.art-board-v2[data-depth="paper-flat"] .ab-region {
+  background: color-mix(in srgb, var(--ab-surface) 88%, var(--ab-bg));
+  box-shadow: none;
+}
+.art-board-v2[data-depth="hairline-ruled"] .ab-region {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ab-text) 14%, transparent);
+}
+.art-board-v2[data-depth="soft-elevation"] .ab-region {
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.08), 0 6px 14px -10px rgb(0 0 0 / 0.45);
+}
+.art-board-v2[data-depth="layered-glass"] .ab-region {
+  background: color-mix(in srgb, var(--ab-surface) 62%, transparent);
+  backdrop-filter: blur(2px);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ab-surface) 70%, transparent);
+}
+.art-board-v2[data-depth="immersive-void"] {
+  --ab-radius: 12px;
+}
+.art-board-v2[data-depth="immersive-void"] .ab-region {
+  background: transparent;
+  box-shadow: none;
+}
+
+/* ---- typography specimen --------------------------------------------- */
+
+.ab-specimen {
+  display: block;
+  color: var(--ab-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- imagery plates --------------------------------------------------- */
+
+.ab-plate {
+  display: block;
+  flex: 1 1 auto;
+  min-block-size: 14px;
+  border-radius: 4px;
+  background:
+    linear-gradient(135deg,
+      color-mix(in srgb, var(--ab-primary) 88%, transparent),
+      color-mix(in srgb, var(--ab-accent) 72%, transparent));
+}
+.ab-plate[data-tall] { min-block-size: 40px; }
+.ab-plate[data-treatment="full-bleed"] { border-radius: 0; margin: calc(var(--ab-beat) * -0.5); }
+.ab-plate[data-treatment="framed-plate"] {
+  border: 3px solid var(--ab-surface);
+  outline: 1px solid color-mix(in srgb, var(--ab-text) 18%, transparent);
+}
+.ab-plate[data-treatment="duotone"] {
+  background: linear-gradient(120deg, var(--ab-primary) 0 50%, var(--ab-accent) 50% 100%);
+}
+.ab-plate[data-treatment="documentary"] {
+  background: color-mix(in srgb, var(--ab-text) 62%, var(--ab-bg));
+  filter: grayscale(1) contrast(1.15);
+}
+.ab-plate-none {
+  background: repeating-linear-gradient(
+    45deg,
+    color-mix(in srgb, var(--ab-text) 8%, transparent) 0 4px,
+    transparent 4px 9px
+  );
+}
+.ab-plate-sheet {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 3px;
+  flex: 1 1 auto;
+}
+.ab-plate-sheet > i {
+  display: block;
+  min-block-size: 10px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--ab-primary) 78%, var(--ab-bg));
+}
+.ab-plate-diagram {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1 1 auto;
+}
+.ab-plate-diagram > i {
+  display: block;
+  block-size: 100%;
+  min-block-size: 12px;
+  flex: 1;
+  border: 1.5px solid var(--ab-primary);
+  border-radius: 3px;
+}
+
+/* ---- rhythm, rows, tiles ---------------------------------------------- */
+
+.ab-rhythm { display: block; }
+.ab-rhythm > i {
+  display: block;
+  block-size: 3px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--ab-text) 22%, transparent);
+}
+.ab-rhythm > i:last-child { margin-block-end: 0 !important; }
+
+.ab-tiles {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: calc(var(--ab-beat) * 0.5);
+  flex: 1 1 auto;
+  min-block-size: 0;
+}
+.ab-tiles[data-wide] { grid-template-columns: repeat(3, 1fr); grid-auto-rows: 1fr; }
+
+.ab-rows { display: flex; flex-direction: column; gap: 4px; flex: 1 1 auto; }
+.ab-rows > i {
+  display: block;
+  block-size: 6px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--ab-text) 16%, transparent);
+}
+.ab-rows[data-mono] > i {
+  border-radius: 1px;
+  background: color-mix(in srgb, var(--ab-primary) 30%, transparent);
+}
+
+.ab-table { display: flex; flex-direction: column; gap: 2px; flex: 1 1 auto; }
+.ab-table > i {
+  display: block;
+  block-size: 7px;
+  background: color-mix(in srgb, var(--ab-text) 12%, transparent);
+  border-block-end: 1px solid color-mix(in srgb, var(--ab-text) 10%, transparent);
+}
+
+.ab-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.ab-chips > i {
+  display: block;
+  block-size: 9px;
+  inline-size: 26px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ab-accent) 42%, transparent);
+}
+.ab-chips[data-tiny] > i { inline-size: 14px; block-size: 7px; border-radius: 3px; }
+
+.ab-action {
+  display: block;
+  block-size: 16px;
+  inline-size: 62%;
+  border-radius: 999px;
+  background: var(--ab-primary);
+}
+.ab-action[data-compact] { inline-size: 34%; block-size: 12px; }
+
+.ab-nav { display: flex; align-items: center; gap: 6px; }
+.ab-nav > b {
+  font-size: 0.5rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ab-text);
+  white-space: nowrap;
+  overflow: hidden;
+}
+.ab-nav > i, .ab-nav-links > i {
+  display: block;
+  block-size: 4px;
+  inline-size: 22px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--ab-text) 24%, transparent);
+}
+.ab-nav[data-kind="rail"], .ab-nav[data-kind="tree"] {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 5px;
+}
+.ab-nav[data-kind="tree"] > i:nth-child(even) { margin-inline-start: 8px; inline-size: 16px; }
+.ab-nav-links { display: flex; gap: 5px; margin-inline-start: auto; }
+
+.ab-track { display: flex; flex-direction: column; gap: 4px; flex: 1 1 auto; justify-content: center; }
+.ab-track > i {
+  display: block;
+  block-size: 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ab-accent) 62%, transparent);
+}
+
+.ab-calendar {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+  flex: 1 1 auto;
+}
+.ab-calendar > i {
+  display: block;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--ab-text) 9%, transparent);
+}
+.ab-calendar > i:nth-child(9),
+.ab-calendar > i:nth-child(13),
+.ab-calendar > i:nth-child(17) { background: var(--ab-accent); }
+
+.ab-steps { display: flex; align-items: center; gap: 6px; }
+.ab-steps > i {
+  display: block;
+  block-size: 8px;
+  inline-size: 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ab-text) 18%, transparent);
+}
+.ab-steps > i[data-on] { background: var(--ab-primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ab-primary) 22%, transparent); }
+
+.ab-command {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--ab-text) 8%, transparent);
+}
+.ab-command > b { font-size: 0.6rem; color: var(--ab-accent); }
+.ab-command > i {
+  display: block;
+  block-size: 5px;
+  flex: 1;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--ab-text) 20%, transparent);
+}
+
+.ab-messages { display: flex; flex-direction: column; gap: 5px; flex: 1 1 auto; justify-content: center; }
+.ab-messages > i {
+  display: block;
+  block-size: 10px;
+  inline-size: 62%;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--ab-text) 13%, transparent);
+}
+.ab-messages > i[data-self] {
+  margin-inline-start: auto;
+  inline-size: 48%;
+  background: color-mix(in srgb, var(--ab-primary) 62%, transparent);
+}
+
+.ab-map {
+  position: relative;
+  display: block;
+  flex: 1 1 auto;
+  border-radius: 5px;
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--ab-text) 8%, transparent) 1px, transparent 1px) 0 0 / 14px 14px,
+    linear-gradient(color-mix(in srgb, var(--ab-text) 8%, transparent) 1px, transparent 1px) 0 0 / 14px 14px,
+    color-mix(in srgb, var(--ab-primary) 12%, var(--ab-surface));
+}
+.ab-map > i {
+  position: absolute;
+  block-size: 8px;
+  inline-size: 8px;
+  border-radius: 999px 999px 999px 2px;
+  background: var(--ab-accent);
+  transform: rotate(-45deg);
+}
+.ab-map > i:nth-child(1) { inset-block-start: 24%; inset-inline-start: 28%; }
+.ab-map > i:nth-child(2) { inset-block-start: 52%; inset-inline-start: 58%; }
+.ab-map > i:nth-child(3) { inset-block-start: 68%; inset-inline-start: 33%; }
+
+.ab-overlay {
+  position: absolute;
+  inset-block-end: calc(var(--ab-beat) * 1.2);
+  inset-inline-start: calc(var(--ab-beat) * 1.2);
+  inset-inline-end: calc(var(--ab-beat) * 1.2);
+  color: var(--ab-surface);
+  mix-blend-mode: difference;
+}
+
+/* ---- responsive transform inset --------------------------------------- */
+
+.ab-phone {
+  position: absolute;
+  inset-block-end: 8px;
+  inset-inline-end: 8px;
+  inline-size: 15%;
+  min-inline-size: 34px;
+  aspect-ratio: 9 / 17;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 4px 3px;
+  border-radius: 5px;
+  background: var(--ab-surface);
+  box-shadow: 0 0 0 1.5px var(--ab-text), 0 6px 16px -8px rgb(0 0 0 / 0.6);
+}
+.ab-phone-bar {
+  display: block;
+  block-size: 3px;
+  inline-size: 55%;
+  margin-inline: auto;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--ab-text) 30%, transparent);
+}
+.ab-phone-stack { display: flex; flex-direction: column; gap: 3px; flex: 1; }
+.ab-phone-stack > i {
+  display: block;
+  flex: 1;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--ab-primary) 34%, transparent);
+}
+.ab-phone-carousel { display: flex; gap: 3px; flex: 1; overflow: hidden; }
+.ab-phone-carousel > i {
+  display: block;
+  flex: 0 0 62%;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--ab-primary) 34%, transparent);
+}
+.ab-phone-dock {
+  display: block;
+  block-size: 5px;
+  border-radius: 2px;
+  background: var(--ab-primary);
+}
+
+/* ---- motion ------------------------------------------------------------ */
+
+.art-board-v2[data-motion="cinematic"] .ab-plate,
+.art-board-v2[data-motion="physical"] .ab-plate {
+  transition: transform 420ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.art-board-v2[data-motion="cinematic"]:hover .ab-plate { transform: scale(1.035); }
+.art-board-v2[data-motion="physical"]:hover .ab-plate { transform: translateY(-2px); }
+.art-board-v2[data-motion="responsive"] .ab-action { transition: transform 160ms ease; }
+.art-board-v2[data-motion="responsive"]:hover .ab-action { transform: translateX(3px); }
+.art-board-v2[data-motion="static"] * { transition: none !important; }
+
+@media (prefers-reduced-motion: reduce) {
+  .art-board-v2 *, .art-board-v2 *::before, .art-board-v2 *::after {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+
+/* ---- caption ----------------------------------------------------------- */
+
+.ab-caption {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  background: color-mix(in srgb, var(--ab-text) 6%, var(--ab-surface));
+  border-block-start: 1px solid color-mix(in srgb, var(--ab-text) 12%, transparent);
+}
+.ab-palette { display: flex; gap: 3px; flex: 0 0 auto; }
+.ab-palette > i {
+  display: block;
+  block-size: 12px;
+  inline-size: 12px;
+  border-radius: 3px;
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.14);
+}
+.ab-caption-meta {
+  font-size: 0.68rem;
+  line-height: 1.2;
+  letter-spacing: 0.01em;
+  color: color-mix(in srgb, var(--ab-text) 74%, transparent);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

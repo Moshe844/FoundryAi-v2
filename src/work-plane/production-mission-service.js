@@ -1747,18 +1747,74 @@ export function bindMissingApprovedRequirementTraces(plan, approvedContract) {
       item,
     ]),
   );
-  const claims = new Map(
-    plan.requirementClaims.map((claim) => [
-      claim.requirementId,
-      claim.implementationSummary,
-    ]),
-  );
-  const files = plan.files.map((file) => ({
-    ...file,
-    contractRequirementIds: Array.isArray(file.contractRequirementIds)
-      ? [...file.contractRequirementIds]
-      : file.contractRequirementIds,
-  }));
+  const claims = new Map();
+  for (const claim of plan.requirementClaims) {
+    if (
+      claim !== null &&
+      typeof claim === "object" &&
+      requirements.has(claim.requirementId) &&
+      !claims.has(claim.requirementId)
+    ) {
+      claims.set(claim.requirementId, claim.implementationSummary);
+    }
+  }
+  const filesByPath = new Map();
+  for (const file of plan.files) {
+    const approvedTraceIds = Array.isArray(file.contractRequirementIds)
+      ? [...new Set(file.contractRequirementIds.filter((id) => requirements.has(id)))]
+      : [];
+    const existing = filesByPath.get(file.path);
+    if (existing === undefined) {
+      filesByPath.set(file.path, {
+        ...file,
+        contractRequirementIds: approvedTraceIds,
+      });
+      continue;
+    }
+    existing.contractRequirementIds = [
+      ...new Set([
+        ...existing.contractRequirementIds,
+        ...approvedTraceIds,
+      ]),
+    ];
+    if (String(file.content).trim() !== "") existing.content = file.content;
+  }
+  const files = [...filesByPath.values()];
+  const rankedTarget = (source) => {
+    const ranked = files
+      .map((file, index) => ({
+        file,
+        index,
+        score: contractTraceScore(source, file),
+      }))
+      .sort((left, right) => right.score - left.score || left.index - right.index);
+    return ranked[0]?.score > 0 ? ranked[0].file : null;
+  };
+  for (const [requirementId, requirement] of requirements) {
+    if (claims.has(requirementId)) continue;
+    const target = rankedTarget(requirement.statement);
+    if (target === null) continue;
+    claims.set(
+      requirementId,
+      `${requirement.statement} — implemented by ${target.path} in the generated project.`,
+    );
+  }
+  for (const file of files) {
+    if (file.contractRequirementIds.length > 0) continue;
+    const ranked = [...requirements.values()]
+      .map((requirement, index) => ({
+        requirementId: requirement.requirementId,
+        index,
+        score: contractTraceScore(
+          `${requirement.statement} ${claims.get(requirement.requirementId) ?? ""}`,
+          file,
+        ),
+      }))
+      .sort((left, right) => right.score - left.score || left.index - right.index);
+    if (ranked[0]?.score > 0) {
+      file.contractRequirementIds.push(ranked[0].requirementId);
+    }
+  }
   const traced = new Set(
     files.flatMap((file) =>
       Array.isArray(file.contractRequirementIds)
@@ -1769,19 +1825,21 @@ export function bindMissingApprovedRequirementTraces(plan, approvedContract) {
   for (const [requirementId, requirement] of requirements) {
     if (traced.has(requirementId) || !claims.has(requirementId)) continue;
     const source = `${requirement.statement} ${claims.get(requirementId)}`;
-    const ranked = files
-      .map((file, index) => ({
-        index,
-        score: contractTraceScore(source, file),
-      }))
-      .sort((left, right) => right.score - left.score || left.index - right.index);
-    if (ranked[0]?.score <= 0) continue;
-    const target = files[ranked[0].index];
-    if (!Array.isArray(target.contractRequirementIds)) continue;
+    const target = rankedTarget(source);
+    if (target === null) continue;
     target.contractRequirementIds.push(requirementId);
     traced.add(requirementId);
   }
-  return { ...plan, files };
+  return {
+    ...plan,
+    requirementClaims: [...claims].map(
+      ([requirementId, implementationSummary]) => ({
+        requirementId,
+        implementationSummary,
+      }),
+    ),
+    files,
+  };
 }
 
 function bundlePrompt(profile, contract, bindings) {

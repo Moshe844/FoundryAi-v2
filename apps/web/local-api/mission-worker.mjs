@@ -59,9 +59,10 @@ const control = openMissionControl({
   modelProviders: liveAdapters.executionAdapters,
   // One attempt disables the gateway's retry-with-feedback loop entirely: a
   // single structured-output validation miss becomes an unrecoverable mission
-  // failure. Three bounded attempts let the model see the exact rejection and
-  // return a corrected object before anything is declared terminal.
-  maxModelProviderAttempts: 3,
+  // failure. Four bounded attempts (the gateway maximum) let the model see the
+  // exact rejection and return a corrected object, with headroom for one
+  // provider capacity blip, before anything is declared terminal.
+  maxModelProviderAttempts: 4,
 });
 
 let stopping = false;

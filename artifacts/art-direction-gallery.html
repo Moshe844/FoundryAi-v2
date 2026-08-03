@@ -1,0 +1,788 @@
+<!doctype html><meta charset="utf-8"><title>Foundry art-direction gallery</title>
+<style>
+/*
+ * Art-direction board renderer.
+ *
+ * Every rule here is driven by a machine-readable creative-DNA attribute
+ * (data-primitive / data-depth / data-motion / data-imagery / data-transform)
+ * so a board is a rendering of the proposed visual system rather than a
+ * decorative placeholder shared by every direction.
+ */
+
+.art-board-v2 {
+  --ab-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin: 0;
+  overflow: hidden;
+  border-radius: var(--ab-radius);
+  background: var(--ab-bg);
+  color: var(--ab-text);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.06), 0 8px 24px -18px rgb(0 0 0 / 0.5);
+  contain: paint;
+}
+
+.ab-canvas {
+  position: relative;
+  display: grid;
+  grid-template-areas: var(--ab-grid);
+  gap: var(--ab-beat);
+  padding: calc(var(--ab-beat) * 1.5);
+  aspect-ratio: 4 / 3;
+  min-block-size: 0;
+}
+
+.art-board-v2[data-compact] .ab-canvas {
+  aspect-ratio: 16 / 9;
+  padding: var(--ab-beat);
+}
+
+.ab-slot {
+  min-inline-size: 0;
+  min-block-size: 0;
+  overflow: hidden;
+}
+
+.ab-region {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--ab-beat) * 0.6);
+  block-size: 100%;
+  min-block-size: 0;
+  padding: calc(var(--ab-beat) * 0.5);
+  border-radius: calc(var(--ab-radius) - 4px);
+  background: var(--ab-surface);
+}
+
+/* ---- surface depth --------------------------------------------------- */
+
+.art-board-v2[data-depth="paper-flat"] .ab-region {
+  background: color-mix(in srgb, var(--ab-surface) 88%, var(--ab-bg));
+  box-shadow: none;
+}
+.art-board-v2[data-depth="hairline-ruled"] .ab-region {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ab-text) 14%, transparent);
+}
+.art-board-v2[data-depth="soft-elevation"] .ab-region {
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.08), 0 6px 14px -10px rgb(0 0 0 / 0.45);
+}
+.art-board-v2[data-depth="layered-glass"] .ab-region {
+  background: color-mix(in srgb, var(--ab-surface) 62%, transparent);
+  backdrop-filter: blur(2px);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ab-surface) 70%, transparent);
+}
+.art-board-v2[data-depth="immersive-void"] {
+  --ab-radius: 12px;
+}
+.art-board-v2[data-depth="immersive-void"] .ab-region {
+  background: transparent;
+  box-shadow: none;
+}
+
+/* ---- typography specimen --------------------------------------------- */
+
+.ab-specimen {
+  display: block;
+  color: var(--ab-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- imagery plates --------------------------------------------------- */
+
+.ab-plate {
+  display: block;
+  flex: 1 1 auto;
+  min-block-size: 14px;
+  border-radius: 4px;
+  background:
+    linear-gradient(135deg,
+      color-mix(in srgb, var(--ab-primary) 88%, transparent),
+      color-mix(in srgb, var(--ab-accent) 72%, transparent));
+}
+.ab-plate[data-tall] { min-block-size: 40px; }
+.ab-plate[data-treatment="full-bleed"] { border-radius: 0; margin: calc(var(--ab-beat) * -0.5); }
+.ab-plate[data-treatment="framed-plate"] {
+  border: 3px solid var(--ab-surface);
+  outline: 1px solid color-mix(in srgb, var(--ab-text) 18%, transparent);
+}
+.ab-plate[data-treatment="duotone"] {
+  background: linear-gradient(120deg, var(--ab-primary) 0 50%, var(--ab-accent) 50% 100%);
+}
+.ab-plate[data-treatment="documentary"] {
+  background: color-mix(in srgb, var(--ab-text) 62%, var(--ab-bg));
+  filter: grayscale(1) contrast(1.15);
+}
+.ab-plate-none {
+  background: repeating-linear-gradient(
+    45deg,
+    color-mix(in srgb, var(--ab-text) 8%, transparent) 0 4px,
+    transparent 4px 9px
+  );
+}
+.ab-plate-sheet {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 3px;
+  flex: 1 1 auto;
+}
+.ab-plate-sheet > i {
+  display: block;
+  min-block-size: 10px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--ab-primary) 78%, var(--ab-bg));
+}
+.ab-plate-diagram {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1 1 auto;
+}
+.ab-plate-diagram > i {
+  display: block;
+  block-size: 100%;
+  min-block-size: 12px;
+  flex: 1;
+  border: 1.5px solid var(--ab-primary);
+  border-radius: 3px;
+}
+
+/* ---- rhythm, rows, tiles ---------------------------------------------- */
+
+.ab-rhythm { display: block; }
+.ab-rhythm > i {
+  display: block;
+  block-size: 3px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--ab-text) 22%, transparent);
+}
+.ab-rhythm > i:last-child { margin-block-end: 0 !important; }
+
+.ab-tiles {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: calc(var(--ab-beat) * 0.5);
+  flex: 1 1 auto;
+  min-block-size: 0;
+}
+.ab-tiles[data-wide] { grid-template-columns: repeat(3, 1fr); grid-auto-rows: 1fr; }
+
+.ab-rows { display: flex; flex-direction: column; gap: 4px; flex: 1 1 auto; }
+.ab-rows > i {
+  display: block;
+  block-size: 6px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--ab-text) 16%, transparent);
+}
+.ab-rows[data-mono] > i {
+  border-radius: 1px;
+  background: color-mix(in srgb, var(--ab-primary) 30%, transparent);
+}
+
+.ab-table { display: flex; flex-direction: column; gap: 2px; flex: 1 1 auto; }
+.ab-table > i {
+  display: block;
+  block-size: 7px;
+  background: color-mix(in srgb, var(--ab-text) 12%, transparent);
+  border-block-end: 1px solid color-mix(in srgb, var(--ab-text) 10%, transparent);
+}
+
+.ab-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.ab-chips > i {
+  display: block;
+  block-size: 9px;
+  inline-size: 26px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ab-accent) 42%, transparent);
+}
+.ab-chips[data-tiny] > i { inline-size: 14px; block-size: 7px; border-radius: 3px; }
+
+.ab-action {
+  display: block;
+  block-size: 16px;
+  inline-size: 62%;
+  border-radius: 999px;
+  background: var(--ab-primary);
+}
+.ab-action[data-compact] { inline-size: 34%; block-size: 12px; }
+
+.ab-nav { display: flex; align-items: center; gap: 6px; }
+.ab-nav > b {
+  font-size: 0.5rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ab-text);
+  white-space: nowrap;
+  overflow: hidden;
+}
+.ab-nav > i, .ab-nav-links > i {
+  display: block;
+  block-size: 4px;
+  inline-size: 22px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--ab-text) 24%, transparent);
+}
+.ab-nav[data-kind="rail"], .ab-nav[data-kind="tree"] {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 5px;
+}
+.ab-nav[data-kind="tree"] > i:nth-child(even) { margin-inline-start: 8px; inline-size: 16px; }
+.ab-nav-links { display: flex; gap: 5px; margin-inline-start: auto; }
+
+.ab-track { display: flex; flex-direction: column; gap: 4px; flex: 1 1 auto; justify-content: center; }
+.ab-track > i {
+  display: block;
+  block-size: 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ab-accent) 62%, transparent);
+}
+
+.ab-calendar {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+  flex: 1 1 auto;
+}
+.ab-calendar > i {
+  display: block;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--ab-text) 9%, transparent);
+}
+.ab-calendar > i:nth-child(9),
+.ab-calendar > i:nth-child(13),
+.ab-calendar > i:nth-child(17) { background: var(--ab-accent); }
+
+.ab-steps { display: flex; align-items: center; gap: 6px; }
+.ab-steps > i {
+  display: block;
+  block-size: 8px;
+  inline-size: 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ab-text) 18%, transparent);
+}
+.ab-steps > i[data-on] { background: var(--ab-primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ab-primary) 22%, transparent); }
+
+.ab-command {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--ab-text) 8%, transparent);
+}
+.ab-command > b { font-size: 0.6rem; color: var(--ab-accent); }
+.ab-command > i {
+  display: block;
+  block-size: 5px;
+  flex: 1;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--ab-text) 20%, transparent);
+}
+
+.ab-messages { display: flex; flex-direction: column; gap: 5px; flex: 1 1 auto; justify-content: center; }
+.ab-messages > i {
+  display: block;
+  block-size: 10px;
+  inline-size: 62%;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--ab-text) 13%, transparent);
+}
+.ab-messages > i[data-self] {
+  margin-inline-start: auto;
+  inline-size: 48%;
+  background: color-mix(in srgb, var(--ab-primary) 62%, transparent);
+}
+
+.ab-map {
+  position: relative;
+  display: block;
+  flex: 1 1 auto;
+  border-radius: 5px;
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--ab-text) 8%, transparent) 1px, transparent 1px) 0 0 / 14px 14px,
+    linear-gradient(color-mix(in srgb, var(--ab-text) 8%, transparent) 1px, transparent 1px) 0 0 / 14px 14px,
+    color-mix(in srgb, var(--ab-primary) 12%, var(--ab-surface));
+}
+.ab-map > i {
+  position: absolute;
+  block-size: 8px;
+  inline-size: 8px;
+  border-radius: 999px 999px 999px 2px;
+  background: var(--ab-accent);
+  transform: rotate(-45deg);
+}
+.ab-map > i:nth-child(1) { inset-block-start: 24%; inset-inline-start: 28%; }
+.ab-map > i:nth-child(2) { inset-block-start: 52%; inset-inline-start: 58%; }
+.ab-map > i:nth-child(3) { inset-block-start: 68%; inset-inline-start: 33%; }
+
+.ab-overlay {
+  position: absolute;
+  inset-block-end: calc(var(--ab-beat) * 1.2);
+  inset-inline-start: calc(var(--ab-beat) * 1.2);
+  inset-inline-end: calc(var(--ab-beat) * 1.2);
+  color: var(--ab-surface);
+  mix-blend-mode: difference;
+}
+
+/* ---- responsive transform inset --------------------------------------- */
+
+.ab-phone {
+  position: absolute;
+  inset-block-end: 8px;
+  inset-inline-end: 8px;
+  inline-size: 15%;
+  min-inline-size: 34px;
+  aspect-ratio: 9 / 17;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 4px 3px;
+  border-radius: 5px;
+  background: var(--ab-surface);
+  box-shadow: 0 0 0 1.5px var(--ab-text), 0 6px 16px -8px rgb(0 0 0 / 0.6);
+}
+.ab-phone-bar {
+  display: block;
+  block-size: 3px;
+  inline-size: 55%;
+  margin-inline: auto;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--ab-text) 30%, transparent);
+}
+.ab-phone-stack { display: flex; flex-direction: column; gap: 3px; flex: 1; }
+.ab-phone-stack > i {
+  display: block;
+  flex: 1;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--ab-primary) 34%, transparent);
+}
+.ab-phone-carousel { display: flex; gap: 3px; flex: 1; overflow: hidden; }
+.ab-phone-carousel > i {
+  display: block;
+  flex: 0 0 62%;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--ab-primary) 34%, transparent);
+}
+.ab-phone-dock {
+  display: block;
+  block-size: 5px;
+  border-radius: 2px;
+  background: var(--ab-primary);
+}
+
+/* ---- motion ------------------------------------------------------------ */
+
+.art-board-v2[data-motion="cinematic"] .ab-plate,
+.art-board-v2[data-motion="physical"] .ab-plate {
+  transition: transform 420ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.art-board-v2[data-motion="cinematic"]:hover .ab-plate { transform: scale(1.035); }
+.art-board-v2[data-motion="physical"]:hover .ab-plate { transform: translateY(-2px); }
+.art-board-v2[data-motion="responsive"] .ab-action { transition: transform 160ms ease; }
+.art-board-v2[data-motion="responsive"]:hover .ab-action { transform: translateX(3px); }
+.art-board-v2[data-motion="static"] * { transition: none !important; }
+
+@media (prefers-reduced-motion: reduce) {
+  .art-board-v2 *, .art-board-v2 *::before, .art-board-v2 *::after {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+
+/* ---- caption ----------------------------------------------------------- */
+
+.ab-caption {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  background: color-mix(in srgb, var(--ab-text) 6%, var(--ab-surface));
+  border-block-start: 1px solid color-mix(in srgb, var(--ab-text) 12%, transparent);
+}
+.ab-palette { display: flex; gap: 3px; flex: 0 0 auto; }
+.ab-palette > i {
+  display: block;
+  block-size: 12px;
+  inline-size: 12px;
+  border-radius: 3px;
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.14);
+}
+.ab-caption-meta {
+  font-size: 0.68rem;
+  line-height: 1.2;
+  letter-spacing: 0.01em;
+  color: color-mix(in srgb, var(--ab-text) 74%, transparent);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:root { color-scheme: light; }
+body { margin:0; padding:28px; font:14px/1.5 "Segoe UI",system-ui,sans-serif; background:#f2f1ee; color:#15171a; }
+h1 { font-size:22px; margin:0 0 4px; }
+.lede { margin:0 0 26px; color:#5a6068; max-width:80ch; }
+section { margin-block-end:34px; }
+h2 { font-size:15px; margin:0 0 10px; display:flex; gap:10px; align-items:baseline; }
+h2 em { font-style:normal; font-size:11px; color:#6b7280; font-weight:400; }
+.row { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; }
+.cell { margin:0; }
+figcaption { margin-block-start:7px; display:flex; flex-direction:column; gap:2px; }
+figcaption strong { font-size:12.5px; }
+.prim { font-size:11px; color:#111; background:#e3e2de; border-radius:4px; padding:1px 5px; align-self:flex-start; }
+.meta { font-size:10.5px; color:#767c85; }
+</style>
+<h1>Foundry — art-direction boards across 12 projects</h1>
+<p class="lede">Rendered from the real <code>ArtDirectionBoard</code> component and real creative DNA from
+<code>src/domain/creative-direction.js</code>. 36 boards, 16 distinct composition primitives in use.</p>
+<section>
+    <h2>Fine-art photographer portfolio
+      <em>97% distinct · publishable</em>
+    </h2>
+    <div class="row"><figure class="cell">
+        <figure class="art-board-v2" data-primitive="immersive-hero" data-depth="hairline-ruled" data-motion="restrained" data-imagery="duotone" style="--ab-bg:#f6f5f4;--ab-surface:#fdfcfc;--ab-primary:#7e4a25;--ab-accent:#98d831;--ab-text:#2c221c;--ab-grid:&quot;a a&quot; &quot;a a&quot; &quot;b c&quot;;--ab-beat:3px"><div class="ab-canvas" role="img" aria-label="Silent Room: immersive hero composition with grotesque neutral typography at editorial scale, duotone imagery, tight grid spacing, restrained motion, and collapse to stack on phones."><div class="ab-slot" style="grid-area:a"><div class="ab-region" data-region="full-bleed-stage"><span class="ab-plate" data-treatment="duotone" data-tall="true" aria-hidden="true"></span><span class="ab-overlay"><span class="ab-specimen" style="font-family:&quot;Helvetica Neue&quot;, Inter, Arial, sans-serif;font-size:1.391rem;line-height:1.18;letter-spacing:-0.005em;font-weight:600">Silent Room</span></span></div></div><div class="ab-slot" style="grid-area:b"><div class="ab-region" data-region="overlay-caption"><span class="ab-specimen" style="font-family:&quot;Helvetica Neue&quot;, Inter, Arial, sans-serif;font-size:0.58422rem;line-height:1.18;letter-spacing:-0.005em;font-weight:400">Silent Room character</span><span class="ab-rhythm" aria-hidden="true"><i style="margin-block-end:3px;inline-size:100%"></i><i style="margin-block-end:3px;inline-size:87%"></i></span></div></div><div class="ab-slot" style="grid-area:c"><div class="ab-region" data-region="quiet-index"><span class="ab-nav" data-kind="bar" aria-hidden="true"><b style="font-family:&quot;Helvetica Neue&quot;, Inter, Arial, sans-serif">Index</b><span class="ab-nav-links"><i></i><i></i><i></i><i></i></span></span></div></div><div class="ab-phone" data-transform="collapse-to-stack" aria-hidden="true"><span class="ab-phone-bar"></span><span class="ab-phone-stack"><i></i><i></i><i></i></span></div></div><figcaption class="ab-caption"><span class="ab-palette" aria-hidden="true"><i style="background:#f6f5f4"></i><i style="background:#fdfcfc"></i><i style="background:#7e4a25"></i><i style="background:#98d831"></i><i style="background:#2c221c"></i></span><span class="ab-caption-meta">grotesque neutral · editorial scale · restrained motion</span></figcaption></figure>
+        <figcaption>
+          <strong>Silent Room</strong>
+          <span class="prim">immersive-hero</span>
+          <span class="meta">grotesque-neutral · editorial · duotone · restrained · collapse-to-stack</span>
+        </figcaption>
+      </figure>
+<figure class="cell">
+        <figure class="art-board-v2" data-primitive="modular-gallery" data-depth="soft-elevation" data-motion="responsive" data-imagery="full-bleed" style="--ab-bg:#f6f4f4;--ab-surface:#fdfcfc;--ab-primary:#7e2529;--ab-accent:#d8ca31;--ab-text:#2c1c1d;--ab-grid:&quot;a a a&quot; &quot;b b b&quot; &quot;c c c&quot;;--ab-beat:11px"><div class="ab-canvas" role="img" aria-label="Plate Catalogue: modular gallery composition with humanist warm typography at measured scale, full bleed imagery, wide breath spacing, responsive motion, and swap navigation on phones."><div class="ab-slot" style="grid-area:a"><div class="ab-region" data-region="compact-identity"><span class="ab-specimen" style="font-family:&quot;Segoe UI&quot;, Tahoma, Verdana, sans-serif;font-size:0.67595rem;line-height:1.18;letter-spacing:-0.005em;font-weight:600">Plate Catalogue</span><span class="ab-nav" data-kind="bar" aria-hidden="true"><b style="font-family:&quot;Segoe UI&quot;, Tahoma, Verdana, sans-serif"></b><span class="ab-nav-links"><i></i><i></i><i></i><i></i></span></span></div></div><div class="ab-slot" style="grid-area:b"><div class="ab-region" data-region="tile-field"><span class="ab-tiles" data-wide="true" aria-hidden="true"><span class="ab-plate" data-treatment="full-bleed" aria-hidden="true"></span><span class="ab-plate" data-treatment="full-bleed" aria-hidden="true"></span><span class="ab-plate" data-treatment="full-bleed" aria-hidden="true"></span><span class="ab-plate" data-treatment="full-bleed" aria-hidden="true"></span><span class="ab-plate" data-treatment="full-bleed" aria-hidden="true"></span><span class="ab-plate" data-treatment="full-bleed" aria-hidden="true"></span></span></div></div><div class="ab-slot" style="grid-area:c"><div class="ab-region" data-region="filter-strip"><span class="ab-chips" aria-hidden="true"><i></i><i></i><i></i><i></i></span></div></div><div class="ab-phone" data-transform="swap-navigation" aria-hidden="true"><span class="ab-phone-bar"></span><span class="ab-phone-stack"><i></i><i></i><i></i></span><span class="ab-phone-dock"></span></div></div><figcaption class="ab-caption"><span class="ab-palette" aria-hidden="true"><i style="background:#f6f4f4"></i><i style="background:#fdfcfc"></i><i style="background:#7e2529"></i><i style="background:#d8ca31"></i><i style="background:#2c1c1d"></i></span><span class="ab-caption-meta">humanist warm · measured scale · responsive motion</span></figcaption></figure>
+        <figcaption>
+          <strong>Plate Catalogue</strong>
+          <span class="prim">modular-gallery</span>
+          <span class="meta">humanist-warm · measured · full-bleed · responsive · swap-navigation</span>
+        </figcaption>
+      </figure>
+<figure class="cell">
+        <figure class="art-board-v2" data-primitive="editorial-spread" data-depth="paper-flat" data-motion="static" data-imagery="contact-sheet" style="--ab-bg:#f5f6f4;--ab-surface:#fcfdfc;--ab-primary:#587e25;--ab-accent:#31d874;--ab-text:#252c1c;--ab-grid:&quot;a a a&quot; &quot;b b c&quot; &quot;d d d&quot;;--ab-beat:6px"><div class="ab-canvas" role="img" aria-label="Essay Sequence: editorial spread composition with serif authority typography at dramatic scale, contact sheet imagery, steady beat spacing, static motion, and reflow columns on phones."><div class="ab-slot" style="grid-area:a"><div class="ab-region" data-region="masthead"><span class="ab-specimen" style="font-family:Georgia, &quot;Iowan Old Style&quot;, &quot;Times New Roman&quot;, serif;font-size:1.607rem;line-height:1.02;letter-spacing:-0.03em;font-weight:600">Essay Sequence</span><span class="ab-nav" data-kind="bar" aria-hidden="true"><b style="font-family:Georgia, &quot;Iowan Old Style&quot;, &quot;Times New Roman&quot;, serif"></b><span class="ab-nav-links"><i></i><i></i><i></i><i></i></span></span></div></div><div class="ab-slot" style="grid-area:b"><div class="ab-region" data-region="lead-column"><span class="ab-specimen" style="font-family:Georgia, &quot;Iowan Old Style&quot;, &quot;Times New Roman&quot;, serif;font-size:0.8035rem;line-height:1.02;letter-spacing:-0.03em;font-weight:500">Essay Sequence character</span><span class="ab-rhythm" aria-hidden="true"><i style="margin-block-end:6px;inline-size:100%"></i><i style="margin-block-end:6px;inline-size:87%"></i><i style="margin-block-end:6px;inline-size:74%"></i><i style="margin-block-end:6px;inline-size:61%"></i><i style="margin-block-end:6px;inline-size:48%"></i></span></div></div><div class="ab-slot" style="grid-area:c"><div class="ab-region" data-region="sidebar-notes"><span class="ab-rhythm" aria-hidden="true"><i style="margin-block-end:6px;inline-size:100%"></i><i style="margin-block-end:6px;inline-size:87%"></i><i style="margin-block-end:6px;inline-size:74%"></i><i style="margin-block-end:6px;inline-size:61%"></i></span></div></div><div class="ab-slot" style="grid-area:d"><div class="ab-region" data-region="plate-grid"><span class="ab-tiles" aria-hidden="true"><span class="ab-plate ab-plate-sheet" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="ab-plate ab-plate-sheet" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="ab-plate ab-plate-sheet" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></span></span></div></div><div class="ab-phone" data-transform="reflow-columns" aria-hidden="true"><span class="ab-phone-bar"></span><span class="ab-phone-stack"><i></i><i></i><i></i></span></div></div><figcaption class="ab-caption"><span class="ab-palette" aria-hidden="true"><i style="background:#f5f6f4"></i><i style="background:#fcfdfc"></i><i style="background:#587e25"></i><i style="background:#31d874"></i><i style="background:#252c1c"></i></span><span class="ab-caption-meta">serif authority · dramatic scale · static motion</span></figcaption></figure>
+        <figcaption>
+          <strong>Essay Sequence</strong>
+          <span class="prim">editorial-spread</span>
+          <span class="meta">serif-authority · dramatic · contact-sheet · static · reflow-columns</span>
+        </figcaption>
+      </figure></div>
+  </section>
+<section>
+    <h2>Commercial photographer portfolio
+      <em>97% distinct · publishable</em>
+    </h2>
+    <div class="row"><figure class="cell">
+        <figure class="art-board-v2" data-primitive="modular-gallery" data-depth="soft-elevation" data-motion="responsive" data-imagery="documentary" style="--ab-bg:#f4f6f5;--ab-surface:#fcfdfd;--ab-primary:#257e65;--ab-accent:#3166d8;--ab-text:#1c2c27;--ab-grid:&quot;a a a&quot; &quot;b b b&quot; &quot;c c c&quot;;--ab-beat:3px"><div class="ab-canvas" role="img" aria-label="Rate Card: modular gallery composition with humanist warm typography at measured scale, documentary imagery, tight grid spacing, responsive motion, and swap navigation on phones."><div class="ab-slot" style="grid-area:a"><div class="ab-region" data-region="compact-identity"><span class="ab-specimen" style="font-family:&quot;Segoe UI&quot;, Tahoma, Verdana, sans-serif;font-size:0.67595rem;line-height:1.18;letter-spacing:-0.005em;font-weight:600">Rate Card</span><span class="ab-nav" data-kind="bar" aria-hidden="true"><b style="font-family:&quot;Segoe UI&quot;, Tahoma, Verdana, sans-serif"></b><span class="ab-nav-links"><i></i><i></i><i></i><i></i></span></span></div></div><div class="ab-slot" style="grid-area:b"><div class="ab-region" data-region="tile-field"><span class="ab-tiles" data-wide="true" aria-hidden="true"><span class="ab-plate" data-treatment="documentary" aria-hidden="true"></span><span class="ab-plate" data-treatment="documentary" aria-hidden="true"></span><span class="ab-plate" data-treatment="documentary" aria-hidden="true"></span><span class="ab-plate" data-treatment="documentary" aria-hidden="true"></span><span class="ab-plate" data-treatment="documentary" aria-hidden="true"></span><span class="ab-plate" data-treatment="documentary" aria-hidden="true"></span></span></div></div><div class="ab-slot" style="grid-area:c"><div class="ab-region" data-region="filter-strip"><span class="ab-chips" aria-hidden="true"><i></i><i></i><i></i><i></i></span></div></div><div class="ab-phone" data-transform="swap-navigation" aria-hidden="true"><span class="ab-phone-bar"></span><span class="ab-phone-stack"><i></i><i></i><i></i></span><span class="ab-phone-dock"></span></div></div><figcaption class="ab-caption"><span class="ab-palette" aria-hidden="true"><i style="background:#f4f6f5"></i><i style="background:#fcfdfd"></i><i style="background:#257e65"></i><i style="background:#3166d8"></i><i style="background:#1c2c27"></i></span><span class="ab-caption-meta">humanist warm · measured scale · responsive motion</span></figcaption></figure>
+        <figcaption>
+          <strong>Rate Card</strong>
+          <span class="prim">modular-gallery</span>
+          <span class="meta">humanist-warm · measured · documentary · responsive · swap-navigation</span>
+        </figcaption>
+      </figure>
+<figure class="cell">
+        <figure class="art-board-v2" data-primitive="editorial-spread" data-depth="paper-flat" data-motion="static" data-imagery="duotone" style="--ab-bg:#f6f4f5;--ab-surface:#fdfcfc;--ab-primary:#7e2553;--ab-accent:#d87c31;--ab-text:#2c1c24;--ab-grid:&quot;a a a&quot; &quot;b b c&quot; &quot;d d d&quot;;--ab-beat:11px"><div class="ab-canvas" role="img" aria-label="Set Report: editorial spread composition with serif authority typography at dramatic scale, duotone imagery, wide breath spacing, static motion, and reflow columns on phones."><div class="ab-slot" style="grid-area:a"><div class="ab-region" data-region="masthead"><span class="ab-specimen" style="font-family:Georgia, &quot;Iowan Old Style&quot;, &quot;Times New Roman&quot;, serif;font-size:1.607rem;line-height:1.02;letter-spacing:-0.03em;font-weight:600">Set Report</span><span class="ab-nav" data-kind="bar" aria-hidden="true"><b style="font-family:Georgia, &quot;Iowan Old Style&quot;, &quot;Times New Roman&quot;, serif"></b><span class="ab-nav-links"><i></i><i></i><i></i><i></i></span></span></div></div><div class="ab-slot" style="grid-area:b"><div class="ab-region" data-region="lead-column"><span class="ab-specimen" style="font-family:Georgia, &quot;Iowan Old Style&quot;, &quot;Times New Roman&quot;, serif;font-size:0.8035rem;line-height:1.02;letter-spacing:-0.03em;font-weight:500">Set Report character</span><span class="ab-rhythm" aria-hidden="true"><i style="margin-block-end:11px;inline-size:100%"></i><i style="margin-block-end:11px;inline-size:87%"></i><i style="margin-block-end:11px;inline-size:74%"></i><i style="margin-block-end:11px;inline-size:61%"></i><i style="margin-block-end:11px;inline-size:48%"></i></span></div></div><div class="ab-slot" style="grid-area:c"><div class="ab-region" data-region="sidebar-notes"><span class="ab-rhythm" aria-hidden="true"><i style="margin-block-end:11px;inline-size:100%"></i><i style="margin-block-end:11px;inline-size:87%"></i><i style="margin-block-end:11px;inline-size:74%"></i><i style="margin-block-end:11px;inline-size:61%"></i></span></div></div><div class="ab-slot" style="grid-area:d"><div class="ab-region" data-region="plate-grid"><span class="ab-tiles" aria-hidden="true"><span class="ab-plate" data-treatment="duotone" aria-hidden="true"></span><span class="ab-plate" data-treatment="duotone" aria-hidden="true"></span><span class="ab-plate" data-treatment="duotone" aria-hidden="true"></span></span></div></div><div class="ab-phone" data-transform="reflow-columns" aria-hidden="true"><span class="ab-phone-bar"></span><span class="ab-phone-stack"><i></i><i></i><i></i></span></div></div><figcaption class="ab-caption"><span class="ab-palette" aria-hidden="true"><i style="background:#f6f4f5"></i><i style="background:#fdfcfc"></i><i style="background:#7e2553"></i><i style="background:#d87c31"></i><i style="background:#2c1c24"></i></span><span class="ab-caption-meta">serif authority · dramatic scale · static motion</span></figcaption></figure>
+        <figcaption>
+          <strong>Set Report</strong>
+          <span class="prim">editorial-spread</span>
+          <span class="meta">serif-authority · dramatic · duotone · static · reflow-columns</span>
+        </figcaption>
+      </figure>
+<figure class="cell">
+        <figure class="art-board-v2" data-primitive="guided-flow" data-depth="layered-glass" data-motion="cinematic" data-imagery="full-bleed" style="--ab-bg:#f5f4f6;--ab-surface:#fcfcfd;--ab-primary:#50257e;--ab-accent:#d8318d;--ab-text:#231c2c;--ab-grid:&quot;a a a&quot; &quot;b b b&quot; &quot;b b b&quot; &quot;c c d&quot;;--ab-beat:6px"><div class="ab-canvas" role="img" aria-label="Booking Desk: guided flow composition with mono technical typography at utilitarian scale, full bleed imagery, steady beat spacing, cinematic motion, and prioritise primary task on phones."><div class="ab-slot" style="grid-area:a"><div class="ab-region" data-region="progress-spine"><span class="ab-steps" aria-hidden="true"><i data-on="true"></i><i></i><i></i></span></div></div><div class="ab-slot" style="grid-area:b"><div class="ab-region" data-region="single-question"><span class="ab-specimen" style="font-family:&quot;SFMono-Regular&quot;, Consolas, &quot;Liberation Mono&quot;, monospace;font-size:0.6564rem;line-height:1.18;letter-spacing:-0.005em;font-weight:500">Booking Desk character</span><span class="ab-rhythm" aria-hidden="true"><i style="margin-block-end:6px;inline-size:100%"></i><i style="margin-block-end:6px;inline-size:87%"></i></span></div></div><div class="ab-slot" style="grid-area:c"><div class="ab-region" data-region="assurance-note"><span class="ab-rhythm" aria-hidden="true"><i style="margin-block-end:6px;inline-size:100%"></i></span></div></div><div class="ab-slot" style="grid-area:d"><div class="ab-region" data-region="advance-action"><span class="ab-action" aria-hidden="true"></span></div></div><div class="ab-phone" data-transform="prioritise-primary-task" aria-hidden="true"><span class="ab-phone-bar"></span><span class="ab-phone-stack"><i></i><i></i></span><span class="ab-phone-dock"></span></div></div><figcaption class="ab-caption"><span class="ab-palette" aria-hidden="true"><i style="background:#f5f4f6"></i><i style="background:#fcfcfd"></i><i style="background:#50257e"></i><i style="background:#d8318d"></i><i style="background:#231c2c"></i></span><span class="ab-caption-meta">mono technical · utilitarian scale · cinematic motion</span></figcaption></figure>
+        <figcaption>
+          <strong>Booking Desk</strong>
+          <span class="prim">guided-flow</span>
+          <span class="meta">mono-technical · utilitarian · full-bleed · cinematic · prioritise-primary-task</span>
+        </figcaption>
+      </figure></div>
+  </section>
+<section>
+    <h2>Filmmaker portfolio
+      <em>100% distinct · publishable</em>
+    </h2>
+    <div class="row"><figure class="cell">
+        <figure class="art-board-v2" data-primitive="immersive-hero" data-depth="soft-elevation" data-motion="responsive" data-imagery="diagrammatic" style="--ab-bg:#f5f4f6;--ab-surface:#fdfcfd;--ab-primary:#6a257e;--ab-accent:#d8315e;--ab-text:#281c2c;--ab-grid:&quot;a a&quot; &quot;a a&quot; &quot;b c&quot;;--ab-beat:6px"><div class="ab-canvas" role="img" aria-label="Title Sequence: immersive hero composition with humanist warm typography at measured scale, diagrammatic imagery, steady beat spacing, responsive motion, and swap navigation on phones."><div class="ab-slot" style="grid-area:a"><div class="ab-region" data-region="full-bleed-stage"><span class="ab-plate ab-plate-diagram" aria-hidden="true"><i></i><i></i><i></i></span><span class="ab-overlay"><span class="ab-specimen" style="font-family:&quot;Segoe UI&quot;, Tahoma, Verdana, sans-serif;font-size:1.229rem;line-height:1.18;letter-spacing:-0.005em;font-weight:600">Title Sequence</span></span></div></div><div class="ab-slot" style="grid-area:b"><div class="ab-region" data-region="overlay-caption"><span class="ab-specimen" style="font-family:&quot;Segoe UI&quot;, Tahoma, Verdana, sans-serif;font-size:0.51618rem;line-height:1.18;letter-spacing:-0.005em;font-weight:400">Title Sequence character</span><span class="ab-rhythm" aria-hidden="true"><i style="margin-block-end:6px;inline-size:100%"></i><i style="margin-block-end:6px;inline-size:87%"></i></span></div></div><div class="ab-slot" style="grid-area:c"><div class="ab-region" data-region="quiet-index"><span class="ab-nav" data-kind="bar" aria-hidden="true"><b style="font-family:&quot;Segoe UI&quot;, Tahoma, Verdana, sans-serif">Index</b><span class="ab-nav-links"><i></i><i></i><i></i><i></i></span></span></div></div><div class="ab-phone" data-transform="swap-navigation" aria-hidden="true"><span class="ab-phone-bar"></span><span class="ab-phone-stack"><i></i><i></i><i></i></span><span class="ab-phone-dock"></span></div></div><figcaption class="ab-caption"><span class="ab-palette" aria-hidden="true"><i style="background:#f5f4f6"></i><i style="background:#fdfcfd"></i><i style="background:#6a257e"></i><i style="background:#d8315e"></i><i style="background:#281c2c"></i></span><span class="ab-caption-meta">humanist warm · measured scale · responsive motion</span></figcaption></figure>
+        <figcaption>
+          <strong>Title Sequence</strong>
+          <span class="prim">immersive-hero</span>
+          <span class="meta">humanist-warm · measured · diagrammatic · responsive · swap-navigation</span>
+        </figcaption>
+      </figure>
+<figure class="cell">
+        <figure class="art-board-v2" data-primitive="timeline" data-depth="layered-glass" data-motion="cinematic" data-imagery="full-bleed" style="--ab-bg:#f6f4f5;--ab-surface:#fdfcfc;--ab-primary:#7e2555;--ab-accent:#d87a31;--ab-text:#2c1c24;--ab-grid:&quot;a a a&quot; &quot;b b b&quot; &quot;c c c&quot; &quot;d d d&quot;;--ab-beat:7px"><div class="ab-canvas" role="img" aria-label="Cutting Room: timeline composition with mono technical typography at utilitarian scale, full bleed imagery, irregular accent spacing, cinematic motion, and prioritise primary task on phones."><div class="ab-slot" style="grid-area:a"><div class="ab-region" data-region="period-header"><span class="ab-specimen" style="font-family:&quot;SFMono-Regular&quot;, Consolas, &quot;Liberation Mono&quot;, monospace;font-size:0.43760000000000004rem;line-height:1.18;letter-spacing:-0.005em;font-weight:600">Cutting Room</span><span class="ab-chips" aria-hidden="true"><i></i><i></i><i></i></span></div></div><div class="ab-slot" style="grid-area:b"><div class="ab-region" data-region="track-lane"><span class="ab-track" aria-hidden="true"><i style="inline-size:42%;margin-inline-start:8%"></i><i style="inline-size:28%;margin-inline-start:6%"></i></span></div></div><div class="ab-slot" style="grid-area:c"><div class="ab-region" data-region="track-lane"><span class="ab-track" aria-hidden="true"><i style="inline-size:42%;margin-inline-start:8%"></i><i style="inline-size:28%;margin-inline-start:6%"></i></span></div></div><div class="ab-slot" style="grid-area:d"><div class="ab-region" data-region="event-detail"><span class="ab-rhythm" aria-hidden="true"><i style="margin-block-end:13.299999999999999px;inline-size:100%"></i><i style="margin-block-end:3.5px;inline-size:79%"></i><i style="margin-block-end:13.299999999999999px;inline-size:58%"></i></span></div></div><div class="ab-phone" data-transform="prioritise-primary-task" aria-hidden="true"><span class="ab-phone-bar"></span><span class="ab-phone-stack"><i></i><i></i></span><span class="ab-phone-dock"></span></div></div><figcaption class="ab-caption"><span class="ab-palette" aria-hidden="true"><i style="background:#f6f4f5"></i><i style="background:#fdfcfc"></i><i style="background:#7e2555"></i><i style="background:#d87a31"></i><i style="background:#2c1c24"></i></span><span class="ab-caption-meta">mono technical · utilitarian scale · cinematic motion</span></figcaption></figure>
+        <figcaption>
+          <strong>Cutting Room</strong>
+          <span class="prim">timeline</span>
+          <span class="meta">mono-technical · utilitarian · full-bleed · cinematic · prioritise-primary-task</span>
+        </figcaption>
+      </figure>
+<figure class="cell">
+        <figure class="art-board-v2" data-primitive="identity-work-canvas" data-depth="immersive-void" data-motion="physical" data-imagery="framed-plate" style="--ab-bg:#f6f4f4;--ab-surface:#fdfcfc;--ab-primary:#7e2526;--ab-accent:#d8d031;--ab-text:#2c1c1c;--ab-grid:&quot;a b b&quot; &quot;a b b&quot; &quot;c b b&quot;;--ab-beat:3px"><div class="ab-canvas" role="img" aria-label="Credits Panel: identity work canvas composition with display expressive typography at monumental scale, framed plate imagery, tight grid spacing, physical motion, and carousel horizontal on phones."><div class="ab-slot" style="grid-area:a"><div class="ab-region" data-region="identity-block"><span class="ab-specimen" style="font-family:&quot;Didot&quot;, &quot;Bodoni MT&quot;, Georgia, serif;font-size:1.221rem;line-height:1.02;letter-spacing:-0.03em;font-weight:600">Credits Panel</span><span class="ab-rhythm" aria-hidden="true"><i style="margin-block-end:3px;inline-size:100%"></i><i style="margin-block-end:3px;inline-size:87%"></i><i style="margin-block-end:3px;inline-size:74%"></i></span></div></div><div class="ab-slot" style="grid-area:b"><div class="ab-region" data-region="work-canvas"><span class="ab-tiles" data-wide="true" aria-hidden="true"><span class="ab-plate" data-treatment="framed-plate" aria-hidden="true"></span><span class="ab-plate" data-treatment="framed-plate" aria-hidden="true"></span><span class="ab-plate" data-treatment="framed-plate" aria-hidden="true"></span><span class="ab-plate" data-treatment="framed-plate" aria-hidden="true"></span></span></div></div><div class="ab-slot" style="grid-area:c"><div class="ab-region" data-region="contact-anchor"><span class="ab-action" aria-hidden="true"></span></div></div><div class="ab-phone" data-transform="carousel-horizontal" aria-hidden="true"><span class="ab-phone-bar"></span><span class="ab-phone-carousel"><i></i><i></i><i></i></span></div></div><figcaption class="ab-caption"><span class="ab-palette" aria-hidden="true"><i style="background:#f6f4f4"></i><i style="background:#fdfcfc"></i><i style="background:#7e2526"></i><i style="background:#d8d031"></i><i style="background:#2c1c1c"></i></span><span class="ab-caption-meta">display expressive · monumental scale · physical motion</span></figcaption></figure>
+        <figcaption>
+          <strong>Credits Panel</strong>
+          <span class="prim">identity-work-canvas</span>
+          <span class="meta">display-expressive · monumental · framed-plate · physical · carousel-horizontal</span>
+        </figcaption>
+      </figure></div>
+  </section>
+<section>
+    <h2>Plumbing business website
+      <em>97% distinct · publishable</em>
+    </h2>
+    <div class="row"><figure class="cell">
+        <figure class="art-board-v2" data-primitive="mobile-stacked" data-depth="paper-flat" data-motion="static" data-imagery="framed-plate" style="--ab-bg:#f5f4f6;--ab-surface:#fcfcfd;--ab-primary:#50257e;--ab-accent:#d8318d;--ab-text:#231c2c;--ab-grid:&quot;a&quot; &quot;b&quot; &quot;c&quot; &quot;d&quot;;--ab-beat:11px"><div class="ab-canvas" role="img" aria-label="Call Now: mobile stacked composition with serif authority typography at dramatic scale, framed plate imagery, wide breath spacing, static motion, and reflow columns on phones."><div class="ab-slot" style="grid-area:a"><div class="ab-region" data-region="thumb-header"><span class="ab-specimen" style="font-family:Georgia, &quot;Iowan Old Style&quot;, &quot;Times New Roman&quot;, serif;font-size:0.72315rem;line-height:1.02;letter-spacing:-0.03em;font-weight:600">Call Now</span><span class="ab-nav" data-kind="bar" aria-hidden="true"><b style="font-family:Georgia, &quot;Iowan Old Style&quot;, &quot;Times New Roman&quot;, serif"></b><span class="ab-nav-links"><i></i><i></i><i></i><i></i></span></span></div></div><div class="ab-slot" style="grid-area:b"><div class="ab-region" data-region="stacked-card"><span class="ab-plate" data-treatment="framed-plate" aria-hidden="true"></span><span class="ab-rhythm" aria-hidden="true"><i style="margin-block-end:11px;inline-size:100%"></i><i style="margin-block-end:11px;inline-size:87%"></i></span></div></div><div class="ab-slot" style="grid-area:c"><div class="ab-region" data-region="stacked-card"><span class="ab-plate" data-treatment="framed-plate" aria-hidden="true"></span><span class="ab-rhythm" aria-hidden="true"><i style="margin-block-end:11px;inline-size:100%"></i><i style="margin-block-end:11px;inline-size:87%"></i></span></div></div><div class="ab-slot" style="grid-area:d"><div class="ab-region" data-region="sticky-action"><span class="ab-action" aria-hidden="true"></span></div></div><div class="ab-phone" data-transform="reflow-columns" aria-hidden="true"><span class="ab-phone-bar"></span><span class="ab-phone-stack"><i></i><i></i><i></i></span></div></div><figcaption class="ab-caption"><span class="ab-palette" aria-hidden="true"><i style="background:#f5f4f6"></i><i style="background:#fcfcfd"></i><i style="background:#50257e"></i><i style="background:#d8318d"></i><i style="background:#231c2c"></i></span><span class="ab-caption-meta">serif authority · dramatic scale · static motion</span></figcaption></figure>
+        <figcaption>
+          <strong>Call Now</strong>
+          <span class="prim">mobile-stacked</span>
+          <span class="meta">serif-authority · dramatic · framed-plate · static · reflow-columns</span>
+        </figcaption>
+      </figure>
+<figure class="cell">
+        <figure class="art-board-v2" data-primitive="map-led" data-depth="soft-elevation" data-motion="responsive" data-imagery="documentary" style="--ab-bg:#f4f6f4;--ab-surface:#fcfdfc;--ab-primary:#3e7e25;--ab-accent:#31d8a3;--ab-text:#202c1c;--ab-grid:&quot;a a b&quot; &quot;a a b&quot; &quot;a a c&quot;;--ab-beat:6px"><div class="ab-canvas" role="img" aria-label="Coverage Map: map led composition with humanist warm typography at measured scale, documentary imagery, steady beat spacing, responsive motion, and swap navigation on phones."><div class="ab-slot" style="grid-area:a"><div class="ab-region" data-region="map-stage"><span class="ab-map" aria-hidden="true"><i></i><i></i><i></i></span></div></div><div class="ab-slot" style="grid-area:b"><div class="ab-region" data-region="result-rail"><span class="ab-rows" aria-hidden="true"><i></i><i></i><i></i><i></i></span></div></div><div class="ab-slot" style="grid-area:c"><div class="ab-region" data-region="locate-action"><span class="ab-action" data-compact="true" aria-hidden="true"></span></div></div><div class="ab-phone" data-transform="swap-navigation" aria-hidden="true"><span class="ab-phone-bar"></span><span class="ab-phone-stack"><i></i><i></i><i></i></span><span class="ab-phone-dock"></span></div></div><figcaption class="ab-caption"><span class="ab-palette" aria-hidden="true"><i style="background:#f4f6f4"></i><i style="background:#fcfdfc"></i><i style="background:#3e7e25"></i><i style="background:#31d8a3"></i><i style="background:#202c1c"></i></span><span class="ab-caption-meta">humanist warm · measured scale · responsive motion</span></figcaption></figure>
+        <figcaption>
+          <strong>Coverage Map</strong>
+          <span class="prim">map-led</span>
+          <span class="meta">humanist-warm · measured · documentary · responsive · swap-navigation</span>
+        </figcaption>
+      </figure>
+<figure class="cell">
+        <figure class="art-board-v2" data-primitive="guided-flow" data-depth="immersive-void" data-motion="physical" data-imagery="duotone" style="--ab-bg:#f4f5f6;--ab-surface:#fcfdfd;--ab-primary:#25687e;--ab-accent:#5531d8;--ab-text:#1c282c;--ab-grid:&quot;a a a&quot; &quot;b b b&quot; &quot;b b b&quot; &quot;c c d&quot;;--ab-beat:3px"><div class="ab-canvas" role="img" aria-label="Quote Path: guided flow composition with display expressive typography at monumental scale, duotone imagery, tight grid spacing, physical motion, and carousel horizontal on phones."><div class="ab-slot" style="grid-area:a"><div class="ab-region" data-region="progress-spine"><span class="ab-steps" aria-hidden="true"><i data-on="true"></i><i></i><i></i></span></div></div><div class="ab-slot" style="grid-area:b"><div class="ab-region" data-region="single-question"><span class="ab-specimen" style="font-family:&quot;Didot&quot;, &quot;Bodoni MT&quot;, Georgia, serif;font-size:1.11rem;line-height:1.02;letter-spacing:-0.03em;font-weight:500">Quote Path character</span><span class="ab-rhythm" aria-hidden="true"><i style="margin-block-end:3px;inline-size:100%"></i><i style="margin-block-end:3px;inline-size:87%"></i></span></div></div><div class="ab-slot" style="grid-area:c"><div class="ab-region" data-region="assurance-note"><span class="ab-rhythm" aria-hidden="true"><i style="margin-block-end:3px;inline-size:100%"></i></span></div></div><div class="ab-slot" style="grid-area:d"><div class="ab-region" data-region="advance-action"><span class="ab-action" aria-hidden="true"></span></div></div><div class="ab-phone" data-transform="carousel-horizontal" aria-hidden="true"><span class="ab-phone-bar"></span><span class="ab-phone-carousel"><i></i><i></i><i></i></span></div></div><figcaption class="ab-caption"><span class="ab-palette" aria-hidden="true"><i style="background:#f4f5f6"></i><i style="background:#fcfdfd"></i><i style="background:#25687e"></i><i style="background:#5531d8"></i><i style="background:#1c282c"></i></span><span class="ab-caption-meta">display expressive · monumental scale · physical motion</span></figcaption></figure>
+        <figcaption>
+          <strong>Quote Path</strong>
+          <span class="prim">guided-flow</span>
+          <span class="meta">display-expressive · monumental · duotone · physical · carousel-horizontal</span>
+        </figcaption>
+      </figure></div>
+  </section>
+<section>
+    <h2>Luxury service website
+      <em>97% distinct · publishable</em>
+    </h2>
+    <div class="row"><figure class="cell">
+        <figure class="art-board-v2" data-primitive="immersive-hero" data-depth="paper-flat" data-motion="static" data-imagery="full-bleed" style="--ab-bg:#f6f4f6;--ab-surface:#fdfcfd;--ab-primary:#73257e;--ab-accent:#d8314d;--ab-text:#291c2c;--ab-grid:&quot;a a&quot; &quot;a a&quot; &quot;b c&quot;;--ab-beat:7px"><div class="ab-canvas" role="img" aria-label="Private View: immersive hero composition with serif authority typography at dramatic scale, full bleed imagery, irregular accent spacing, static motion, and reflow columns on phones."><div class="ab-slot" style="grid-area:a"><div class="ab-region" data-region="full-bleed-stage"><span class="ab-plate" data-treatment="full-bleed" data-tall="true" aria-hidden="true"></span><span class="ab-overlay"><span class="ab-specimen" style="font-family:Georgia, &quot;Iowan Old Style&quot;, &quot;Times New Roman&quot;, serif;font-size:1.607rem;line-height:1.02;letter-spacing:-0.03em;font-weight:600">Private View</span></span></div></div><div class="ab-slot" style="grid-area:b"><div class="ab-region" data-region="overlay-caption"><span class="ab-specimen" style="font-family:Georgia, &quot;Iowan Old Style&quot;, &quot;Times New Roman&quot;, serif;font-size:0.67494rem;line-height:1.02;letter-spacing:-0.03em;font-weight:400">Private View character</span><span class="ab-rhythm" aria-hidden="true"><i style="margin-block-end:13.299999999999999px;inline-size:100%"></i><i style="margin-block-end:3.5px;inline-size:79%"></i></span></div></div><div class="ab-slot" style="grid-area:c"><div class="ab-region" data-region="quiet-index"><span class="ab-nav" data-kind="bar" aria-hidden="true"><b style="font-family:Georgia, &quot;Iowan Old Style&quot;, &quot;Times New Roman&quot;, serif">Index</b><span class="ab-nav-links"><i></i><i></i><i></i><i></i></span></span></div></div><div class="ab-phone" data-transform="reflow-columns" aria-hidden="true"><span class="ab-phone-bar"></span><span class="ab-phone-stack"><i></i><i></i><i></i></span></div></div><figcaption class="ab-caption"><span class="ab-palette" aria-hidden="true"><i style="background:#f6f4f6"></i><i style="background:#fdfcfd"></i><i style="background:#73257e"></i><i style="background:#d8314d"></i><i style="background:#291c2c"></i></span><span class="ab-caption-meta">serif authority · dramatic scale · static motion</span></figcaption></figure>
+        <figcaption>
+          <strong>Private View</strong>
+          <span class="prim">immersive-hero</span>
+          <span class="meta">serif-authority · dramatic · full-bleed · static · reflow-columns</span>
+        </figcaption>
+      </figure>
+<figure class="cell">
+        <figure class="art-board-v2" data-primitive="editorial-spread" data-depth="soft-elevation" data-motion="responsive" data-imagery="diagrammatic" style="--ab-bg:#f5f4f6;--ab-surface:#fdfcfd;--ab-primary:#68257e;--ab-accent:#d83161;--ab-text:#281c2c;--ab-grid:&quot;a a a&quot; &quot;b b c&quot; &quot;d d d&quot;;--ab-beat:3px"><div class="ab-canvas" role="img" aria-label="House Journal: editorial spread composition with humanist warm typography at measured scale, diagrammatic imagery, tight grid spacing, responsive motion, and swap navigation on phones."><div class="ab-slot" style="grid-area:a"><div class="ab-region" data-region="masthead"><span class="ab-specimen" style="font-family:&quot;Segoe UI&quot;, Tahoma, Verdana, sans-serif;font-size:1.229rem;line-height:1.18;letter-spacing:-0.005em;font-weight:600">House Journal</span><span class="ab-nav" data-kind="bar" aria-hidden="true"><b style="font-family:&quot;Segoe UI&quot;, Tahoma, Verdana, sans-serif"></b><span class="ab-nav-links"><i></i><i></i><i></i><i></i></span></span></div></div><div class="ab-slot" style="grid-area:b"><div class="ab-region" data-region="lead-column"><span class="ab-specimen" style="font-family:&quot;Segoe UI&quot;, Tahoma, Verdana, sans-serif;font-size:0.6145rem;line-height:1.18;letter-spacing:-0.005em;font-weight:500">House Journal character</span><span class="ab-rhythm" aria-hidden="true"><i style="margin-block-end:3px;inline-size:100%"></i><i style="margin-block-end:3px;inline-size:87%"></i><i style="margin-block-end:3px;inline-size:74%"></i><i style="margin-block-end:3px;inline-size:61%"></i><i style="margin-block-end:3px;inline-size:48%"></i></span></div></div><div class="ab-slot" style="grid-area:c"><div class="ab-region" data-region="sidebar-notes"><span class="ab-rhythm" aria-hidden="true"><i style="margin-block-end:3px;inline-size:100%"></i><i style="margin-block-end:3px;inline-size:87%"></i><i style="margin-block-end:3px;inline-size:74%"></i><i style="margin-block-end:3px;inline-size:61%"></i></span></div></div><div class="ab-slot" style="grid-area:d"><div class="ab-region" data-region="plate-grid"><span class="ab-tiles" aria-hidden="true"><span class="ab-plate ab-plate-diagram" aria-hidden="true"><i></i><i></i><i></i></span><span class="ab-plate ab-plate-diagram" aria-hidden="true"><i></i><i></i><i></i></span><span class="ab-plate ab-plate-diagram" aria-hidden="true"><i></i><i></i><i></i></span></span></div></div><div class="ab-phone" data-transform="swap-navigation" aria-hidden="true"><span class="ab-phone-bar"></span><span class="ab-phone-stack"><i></i><i></i><i></i></span><span class="ab-phone-dock"></span></div></div><figcaption class="ab-caption"><span class="ab-palette" aria-hidden="true"><i style="background:#f5f4f6"></i><i style="background:#fdfcfd"></i><i style="background:#68257e"></i><i style="background:#d83161"></i><i style="background:#281c2c"></i></span><span class="ab-caption-meta">humanist warm · measured scale · responsive motion</span></figcaption></figure>
+        <figcaption>
+          <strong>House Journal</strong>
+          <span class="prim">editorial-spread</span>
+          <span class="meta">humanist-warm · measured · diagrammatic · responsive · swap-navigation</span>
+        </figcaption>
+      </figure>
+<figure class="cell">
+        <figure class="art-board-v2" data-primitive="guided-flow" data-depth="immersive-void" data-motion="physical" data-imagery="contact-sheet" style="--ab-bg:#f4f5f6;--ab-surface:#fcfcfd;--ab-primary:#25567e;--ab-accent:#7731d8;--ab-text:#1c242c;--ab-grid:&quot;a a a&quot; &quot;b b b&quot; &quot;b b b&quot; &quot;c c d&quot;;--ab-beat:6px"><div class="ab-canvas" role="img" aria-label="Concierge: guided flow composition with display expressive typography at monumental scale, contact sheet imagery, steady beat spacing, physical motion, and carousel horizontal on phones."><div class="ab-slot" style="grid-area:a"><div class="ab-region" data-region="progress-spine"><span class="ab-steps" aria-hidden="true"><i data-on="true"></i><i></i><i></i></span></div></div><div class="ab-slot" style="grid-area:b"><div class="ab-region" data-region="single-question"><span class="ab-specimen" style="font-family:&quot;Didot&quot;, &quot;Bodoni MT&quot;, Georgia, serif;font-size:1.11rem;line-height:1.02;letter-spacing:-0.03em;font-weight:500">Concierge character</span><span class="ab-rhythm" aria-hidden="true"><i style="margin-block-end:6px;inline-size:100%"></i><i style="margin-block-end:6px;inline-size:87%"></i></span></div></div><div class="ab-slot" style="grid-area:c"><div class="ab-region" data-region="assurance-note"><span class="ab-rhythm" aria-hidden="true"><i style="margin-block-end:6px;inline-size:100%"></i></span></div></div><div class="ab-slot" style="grid-area:d"><div class="ab-region" data-region="advance-action"><span class="ab-action" aria-hidden="true"></span></div></div><div class="ab-phone" data-transform="carousel-horizontal" aria-hidden="true"><span class="ab-phone-bar"></span><span class="ab-phone-carousel"><i></i><i></i><i></i></span></div></div><figcaption class="ab-caption"><span class="ab-palette" aria-hidden="true"><i style="background:#f4f5f6"></i><i style="background:#fcfcfd"></i><i style="background:#25567e"></i><i style="background:#7731d8"></i><i style="background:#1c242c"></i></span><span class="ab-caption-meta">display expressive · monumental scale · physical motion</span></figcaption></figure>
+        <figcaption>
+          <strong>Concierge</strong>
+          <span class="prim">guided-flow</span>
+          <span class="meta">display-expressive · monumental · contact-sheet · physical · carousel-horizontal</span>
+        </figcaption>
+      </figure></div>
+  </section>
+<section>
+    <h2>Multi-staff appointment booking application
+      <em>100% distinct · publishable</em>
+    </h2>
+    <div class="row"><figure class="cell">
+        <figure class="art-board-v2" data-primitive="modular-gallery" data-depth="paper-flat" data-motion="static" data-imagery="full-bleed" style="--ab-bg:#f4f6f6;--ab-surface:#fcfdfd;--ab-primary:#25737e;--ab-accent:#4231d8;--ab-text:#1c292c;--ab-grid:&quot;a a a&quot; &quot;b b b&quot; &quot;c c c&quot;;--ab-beat:7px"><div class="ab-canvas" role="img" aria-label="Day Grid: modular gallery composition with serif authority typography at dramatic scale, full bleed imagery, irregular accent spacing, static motion, and reflow columns on phones."><div class="ab-slot" style="grid-area:a"><div class="ab-region" data-region="compact-identity"><span class="ab-specimen" style="font-family:Georgia, &quot;Iowan Old Style&quot;, &quot;Times New Roman&quot;, serif;font-size:0.88385rem;line-height:1.02;letter-spacing:-0.03em;font-weight:600">Day Grid</span><span class="ab-nav" data-kind="bar" aria-hidden="true"><b style="font-family:Georgia, &quot;Iowan Old Style&quot;, &quot;Times New Roman&quot;, serif"></b><span class="ab-nav-links"><i></i><i></i><i></i><i></i></span></span></div></div><div class="ab-slot" style="grid-area:b"><div class="ab-region" data-region="tile-field"><span class="ab-tiles" data-wide="true" aria-hidden="true"><span class="ab-plate" data-treatment="full-bleed" aria-hidden="true"></span><span class="ab-plate" data-treatment="full-bleed" aria-hidden="true"></span><span class="ab-plate" data-treatment="full-bleed" aria-hidden="true"></span><span class="ab-plate" data-treatment="full-bleed" aria-hidden="true"></span><span class="ab-plate" data-treatment="full-bleed" aria-hidden="true"></span><span class="ab-plate" data-treatment="full-bleed" aria-hidden="true"></span></span></div></div><div class="ab-slot" style="grid-area:c"><div class="ab-region" data-region="filter-strip"><span class="ab-chips" aria-hidden="true"><i></i><i></i><i></i><i></i></span></div></div><div class="ab-phone" data-transform="reflow-columns" aria-hidden="true"><span class="ab-phone-bar"></span><span class="ab-phone-stack"><i></i><i></i><i></i></span></div></div><figcaption class="ab-caption"><span class="ab-palette" aria-hidden="true"><i style="background:#f4f6f6"></i><i style="background:#fcfdfd"></i><i style="background:#25737e"></i><i style="background:#4231d8"></i><i style="background:#1c292c"></i></span><span class="ab-caption-meta">serif authority · dramatic scale · static motion</span></figcaption></figure>
+        <figcaption>
+          <strong>Day Grid</strong>
+          <span class="prim">modular-gallery</span>
+          <span class="meta">serif-authority · dramatic · full-bleed · static · reflow-columns</span>
+        </figcaption>
+      </figure>
+<figure class="cell">
+        <figure class="art-board-v2" data-primitive="task-workspace" data-depth="hairline-ruled" data-motion="restrained" data-imagery="framed-plate" style="--ab-bg:#f6f4f6;--ab-surface:#fdfcfd;--ab-primary:#7a257e;--ab-accent:#d8313f;--ab-text:#2b1c2c;--ab-grid:&quot;a b b&quot; &quot;a c d&quot; &quot;a c d&quot;;--ab-beat:6px"><div class="ab-canvas" role="img" aria-label="Queue Desk: task workspace composition with grotesque neutral typography at editorial scale, framed plate imagery, steady beat spacing, restrained motion, and collapse to stack on phones."><div class="ab-slot" style="grid-area:a"><div class="ab-region" data-region="utility-rail"><span class="ab-nav" data-kind="rail" aria-hidden="true"><b style="font-family:&quot;Helvetica Neue&quot;, Inter, Arial, sans-serif">Queue Desk</b><i></i><i></i><i></i><i></i></span></div></div><div class="ab-slot" style="grid-area:b"><div class="ab-region" data-region="task-header"><span class="ab-specimen" style="font-family:&quot;Helvetica Neue&quot;, Inter, Arial, sans-serif;font-size:0.58422rem;line-height:1.18;letter-spacing:-0.005em;font-weight:600">Queue Desk</span><span class="ab-chips" aria-hidden="true"><i></i><i></i></span></div></div><div class="ab-slot" style="grid-area:c"><div class="ab-region" data-region="work-surface"><span class="ab-rows" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span></div></div><div class="ab-slot" style="grid-area:d"><div class="ab-region" data-region="detail-panel"><span class="ab-rhythm" aria-hidden="true"><i style="margin-block-end:6px;inline-size:100%"></i><i style="margin-block-end:6px;inline-size:87%"></i><i style="margin-block-end:6px;inline-size:74%"></i><i style="margin-block-end:6px;inline-size:61%"></i></span></div></div><div class="ab-phone" data-transform="collapse-to-stack" aria-hidden="true"><span class="ab-phone-bar"></span><span class="ab-phone-stack"><i></i><i></i><i></i></span></div></div><figcaption class="ab-caption"><span class="ab-palette" aria-hidden="true"><i style="background:#f6f4f6"></i><i style="background:#fdfcfd"></i><i style="background:#7a257e"></i><i style="background:#d8313f"></i><i style="background:#2b1c2c"></i></span><span class="ab-caption-meta">grotesque neutral · editorial scale · restrained motion</span></figcaption></figure>
+        <figcaption>
+          <strong>Queue Desk</strong>
+          <span class="prim">task-workspace</span>
+          <span class="meta">grotesque-neutral · editorial · framed-plate · restrained · collapse-to-stack</span>
+        </figcaption>
+      </figure>
+<figure class="cell">
+        <figure class="art-board-v2" data-primitive="guided-flow" data-depth="immersive-void" data-motion="physical" data-imagery="duotone" style="--ab-bg:#f4f6f5;--ab-surface:#fcfdfc;--ab-primary:#257e47;--ab-accent:#319ed8;--ab-text:#1c2c22;--ab-grid:&quot;a a a&quot; &quot;b b b&quot; &quot;b b b&quot; &quot;c c d&quot;;--ab-beat:3px"><div class="ab-canvas" role="img" aria-label="Guest Path: guided flow composition with display expressive typography at monumental scale, duotone imagery, tight grid spacing, physical motion, and carousel horizontal on phones."><div class="ab-slot" style="grid-area:a"><div class="ab-region" data-region="progress-spine"><span class="ab-steps" aria-hidden="true"><i data-on="true"></i><i></i><i></i></span></div></div><div class="ab-slot" style="grid-area:b"><div class="ab-region" data-region="single-question"><span class="ab-specimen" style="font-family:&quot;Didot&quot;, &quot;Bodoni MT&quot;, Georgia, serif;font-size:1.11rem;line-height:1.02;letter-spacing:-0.03em;font-weight:500">Guest Path character</span><span class="ab-rhythm" aria-hidden="true"><i style="margin-block-end:3px;inline-size:100%"></i><i style="margin-block-end:3px;inline-size:87%"></i></span></div></div><div class="ab-slot" style="grid-area:c"><div class="ab-region" data-region="assurance-note"><span class="ab-rhythm" aria-hidden="true"><i style="margin-block-end:3px;inline-size:100%"></i></span></div></div><div class="ab-slot" style="grid-area:d"><div class="ab-region" data-region="advance-action"><span class="ab-action" aria-hidden="true"></span></div></div><div class="ab-phone" data-transform="carousel-horizontal" aria-hidden="true"><span class="ab-phone-bar"></span><span class="ab-phone-carousel"><i></i><i></i><i></i></span></div></div><figcaption class="ab-caption"><span class="ab-palette" aria-hidden="true"><i style="background:#f4f6f5"></i><i style="background:#fcfdfc"></i><i style="background:#257e47"></i><i style="background:#319ed8"></i><i style="background:#1c2c22"></i></span><span class="ab-caption-meta">display expressive · monumental scale · physical motion</span></figcaption></figure>
+        <figcaption>
+          <strong>Guest Path</strong>
+          <span class="prim">guided-flow</span>
+          <span class="meta">display-expressive · monumental · duotone · physical · carousel-horizontal</span>
+        </figcaption>
+      </figure></div>
+  </section>
+<section>
+    <h2>Insurance customer portal
+      <em>97% distinct · publishable</em>
+    </h2>
+    <div class="row"><figure class="cell">
+        <figure class="art-board-v2" data-primitive="profile-led" data-depth="layered-glass" data-motion="cinematic" data-imagery="documentary" style="--ab-bg:#f5f4f6;--ab-surface:#fcfcfd;--ab-primary:#4f257e;--ab-accent:#d83190;--ab-text:#231c2c;--ab-grid:&quot;a a&quot; &quot;b b&quot; &quot;c c&quot;;--ab-beat:6px"><div class="ab-canvas" role="img" aria-label="Policy Desk: profile led composition with mono technical typography at utilitarian scale, documentary imagery, steady beat spacing, cinematic motion, and prioritise primary task on phones."><div class="ab-slot" style="grid-area:a"><div class="ab-region" data-region="profile-header"><span class="ab-plate" data-treatment="documentary" aria-hidden="true"></span><span class="ab-specimen" style="font-family:&quot;SFMono-Regular&quot;, Consolas, &quot;Liberation Mono&quot;, monospace;font-size:0.547rem;line-height:1.18;letter-spacing:-0.005em;font-weight:600">Policy Desk</span></div></div><div class="ab-slot" style="grid-area:b"><div class="ab-region" data-region="credential-strip"><span class="ab-chips" aria-hidden="true"><i></i><i></i><i></i></span></div></div><div class="ab-slot" style="grid-area:c"><div class="ab-region" data-region="activity-column"><span class="ab-rows" aria-hidden="true"><i></i><i></i><i></i><i></i></span></div></div><div class="ab-phone" data-transform="prioritise-primary-task" aria-hidden="true"><span class="ab-phone-bar"></span><span class="ab-phone-stack"><i></i><i></i></span><span class="ab-phone-dock"></span></div></div><figcaption class="ab-caption"><span class="ab-palette" aria-hidden="true"><i style="background:#f5f4f6"></i><i style="background:#fcfcfd"></i><i style="background:#4f257e"></i><i style="background:#d83190"></i><i style="background:#231c2c"></i></span><span class="ab-caption-meta">mono technical · utilitarian scale · cinematic motion</span></figcaption></figure>
+        <figcaption>
+          <strong>Policy Desk</strong>
+          <span class="prim">profile-led</span>
+          <span class="meta">mono-technical · utilitarian · documentary · cinematic · prioritise-primary-task</span>
+        </figcaption>
+      </figure>
+<figure class="cell">
+        <figure class="art-board-v2" data-primitive="timeline" data-depth="immersive-void" data-motion="physical" data-imagery="full-bleed" style="--ab-bg:#f6f6f4;--ab-surface:#fdfdfc;--ab-primary:#7d7e25;--ab-accent:#34d831;--ab-text:#2b2c1c;--ab-grid:&quot;a a a&quot; &quot;b b b&quot; &quot;c c c&quot; &quot;d d d&quot;;--ab-beat:11px"><div class="ab-canvas" role="img" aria-label="Claim Track: timeline composition with display expressive typography at monumental scale, full bleed imagery, wide breath spacing, physical motion, and carousel horizontal on phones."><div class="ab-slot" style="grid-area:a"><div class="ab-region" data-region="period-header"><span class="ab-specimen" style="font-family:&quot;Didot&quot;, &quot;Bodoni MT&quot;, Georgia, serif;font-size:0.7400000000000001rem;line-height:1.02;letter-spacing:-0.03em;font-weight:600">Claim Track</span><span class="ab-chips" aria-hidden="true"><i></i><i></i><i></i></span></div></div><div class="ab-slot" style="grid-area:b"><div class="ab-region" data-region="track-lane"><span class="ab-track" aria-hidden="true"><i style="inline-size:42%;margin-inline-start:8%"></i><i style="inline-size:28%;margin-inline-start:6%"></i></span></div></div><div class="ab-slot" style="grid-area:c"><div class="ab-region" data-region="track-lane"><span class="ab-track" aria-hidden="true"><i style="inline-size:42%;margin-inline-start:8%"></i><i style="inline-size:28%;margin-inline-start:6%"></i></span></div></div><div class="ab-slot" style="grid-area:d"><div class="ab-region" data-region="event-detail"><span class="ab-rhythm" aria-hidden="true"><i style="margin-block-end:11px;inline-size:100%"></i><i style="margin-block-end:11px;inline-size:87%"></i><i style="margin-block-end:11px;inline-size:74%"></i></span></div></div><div class="ab-phone" data-transform="carousel-horizontal" aria-hidden="true"><span class="ab-phone-bar"></span><span class="ab-phone-carousel"><i></i><i></i><i></i></span></div></div><figcaption class="ab-caption"><span class="ab-palette" aria-hidden="true"><i style="background:#f6f6f4"></i><i style="background:#fdfdfc"></i><i style="background:#7d7e25"></i><i style="background:#34d831"></i><i style="background:#2b2c1c"></i></span><span class="ab-caption-meta">display expressive · monumental scale · physical motion</span></figcaption></figure>
+        <figcaption>
+          <strong>Claim Track</strong>
+          <span class="prim">timeline</span>
+          <span class="meta">display-expressive · monumental · full-bleed · physical · carousel-horizontal</span>
+        </figcaption>
+      </figure>
+<figure class="cell">
+        <figure class="art-board-v2" data-primitive="table-operations" data-depth="hairline-ruled" data-motion="restrained" data-imagery="contact-sheet" style="--ab-bg:#f4f6f5;--ab-surface:#fcfdfc;--ab-primary:#257e5c;--ab-accent:#3177d8;--ab-text:#1c2c26;--ab-grid:&quot;a b b&quot; &quot;a c c&quot; &quot;a d d&quot;;--ab-beat:3px"><div class="ab-canvas" role="img" aria-label="Document Table: table operations composition with grotesque neutral typography at editorial scale, contact sheet imagery, tight grid spacing, restrained motion, and collapse to stack on phones."><div class="ab-slot" style="grid-area:a"><div class="ab-region" data-region="utility-rail"><span class="ab-nav" data-kind="rail" aria-hidden="true"><b style="font-family:&quot;Helvetica Neue&quot;, Inter, Arial, sans-serif">Document Tab</b><i></i><i></i><i></i><i></i></span></div></div><div class="ab-slot" style="grid-area:b"><div class="ab-region" data-region="filter-bar"><span class="ab-chips" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span></div></div><div class="ab-slot" style="grid-area:c"><div class="ab-region" data-region="record-table"><span class="ab-table" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></span></div></div><div class="ab-slot" style="grid-area:d"><div class="ab-region" data-region="bulk-action-bar"><span class="ab-action" data-compact="true" aria-hidden="true"></span></div></div><div class="ab-phone" data-transform="collapse-to-stack" aria-hidden="true"><span class="ab-phone-bar"></span><span class="ab-phone-stack"><i></i><i></i><i></i></span></div></div><figcaption class="ab-caption"><span class="ab-palette" aria-hidden="true"><i style="background:#f4f6f5"></i><i style="background:#fcfdfc"></i><i style="background:#257e5c"></i><i style="background:#3177d8"></i><i style="background:#1c2c26"></i></span><span class="ab-caption-meta">grotesque neutral · editorial scale · restrained motion</span></figcaption></figure>
+        <figcaption>
+          <strong>Document Table</strong>
+          <span class="prim">table-operations</span>
+          <span class="meta">grotesque-neutral · editorial · contact-sheet · restrained · collapse-to-stack</span>
+        </figcaption>
+      </figure></div>
+  </section>
+<section>
+    <h2>Expense approval workspace
+      <em>100% distinct · publishable</em>
+    </h2>
+    <div class="row"><figure class="cell">
+        <figure class="art-board-v2" data-primitive="task-workspace" data-depth="paper-flat" data-motion="static" data-imagery="documentary" style="--ab-bg:#f4f4f6;--ab-surface:#fcfcfd;--ab-primary:#32257e;--ab-accent:#d831c4;--ab-text:#1e1c2c;--ab-grid:&quot;a b b&quot; &quot;a c d&quot; &quot;a c d&quot;;--ab-beat:6px"><div class="ab-canvas" role="img" aria-label="Approval Queue: task workspace composition with serif authority typography at dramatic scale, documentary imagery, steady beat spacing, static motion, and reflow columns on phones."><div class="ab-slot" style="grid-area:a"><div class="ab-region" data-region="utility-rail"><span class="ab-nav" data-kind="rail" aria-hidden="true"><b style="font-family:Georgia, &quot;Iowan Old Style&quot;, &quot;Times New Roman&quot;, serif">Approval Que</b><i></i><i></i><i></i><i></i></span></div></div><div class="ab-slot" style="grid-area:b"><div class="ab-region" data-region="task-header"><span class="ab-specimen" style="font-family:Georgia, &quot;Iowan Old Style&quot;, &quot;Times New Roman&quot;, serif;font-size:0.67494rem;line-height:1.02;letter-spacing:-0.03em;font-weight:600">Approval Queue</span><span class="ab-chips" aria-hidden="true"><i></i><i></i></span></div></div><div class="ab-slot" style="grid-area:c"><div class="ab-region" data-region="work-surface"><span class="ab-rows" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span></div></div><div class="ab-slot" style="grid-area:d"><div class="ab-region" data-region="detail-panel"><span class="ab-rhythm" aria-hidden="true"><i style="margin-block-end:6px;inline-size:100%"></i><i style="margin-block-end:6px;inline-size:87%"></i><i style="margin-block-end:6px;inline-size:74%"></i><i style="margin-block-end:6px;inline-size:61%"></i></span></div></div><div class="ab-phone" data-transform="reflow-columns" aria-hidden="true"><span class="ab-phone-bar"></span><span class="ab-phone-stack"><i></i><i></i><i></i></span></div></div><figcaption class="ab-caption"><span class="ab-palette" aria-hidden="true"><i style="background:#f4f4f6"></i><i style="background:#fcfcfd"></i><i style="background:#32257e"></i><i style="background:#d831c4"></i><i style="background:#1e1c2c"></i></span><span class="ab-caption-meta">serif authority · dramatic scale · static motion</span></figcaption></figure>
+        <figcaption>
+          <strong>Approval Queue</strong>
+          <span class="prim">task-workspace</span>
+          <span class="meta">serif-authority · dramatic · documentary · static · reflow-columns</span>
+        </figcaption>
+      </figure>
+<figure class="cell">
+        <figure class="art-board-v2" data-primitive="table-operations" data-depth="hairline-ruled" data-motion="restrained" data-imagery="framed-plate" style="--ab-bg:#f4f4f6;--ab-surface:#fcfcfd;--ab-primary:#252c7e;--ab-accent:#c431d8;--ab-text:#1c1d2c;--ab-grid:&quot;a b b&quot; &quot;a c c&quot; &quot;a d d&quot;;--ab-beat:3px"><div class="ab-canvas" role="img" aria-label="Ledger View: table operations composition with grotesque neutral typography at editorial scale, framed plate imagery, tight grid spacing, restrained motion, and collapse to stack on phones."><div class="ab-slot" style="grid-area:a"><div class="ab-region" data-region="utility-rail"><span class="ab-nav" data-kind="rail" aria-hidden="true"><b style="font-family:&quot;Helvetica Neue&quot;, Inter, Arial, sans-serif">Ledger View</b><i></i><i></i><i></i><i></i></span></div></div><div class="ab-slot" style="grid-area:b"><div class="ab-region" data-region="filter-bar"><span class="ab-chips" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span></div></div><div class="ab-slot" style="grid-area:c"><div class="ab-region" data-region="record-table"><span class="ab-table" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></span></div></div><div class="ab-slot" style="grid-area:d"><div class="ab-region" data-region="bulk-action-bar"><span class="ab-action" data-compact="true" aria-hidden="true"></span></div></div><div class="ab-phone" data-transform="collapse-to-stack" aria-hidden="true"><span class="ab-phone-bar"></span><span class="ab-phone-stack"><i></i><i></i><i></i></span></div></div><figcaption class="ab-caption"><span class="ab-palette" aria-hidden="true"><i style="background:#f4f4f6"></i><i style="background:#fcfcfd"></i><i style="background:#252c7e"></i><i style="background:#c431d8"></i><i style="background:#1c1d2c"></i></span><span class="ab-caption-meta">grotesque neutral · editorial scale · restrained motion</span></figcaption></figure>
+        <figcaption>
+          <strong>Ledger View</strong>
+          <span class="prim">table-operations</span>
+          <span class="meta">grotesque-neutral · editorial · framed-plate · restrained · collapse-to-stack</span>
+        </figcaption>
+      </figure>
+<figure class="cell">
+        <figure class="art-board-v2" data-primitive="conversation-surface" data-depth="soft-elevation" data-motion="responsive" data-imagery="contact-sheet" style="--ab-bg:#f6f4f6;--ab-surface:#fdfcfd;--ab-primary:#7a257e;--ab-accent:#d8313f;--ab-text:#2b1c2c;--ab-grid:&quot;a b b&quot; &quot;a b b&quot; &quot;a c c&quot;;--ab-beat:7px"><div class="ab-canvas" role="img" aria-label="Receipt Reader: conversation surface composition with humanist warm typography at measured scale, contact sheet imagery, irregular accent spacing, responsive motion, and swap navigation on phones."><div class="ab-slot" style="grid-area:a"><div class="ab-region" data-region="thread-rail"><span class="ab-nav" data-kind="rail" aria-hidden="true"><b style="font-family:&quot;Segoe UI&quot;, Tahoma, Verdana, sans-serif">Threads</b><i></i><i></i><i></i><i></i></span></div></div><div class="ab-slot" style="grid-area:b"><div class="ab-region" data-region="message-stream"><span class="ab-messages" aria-hidden="true"><i></i><i data-self="true"></i><i></i><i data-self="true"></i></span></div></div><div class="ab-slot" style="grid-area:c"><div class="ab-region" data-region="composer-dock"><span class="ab-command" aria-hidden="true"><i></i><b>↵</b></span></div></div><div class="ab-phone" data-transform="swap-navigation" aria-hidden="true"><span class="ab-phone-bar"></span><span class="ab-phone-stack"><i></i><i></i><i></i></span><span class="ab-phone-dock"></span></div></div><figcaption class="ab-caption"><span class="ab-palette" aria-hidden="true"><i style="background:#f6f4f6"></i><i style="background:#fdfcfd"></i><i style="background:#7a257e"></i><i style="background:#d8313f"></i><i style="background:#2b1c2c"></i></span><span class="ab-caption-meta">humanist warm · measured scale · responsive motion</span></figcaption></figure>
+        <figcaption>
+          <strong>Receipt Reader</strong>
+          <span class="prim">conversation-surface</span>
+          <span class="meta">humanist-warm · measured · contact-sheet · responsive · swap-navigation</span>
+        </figcaption>
+      </figure></div>
+  </section>
+<section>
+    <h2>School parent portal
+      <em>97% distinct · publishable</em>
+    </h2>
+    <div class="row"><figure class="cell">
+        <figure class="art-board-v2" data-primitive="profile-led" data-depth="soft-elevation" data-motion="responsive" data-imagery="duotone" style="--ab-bg:#f4f6f6;--ab-surface:#fcfdfd;--ab-primary:#257e77;--ab-accent:#3145d8;--ab-text:#1c2c2a;--ab-grid:&quot;a a&quot; &quot;b b&quot; &quot;c c&quot;;--ab-beat:6px"><div class="ab-canvas" role="img" aria-label="Family Card: profile led composition with humanist warm typography at measured scale, duotone imagery, steady beat spacing, responsive motion, and swap navigation on phones."><div class="ab-slot" style="grid-area:a"><div class="ab-region" data-region="profile-header"><span class="ab-plate" data-treatment="duotone" aria-hidden="true"></span><span class="ab-specimen" style="font-family:&quot;Segoe UI&quot;, Tahoma, Verdana, sans-serif;font-size:0.6145rem;line-height:1.18;letter-spacing:-0.005em;font-weight:600">Family Card</span></div></div><div class="ab-slot" style="grid-area:b"><div class="ab-region" data-region="credential-strip"><span class="ab-chips" aria-hidden="true"><i></i><i></i><i></i></span></div></div><div class="ab-slot" style="grid-area:c"><div class="ab-region" data-region="activity-column"><span class="ab-rows" aria-hidden="true"><i></i><i></i><i></i><i></i></span></div></div><div class="ab-phone" data-transform="swap-navigation" aria-hidden="true"><span class="ab-phone-bar"></span><span class="ab-phone-stack"><i></i><i></i><i></i></span><span class="ab-phone-dock"></span></div></div><figcaption class="ab-caption"><span class="ab-palette" aria-hidden="true"><i style="background:#f4f6f6"></i><i style="background:#fcfdfd"></i><i style="background:#257e77"></i><i style="background:#3145d8"></i><i style="background:#1c2c2a"></i></span><span class="ab-caption-meta">humanist warm · measured scale · responsive motion</span></figcaption></figure>
+        <figcaption>
+          <strong>Family Card</strong>
+          <span class="prim">profile-led</span>
+          <span class="meta">humanist-warm · measured · duotone · responsive · swap-navigation</span>
+        </figcaption>
+      </figure>
+<figure class="cell">
+        <figure class="art-board-v2" data-primitive="calendar" data-depth="hairline-ruled" data-motion="restrained" data-imagery="contact-sheet" style="--ab-bg:#f6f4f4;--ab-surface:#fdfcfc;--ab-primary:#7e4325;--ab-accent:#a6d831;--ab-text:#2c211c;--ab-grid:&quot;a a a&quot; &quot;b b b&quot; &quot;b b b&quot; &quot;c c c&quot;;--ab-beat:11px"><div class="ab-canvas" role="img" aria-label="Term Calendar: calendar composition with grotesque neutral typography at editorial scale, contact sheet imagery, wide breath spacing, restrained motion, and collapse to stack on phones."><div class="ab-slot" style="grid-area:a"><div class="ab-region" data-region="range-switcher"><span class="ab-chips" aria-hidden="true"><i></i><i></i><i></i></span></div></div><div class="ab-slot" style="grid-area:b"><div class="ab-region" data-region="grid-field"><span class="ab-calendar" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span></div></div><div class="ab-slot" style="grid-area:c"><div class="ab-region" data-region="slot-detail"><span class="ab-rhythm" aria-hidden="true"><i style="margin-block-end:11px;inline-size:100%"></i><i style="margin-block-end:11px;inline-size:87%"></i></span></div></div><div class="ab-phone" data-transform="collapse-to-stack" aria-hidden="true"><span class="ab-phone-bar"></span><span class="ab-phone-stack"><i></i><i></i><i></i></span></div></div><figcaption class="ab-caption"><span class="ab-palette" aria-hidden="true"><i style="background:#f6f4f4"></i><i style="background:#fdfcfc"></i><i style="background:#7e4325"></i><i style="background:#a6d831"></i><i style="background:#2c211c"></i></span><span class="ab-caption-meta">grotesque neutral · editorial scale · restrained motion</span></figcaption></figure>
+        <figcaption>
+          <strong>Term Calendar</strong>
+          <span class="prim">calendar</span>
+          <span class="meta">grotesque-neutral · editorial · contact-sheet · restrained · collapse-to-stack</span>
+        </figcaption>
+      </figure>
+<figure class="cell">
+        <figure class="art-board-v2" data-primitive="conversation-surface" data-depth="immersive-void" data-motion="physical" data-imagery="framed-plate" style="--ab-bg:#f5f6f4;--ab-surface:#fdfdfc;--ab-primary:#647e25;--ab-accent:#31d85e;--ab-text:#272c1c;--ab-grid:&quot;a b b&quot; &quot;a b b&quot; &quot;a c c&quot;;--ab-beat:7px"><div class="ab-canvas" role="img" aria-label="Message Thread: conversation surface composition with display expressive typography at monumental scale, framed plate imagery, irregular accent spacing, physical motion, and carousel horizontal on phones."><div class="ab-slot" style="grid-area:a"><div class="ab-region" data-region="thread-rail"><span class="ab-nav" data-kind="rail" aria-hidden="true"><b style="font-family:&quot;Didot&quot;, &quot;Bodoni MT&quot;, Georgia, serif">Threads</b><i></i><i></i><i></i><i></i></span></div></div><div class="ab-slot" style="grid-area:b"><div class="ab-region" data-region="message-stream"><span class="ab-messages" aria-hidden="true"><i></i><i data-self="true"></i><i></i><i data-self="true"></i></span></div></div><div class="ab-slot" style="grid-area:c"><div class="ab-region" data-region="composer-dock"><span class="ab-command" aria-hidden="true"><i></i><b>↵</b></span></div></div><div class="ab-phone" data-transform="carousel-horizontal" aria-hidden="true"><span class="ab-phone-bar"></span><span class="ab-phone-carousel"><i></i><i></i><i></i></span></div></div><figcaption class="ab-caption"><span class="ab-palette" aria-hidden="true"><i style="background:#f5f6f4"></i><i style="background:#fdfdfc"></i><i style="background:#647e25"></i><i style="background:#31d85e"></i><i style="background:#272c1c"></i></span><span class="ab-caption-meta">display expressive · monumental scale · physical motion</span></figcaption></figure>
+        <figcaption>
+          <strong>Message Thread</strong>
+          <span class="prim">conversation-surface</span>
+          <span class="meta">display-expressive · monumental · framed-plate · physical · carousel-horizontal</span>
+        </figcaption>
+      </figure></div>
+  </section>
+<section>
+    <h2>Restaurant reservation application
+      <em>100% distinct · publishable</em>
+    </h2>
+    <div class="row"><figure class="cell">
+        <figure class="art-board-v2" data-primitive="map-led" data-depth="immersive-void" data-motion="physical" data-imagery="framed-plate" style="--ab-bg:#f5f6f4;--ab-surface:#fcfdfc;--ab-primary:#527e25;--ab-accent:#31d87f;--ab-text:#242c1c;--ab-grid:&quot;a a b&quot; &quot;a a b&quot; &quot;a a c&quot;;--ab-beat:6px"><div class="ab-canvas" role="img" aria-label="Floor Plan: map led composition with display expressive typography at monumental scale, framed plate imagery, steady beat spacing, physical motion, and carousel horizontal on phones."><div class="ab-slot" style="grid-area:a"><div class="ab-region" data-region="map-stage"><span class="ab-map" aria-hidden="true"><i></i><i></i><i></i></span></div></div><div class="ab-slot" style="grid-area:b"><div class="ab-region" data-region="result-rail"><span class="ab-rows" aria-hidden="true"><i></i><i></i><i></i><i></i></span></div></div><div class="ab-slot" style="grid-area:c"><div class="ab-region" data-region="locate-action"><span class="ab-action" data-compact="true" aria-hidden="true"></span></div></div><div class="ab-phone" data-transform="carousel-horizontal" aria-hidden="true"><span class="ab-phone-bar"></span><span class="ab-phone-carousel"><i></i><i></i><i></i></span></div></div><figcaption class="ab-caption"><span class="ab-palette" aria-hidden="true"><i style="background:#f5f6f4"></i><i style="background:#fcfdfc"></i><i style="background:#527e25"></i><i style="background:#31d87f"></i><i style="background:#242c1c"></i></span><span class="ab-caption-meta">display expressive · monumental scale · physical motion</span></figcaption></figure>
+        <figcaption>
+          <strong>Floor Plan</strong>
+          <span class="prim">map-led</span>
+          <span class="meta">display-expressive · monumental · framed-plate · physical · carousel-horizontal</span>
+        </figcaption>
+      </figure>
+<figure class="cell">
+        <figure class="art-board-v2" data-primitive="timeline" data-depth="hairline-ruled" data-motion="restrained" data-imagery="full-bleed" style="--ab-bg:#f6f4f4;--ab-surface:#fdfcfc;--ab-primary:#7e2531;--ab-accent:#d8bc31;--ab-text:#2c1c1e;--ab-grid:&quot;a a a&quot; &quot;b b b&quot; &quot;c c c&quot; &quot;d d d&quot;;--ab-beat:11px"><div class="ab-canvas" role="img" aria-label="Service Timeline: timeline composition with grotesque neutral typography at editorial scale, full bleed imagery, wide breath spacing, restrained motion, and collapse to stack on phones."><div class="ab-slot" style="grid-area:a"><div class="ab-region" data-region="period-header"><span class="ab-specimen" style="font-family:&quot;Helvetica Neue&quot;, Inter, Arial, sans-serif;font-size:0.5564rem;line-height:1.18;letter-spacing:-0.005em;font-weight:600">Service Timeline</span><span class="ab-chips" aria-hidden="true"><i></i><i></i><i></i></span></div></div><div class="ab-slot" style="grid-area:b"><div class="ab-region" data-region="track-lane"><span class="ab-track" aria-hidden="true"><i style="inline-size:42%;margin-inline-start:8%"></i><i style="inline-size:28%;margin-inline-start:6%"></i></span></div></div><div class="ab-slot" style="grid-area:c"><div class="ab-region" data-region="track-lane"><span class="ab-track" aria-hidden="true"><i style="inline-size:42%;margin-inline-start:8%"></i><i style="inline-size:28%;margin-inline-start:6%"></i></span></div></div><div class="ab-slot" style="grid-area:d"><div class="ab-region" data-region="event-detail"><span class="ab-rhythm" aria-hidden="true"><i style="margin-block-end:11px;inline-size:100%"></i><i style="margin-block-end:11px;inline-size:87%"></i><i style="margin-block-end:11px;inline-size:74%"></i></span></div></div><div class="ab-phone" data-transform="collapse-to-stack" aria-hidden="true"><span class="ab-phone-bar"></span><span class="ab-phone-stack"><i></i><i></i><i></i></span></div></div><figcaption class="ab-caption"><span class="ab-palette" aria-hidden="true"><i style="background:#f6f4f4"></i><i style="background:#fdfcfc"></i><i style="background:#7e2531"></i><i style="background:#d8bc31"></i><i style="background:#2c1c1e"></i></span><span class="ab-caption-meta">grotesque neutral · editorial scale · restrained motion</span></figcaption></figure>
+        <figcaption>
+          <strong>Service Timeline</strong>
+          <span class="prim">timeline</span>
+          <span class="meta">grotesque-neutral · editorial · full-bleed · restrained · collapse-to-stack</span>
+        </figcaption>
+      </figure>
+<figure class="cell">
+        <figure class="art-board-v2" data-primitive="table-operations" data-depth="layered-glass" data-motion="cinematic" data-imagery="contact-sheet" style="--ab-bg:#f4f4f6;--ab-surface:#fcfcfd;--ab-primary:#25387e;--ab-accent:#ae31d8;--ab-text:#1c1f2c;--ab-grid:&quot;a b b&quot; &quot;a c c&quot; &quot;a d d&quot;;--ab-beat:3px"><div class="ab-canvas" role="img" aria-label="Book a Table: table operations composition with mono technical typography at utilitarian scale, contact sheet imagery, tight grid spacing, cinematic motion, and prioritise primary task on phones."><div class="ab-slot" style="grid-area:a"><div class="ab-region" data-region="utility-rail"><span class="ab-nav" data-kind="rail" aria-hidden="true"><b style="font-family:&quot;SFMono-Regular&quot;, Consolas, &quot;Liberation Mono&quot;, monospace">Book a Table</b><i></i><i></i><i></i><i></i></span></div></div><div class="ab-slot" style="grid-area:b"><div class="ab-region" data-region="filter-bar"><span class="ab-chips" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span></div></div><div class="ab-slot" style="grid-area:c"><div class="ab-region" data-region="record-table"><span class="ab-table" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></span></div></div><div class="ab-slot" style="grid-area:d"><div class="ab-region" data-region="bulk-action-bar"><span class="ab-action" data-compact="true" aria-hidden="true"></span></div></div><div class="ab-phone" data-transform="prioritise-primary-task" aria-hidden="true"><span class="ab-phone-bar"></span><span class="ab-phone-stack"><i></i><i></i></span><span class="ab-phone-dock"></span></div></div><figcaption class="ab-caption"><span class="ab-palette" aria-hidden="true"><i style="background:#f4f4f6"></i><i style="background:#fcfcfd"></i><i style="background:#25387e"></i><i style="background:#ae31d8"></i><i style="background:#1c1f2c"></i></span><span class="ab-caption-meta">mono technical · utilitarian scale · cinematic motion</span></figcaption></figure>
+        <figcaption>
+          <strong>Book a Table</strong>
+          <span class="prim">table-operations</span>
+          <span class="meta">mono-technical · utilitarian · contact-sheet · cinematic · prioritise-primary-task</span>
+        </figcaption>
+      </figure></div>
+  </section>
+<section>
+    <h2>AI document-review application
+      <em>97% distinct · publishable</em>
+    </h2>
+    <div class="row"><figure class="cell">
+        <figure class="art-board-v2" data-primitive="task-workspace" data-depth="immersive-void" data-motion="physical" data-imagery="duotone" style="--ab-bg:#f6f6f4;--ab-surface:#fdfdfc;--ab-primary:#7e7b25;--ab-accent:#3cd831;--ab-text:#2c2b1c;--ab-grid:&quot;a b b&quot; &quot;a c d&quot; &quot;a c d&quot;;--ab-beat:11px"><div class="ab-canvas" role="img" aria-label="Review Bench: task workspace composition with display expressive typography at monumental scale, duotone imagery, wide breath spacing, physical motion, and carousel horizontal on phones."><div class="ab-slot" style="grid-area:a"><div class="ab-region" data-region="utility-rail"><span class="ab-nav" data-kind="rail" aria-hidden="true"><b style="font-family:&quot;Didot&quot;, &quot;Bodoni MT&quot;, Georgia, serif">Review Bench</b><i></i><i></i><i></i><i></i></span></div></div><div class="ab-slot" style="grid-area:b"><div class="ab-region" data-region="task-header"><span class="ab-specimen" style="font-family:&quot;Didot&quot;, &quot;Bodoni MT&quot;, Georgia, serif;font-size:0.777rem;line-height:1.02;letter-spacing:-0.03em;font-weight:600">Review Bench</span><span class="ab-chips" aria-hidden="true"><i></i><i></i></span></div></div><div class="ab-slot" style="grid-area:c"><div class="ab-region" data-region="work-surface"><span class="ab-rows" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span></div></div><div class="ab-slot" style="grid-area:d"><div class="ab-region" data-region="detail-panel"><span class="ab-rhythm" aria-hidden="true"><i style="margin-block-end:11px;inline-size:100%"></i><i style="margin-block-end:11px;inline-size:87%"></i><i style="margin-block-end:11px;inline-size:74%"></i><i style="margin-block-end:11px;inline-size:61%"></i></span></div></div><div class="ab-phone" data-transform="carousel-horizontal" aria-hidden="true"><span class="ab-phone-bar"></span><span class="ab-phone-carousel"><i></i><i></i><i></i></span></div></div><figcaption class="ab-caption"><span class="ab-palette" aria-hidden="true"><i style="background:#f6f6f4"></i><i style="background:#fdfdfc"></i><i style="background:#7e7b25"></i><i style="background:#3cd831"></i><i style="background:#2c2b1c"></i></span><span class="ab-caption-meta">display expressive · monumental scale · physical motion</span></figcaption></figure>
+        <figcaption>
+          <strong>Review Bench</strong>
+          <span class="prim">task-workspace</span>
+          <span class="meta">display-expressive · monumental · duotone · physical · carousel-horizontal</span>
+        </figcaption>
+      </figure>
+<figure class="cell">
+        <figure class="art-board-v2" data-primitive="conversation-surface" data-depth="paper-flat" data-motion="static" data-imagery="none" style="--ab-bg:#f6f4f4;--ab-surface:#fdfcfc;--ab-primary:#7e253a;--ab-accent:#d8ab31;--ab-text:#2c1c20;--ab-grid:&quot;a b b&quot; &quot;a b b&quot; &quot;a c c&quot;;--ab-beat:6px"><div class="ab-canvas" role="img" aria-label="Ask the File: conversation surface composition with serif authority typography at dramatic scale, none imagery, steady beat spacing, static motion, and reflow columns on phones."><div class="ab-slot" style="grid-area:a"><div class="ab-region" data-region="thread-rail"><span class="ab-nav" data-kind="rail" aria-hidden="true"><b style="font-family:Georgia, &quot;Iowan Old Style&quot;, &quot;Times New Roman&quot;, serif">Threads</b><i></i><i></i><i></i><i></i></span></div></div><div class="ab-slot" style="grid-area:b"><div class="ab-region" data-region="message-stream"><span class="ab-messages" aria-hidden="true"><i></i><i data-self="true"></i><i></i><i data-self="true"></i></span></div></div><div class="ab-slot" style="grid-area:c"><div class="ab-region" data-region="composer-dock"><span class="ab-command" aria-hidden="true"><i></i><b>↵</b></span></div></div><div class="ab-phone" data-transform="reflow-columns" aria-hidden="true"><span class="ab-phone-bar"></span><span class="ab-phone-stack"><i></i><i></i><i></i></span></div></div><figcaption class="ab-caption"><span class="ab-palette" aria-hidden="true"><i style="background:#f6f4f4"></i><i style="background:#fdfcfc"></i><i style="background:#7e253a"></i><i style="background:#d8ab31"></i><i style="background:#2c1c20"></i></span><span class="ab-caption-meta">serif authority · dramatic scale · static motion</span></figcaption></figure>
+        <figcaption>
+          <strong>Ask the File</strong>
+          <span class="prim">conversation-surface</span>
+          <span class="meta">serif-authority · dramatic · none · static · reflow-columns</span>
+        </figcaption>
+      </figure>
+<figure class="cell">
+        <figure class="art-board-v2" data-primitive="table-operations" data-depth="hairline-ruled" data-motion="restrained" data-imagery="full-bleed" style="--ab-bg:#f6f4f4;--ab-surface:#fdfcfc;--ab-primary:#7e4025;--ab-accent:#abd831;--ab-text:#2c211c;--ab-grid:&quot;a b b&quot; &quot;a c c&quot; &quot;a d d&quot;;--ab-beat:3px"><div class="ab-canvas" role="img" aria-label="Finding Table: table operations composition with grotesque neutral typography at editorial scale, full bleed imagery, tight grid spacing, restrained motion, and collapse to stack on phones."><div class="ab-slot" style="grid-area:a"><div class="ab-region" data-region="utility-rail"><span class="ab-nav" data-kind="rail" aria-hidden="true"><b style="font-family:&quot;Helvetica Neue&quot;, Inter, Arial, sans-serif">Finding Tabl</b><i></i><i></i><i></i><i></i></span></div></div><div class="ab-slot" style="grid-area:b"><div class="ab-region" data-region="filter-bar"><span class="ab-chips" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span></div></div><div class="ab-slot" style="grid-area:c"><div class="ab-region" data-region="record-table"><span class="ab-table" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></span></div></div><div class="ab-slot" style="grid-area:d"><div class="ab-region" data-region="bulk-action-bar"><span class="ab-action" data-compact="true" aria-hidden="true"></span></div></div><div class="ab-phone" data-transform="collapse-to-stack" aria-hidden="true"><span class="ab-phone-bar"></span><span class="ab-phone-stack"><i></i><i></i><i></i></span></div></div><figcaption class="ab-caption"><span class="ab-palette" aria-hidden="true"><i style="background:#f6f4f4"></i><i style="background:#fdfcfc"></i><i style="background:#7e4025"></i><i style="background:#abd831"></i><i style="background:#2c211c"></i></span><span class="ab-caption-meta">grotesque neutral · editorial scale · restrained motion</span></figcaption></figure>
+        <figcaption>
+          <strong>Finding Table</strong>
+          <span class="prim">table-operations</span>
+          <span class="meta">grotesque-neutral · editorial · full-bleed · restrained · collapse-to-stack</span>
+        </figcaption>
+      </figure></div>
+  </section>
+<section>
+    <h2>REST API developer experience
+      <em>97% distinct · publishable</em>
+    </h2>
+    <div class="row"><figure class="cell">
+        <figure class="art-board-v2" data-primitive="documentation-explorer" data-depth="layered-glass" data-motion="cinematic" data-imagery="documentary" style="--ab-bg:#f5f4f6;--ab-surface:#fcfcfd;--ab-primary:#49257e;--ab-accent:#d8319b;--ab-text:#221c2c;--ab-grid:&quot;a b b c&quot; &quot;a b b c&quot; &quot;a b b c&quot;;--ab-beat:7px"><div class="ab-canvas" role="img" aria-label="Reference Tree: documentation explorer composition with mono technical typography at utilitarian scale, documentary imagery, irregular accent spacing, cinematic motion, and prioritise primary task on phones."><div class="ab-slot" style="grid-area:a"><div class="ab-region" data-region="reference-tree"><span class="ab-nav" data-kind="tree" aria-hidden="true"><b style="font-family:&quot;SFMono-Regular&quot;, Consolas, &quot;Liberation Mono&quot;, monospace">Reference</b><i></i><i></i><i></i><i></i><i></i><i></i></span></div></div><div class="ab-slot" style="grid-area:b"><div class="ab-region" data-region="prose-column"><span class="ab-specimen" style="font-family:&quot;SFMono-Regular&quot;, Consolas, &quot;Liberation Mono&quot;, monospace;font-size:0.48136000000000007rem;line-height:1.18;letter-spacing:-0.005em;font-weight:500">Reference Tree character</span><span class="ab-rhythm" aria-hidden="true"><i style="margin-block-end:13.299999999999999px;inline-size:100%"></i><i style="margin-block-end:3.5px;inline-size:79%"></i><i style="margin-block-end:13.299999999999999px;inline-size:58%"></i><i style="margin-block-end:3.5px;inline-size:37%"></i><i style="margin-block-end:13.299999999999999px;inline-size:16%"></i></span></div></div><div class="ab-slot" style="grid-area:c"><div class="ab-region" data-region="example-pane"><span class="ab-rows" data-mono="true" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></span></div></div><div class="ab-phone" data-transform="prioritise-primary-task" aria-hidden="true"><span class="ab-phone-bar"></span><span class="ab-phone-stack"><i></i><i></i></span><span class="ab-phone-dock"></span></div></div><figcaption class="ab-caption"><span class="ab-palette" aria-hidden="true"><i style="background:#f5f4f6"></i><i style="background:#fcfcfd"></i><i style="background:#49257e"></i><i style="background:#d8319b"></i><i style="background:#221c2c"></i></span><span class="ab-caption-meta">mono technical · utilitarian scale · cinematic motion</span></figcaption></figure>
+        <figcaption>
+          <strong>Reference Tree</strong>
+          <span class="prim">documentation-explorer</span>
+          <span class="meta">mono-technical · utilitarian · documentary · cinematic · prioritise-primary-task</span>
+        </figcaption>
+      </figure>
+<figure class="cell">
+        <figure class="art-board-v2" data-primitive="command-surface" data-depth="soft-elevation" data-motion="responsive" data-imagery="full-bleed" style="--ab-bg:#f6f4f5;--ab-surface:#fdfcfd;--ab-primary:#7e2567;--ab-accent:#d85831;--ab-text:#2c1c27;--ab-grid:&quot;a a&quot; &quot;b b&quot; &quot;b b&quot; &quot;c c&quot;;--ab-beat:6px"><div class="ab-canvas" role="img" aria-label="Console First: command surface composition with humanist warm typography at measured scale, full bleed imagery, steady beat spacing, responsive motion, and swap navigation on phones."><div class="ab-slot" style="grid-area:a"><div class="ab-region" data-region="command-input"><span class="ab-command" aria-hidden="true"><b>›</b><i></i></span></div></div><div class="ab-slot" style="grid-area:b"><div class="ab-region" data-region="result-list"><span class="ab-rows" data-mono="true" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span></div></div><div class="ab-slot" style="grid-area:c"><div class="ab-region" data-region="keyboard-legend"><span class="ab-chips" data-tiny="true" aria-hidden="true"><i></i><i></i><i></i><i></i></span></div></div><div class="ab-phone" data-transform="swap-navigation" aria-hidden="true"><span class="ab-phone-bar"></span><span class="ab-phone-stack"><i></i><i></i><i></i></span><span class="ab-phone-dock"></span></div></div><figcaption class="ab-caption"><span class="ab-palette" aria-hidden="true"><i style="background:#f6f4f5"></i><i style="background:#fdfcfd"></i><i style="background:#7e2567"></i><i style="background:#d85831"></i><i style="background:#2c1c27"></i></span><span class="ab-caption-meta">humanist warm · measured scale · responsive motion</span></figcaption></figure>
+        <figcaption>
+          <strong>Console First</strong>
+          <span class="prim">command-surface</span>
+          <span class="meta">humanist-warm · measured · full-bleed · responsive · swap-navigation</span>
+        </figcaption>
+      </figure>
+<figure class="cell">
+        <figure class="art-board-v2" data-primitive="narrative-scroll" data-depth="immersive-void" data-motion="physical" data-imagery="duotone" style="--ab-bg:#f6f4f6;--ab-surface:#fdfcfd;--ab-primary:#70257e;--ab-accent:#d83153;--ab-text:#291c2c;--ab-grid:&quot;a a&quot; &quot;b b&quot; &quot;c c&quot; &quot;d d&quot;;--ab-beat:3px"><div class="ab-canvas" role="img" aria-label="Recipe Book: narrative scroll composition with display expressive typography at monumental scale, duotone imagery, tight grid spacing, physical motion, and carousel horizontal on phones."><div class="ab-slot" style="grid-area:a"><div class="ab-region" data-region="opening-statement"><span class="ab-specimen" style="font-family:&quot;Didot&quot;, &quot;Bodoni MT&quot;, Georgia, serif;font-size:1.85rem;line-height:1.02;letter-spacing:-0.03em;font-weight:600">Recipe Book</span></div></div><div class="ab-slot" style="grid-area:b"><div class="ab-region" data-region="chapter-band"><span class="ab-plate" data-treatment="duotone" aria-hidden="true"></span><span class="ab-rhythm" aria-hidden="true"><i style="margin-block-end:3px;inline-size:100%"></i><i style="margin-block-end:3px;inline-size:87%"></i></span></div></div><div class="ab-slot" style="grid-area:c"><div class="ab-region" data-region="chapter-band"><span class="ab-plate" data-treatment="duotone" aria-hidden="true"></span><span class="ab-rhythm" aria-hidden="true"><i style="margin-block-end:3px;inline-size:100%"></i><i style="margin-block-end:3px;inline-size:87%"></i></span></div></div><div class="ab-slot" style="grid-area:d"><div class="ab-region" data-region="closing-call"><span class="ab-action" aria-hidden="true"></span></div></div><div class="ab-phone" data-transform="carousel-horizontal" aria-hidden="true"><span class="ab-phone-bar"></span><span class="ab-phone-carousel"><i></i><i></i><i></i></span></div></div><figcaption class="ab-caption"><span class="ab-palette" aria-hidden="true"><i style="background:#f6f4f6"></i><i style="background:#fdfcfd"></i><i style="background:#70257e"></i><i style="background:#d83153"></i><i style="background:#291c2c"></i></span><span class="ab-caption-meta">display expressive · monumental scale · physical motion</span></figcaption></figure>
+        <figcaption>
+          <strong>Recipe Book</strong>
+          <span class="prim">narrative-scroll</span>
+          <span class="meta">display-expressive · monumental · duotone · physical · carousel-horizontal</span>
+        </figcaption>
+      </figure></div>
+  </section>

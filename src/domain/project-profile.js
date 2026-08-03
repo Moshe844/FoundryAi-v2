@@ -1,4 +1,5 @@
 import { ProjectProfileValidationError } from "./errors.js";
+import { normalizeCreativeDNA } from "./creative-direction.js";
 import { OBSERVATION_KINDS } from "./observation-evidence.js";
 import { normalizeAcceptanceCondition } from "./verification.js";
 
@@ -427,6 +428,15 @@ function normalizeDesignAlternative(alternative, index) {
         { allowEmpty: false },
       ),
     };
+  }
+  // Creative DNA is the structural design contract for this direction. It must
+  // survive the profile boundary intact or generation receives a name and a
+  // palette and nothing that makes the direction recognizable.
+  if (alternative.creativeDNA !== undefined) {
+    normalized.creativeDNA = normalizeCreativeDNA(
+      alternative.creativeDNA,
+      `designAlternatives[${index}].creativeDNA`,
+    );
   }
   return normalized;
 }

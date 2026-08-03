@@ -3,6 +3,8 @@ import { headers } from "next/headers";
 import "./globals.css";
 import "./styles/design-intelligence.css";
 import "./styles/design-quality.css";
+import "./styles/art-board.css";
+import "./styles/creative-studio.css";
 
 export async function generateMetadata(): Promise<Metadata> {
   const requestHeaders = await headers();

@@ -212,6 +212,7 @@ export function ProjectDiscovery({
       mode: designChoice.mode,
       optionId: designChoice.optionId,
       customValue: designChoice.value,
+      customComposition: designChoice.composition,
       sourceProfileVersion: profileVersion,
     });
 
@@ -238,7 +239,9 @@ export function ProjectDiscovery({
   }
 
   async function continueFromDesign() {
-    if (designChoice.mode === "other" && !designChoice.value?.trim()) return;
+    // A combined direction is valid once traits are selected. Typing is never
+    // required, so completeness is read from the structured composition.
+    if (designChoice.mode === "other" && designChoice.composition?.complete !== true) return;
     if (await onClarify([designFollowUp()])) advance();
   }
 
@@ -425,7 +428,7 @@ export function ProjectDiscovery({
                   disabled={
                     interactionBusy ||
                     (designChoice.mode === "other" &&
-                      !designChoice.value?.trim())
+                      designChoice.composition?.complete !== true)
                   }
                   onClick={() => void continueFromDesign()}
                 >

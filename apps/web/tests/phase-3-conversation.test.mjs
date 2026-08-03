@@ -12,10 +12,11 @@ test("new Phase 3 presents one progressive working-session stage", async () => {
     source("../app/components/customer-input-composer.tsx"),
     source("../app/globals.css"),
   ]);
-  assert.match(discovery, /const stages = \[/u);
-  assert.match(discovery, /aria-current=\{stage === index \? "step"/u);
-  assert.match(discovery, /stage === 0/u);
-  assert.match(discovery, /stage === 6/u);
+  assert.match(discovery, /function buildStages\(/u);
+  assert.match(discovery, /const stages: DiscoveryStage\[\] = \[/u);
+  assert.match(discovery, /aria-current=\{stageId === item\.id \? "step"/u);
+  assert.match(discovery, /stageId === "read"/u);
+  assert.match(discovery, /stageId === "review"/u);
   assert.match(composer, /Tell Foundry anything else/u);
   assert.match(composer, /Send and revise/u);
   assert.match(styles, /\.discovery-workspace/u);
@@ -31,7 +32,13 @@ test("new Phase 3 exposes customer-created input and visible revision history", 
   ]);
   assert.match(composer, /kind: "customer-message"/u);
   assert.match(composer, /classification: null/u);
-  assert.match(composer, /proposal\.smartSuggestions\.map/u);
+  assert.match(composer, /proposal\.smartSuggestions\.filter/u);
+  assert.match(composer, /visibleSuggestions\.map/u);
+  // The panel must stay calm: at most three visible, and dismissed or accepted
+  // suggestions never come back.
+  assert.match(composer, /slice\(0, 3\)/u);
+  assert.match(composer, /suggestion-dismiss/u);
+  assert.match(composer, /More ideas/u);
   assert.doesNotMatch(composer, /<select|option value=/u);
   assert.match(composer, /Plan revised/u);
   assert.match(composer, /Your instructions/u);

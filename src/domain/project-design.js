@@ -511,12 +511,12 @@ export function normalizeDesignDirection(design) {
   });
 }
 
-export function normalizeDesignAlternativeList(value = []) {
+export function normalizeDesignAlternativeList(value = [], { family } = {}) {
   if (!Array.isArray(value)) fail("designAlternatives must be an array.");
   if (value.length < 3 || value.length > 7) {
     fail("designAlternatives must contain three to seven meaningful directions.");
   }
-  const derivedDNA = deriveCreativeDNASet(value);
+  const derivedDNA = deriveCreativeDNASet(value, { family });
   const normalized = value.map((entry, index) => {
     const label = `designAlternatives[${index}]`;
     const alternativeKeys = [
@@ -718,7 +718,7 @@ export function normalizeProjectVerificationPlan(value) {
   return freeze(normalized);
 }
 
-export function normalizeProjectDesign(input) {
+export function normalizeProjectDesign(input, { designFamily } = {}) {
   exactWithOptional(
     input,
     ["projectIntent", "userExperiencePlan", "productProposal", "designDirection", "foundryInsights", "decisions", "recommendations", "verificationPlan"],
@@ -746,7 +746,7 @@ export function normalizeProjectDesign(input) {
       scopeImpact: text(proposal.scopeImpact, "productProposal.scopeImpact"),
     },
     designDirection: normalizeDesignDirection(design),
-    designAlternatives: normalizeDesignAlternativeList(input.designAlternatives ?? []),
+    designAlternatives: normalizeDesignAlternativeList(input.designAlternatives ?? [], { family: designFamily }),
     foundryInsights: {
       observations: list(insights.observations, "foundryInsights.observations", { required: true }),
       opportunities: list(insights.opportunities, "foundryInsights.opportunities", { required: true }),
@@ -775,7 +775,7 @@ export function validateProjectDesignQuality(
   input,
   { originalRequest = "", designFamily = "application" } = {},
 ) {
-  const design = normalizeProjectDesign(input);
+  const design = normalizeProjectDesign(input, { designFamily });
   const issues = [];
   const intent = design.projectIntent;
   for (const [field, value] of [["customerOutcome", intent.customerOutcome], ["businessContext", intent.businessContext], ["primaryGoal", intent.primaryGoal], ["successDefinition", intent.successDefinition]]) {
