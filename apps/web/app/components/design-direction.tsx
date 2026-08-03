@@ -1,7 +1,6 @@
 "use client";
 
 import type { CSSProperties } from "react";
-import { useState } from "react";
 
 import type {
   DesignAlternative,
@@ -17,13 +16,15 @@ export type DesignDirectionChoice = Readonly<{
 
 function DirectionPreview({
   direction,
-  index,
-  visualOverride,
-}: Readonly<{ direction: DesignAlternative; index: number; visualOverride?: DesignVisualSystem }>) {
-  const fallbacks = ["sidebar", "split-screen", "editorial", "dashboard", "guided-flow"];
-  const system = visualOverride ?? direction.visualSystem;
-  const layout = system?.layoutType ?? fallbacks[index % fallbacks.length];
-  const labels = system?.sampleLabels ?? [direction.name.value, "Overview", "Next step"];
+}: Readonly<{ direction: DesignAlternative }>) {
+  const system = direction.visualSystem;
+  const layout = system?.layoutType ?? "custom";
+  const labels =
+    system?.sampleLabels ?? [
+      direction.name.value,
+      direction.layoutApproach.value,
+      direction.navigationApproach.value,
+    ];
   const style = {
     "--preview-bg": system?.colorRoles.background ?? "#f4f2ed",
     "--preview-surface": system?.colorRoles.surface ?? "#ffffff",
@@ -36,53 +37,138 @@ function DirectionPreview({
   if (["sidebar", "documentation", "dashboard"].includes(layout)) {
     composition = (
       <div className="preview-shell preview-sidebar-shell">
-        <aside>{labels.slice(0, 3).map((label) => <span key={label}>{label}</span>)}</aside>
+        <aside>
+          {labels.slice(0, 3).map((label) => (
+            <span key={label}>{label}</span>
+          ))}
+        </aside>
         <main>
-          <header><b>{labels[0]}</b><i /></header>
-          <div className="preview-stat-row"><span /><span /><span /></div>
-          <div className="preview-table"><i /><i /><i /><i /></div>
+          <header>
+            <b>{labels[0]}</b>
+            <i />
+          </header>
+          <div className="preview-stat-row">
+            <span />
+            <span />
+            <span />
+          </div>
+          <div className="preview-table">
+            <i />
+            <i />
+            <i />
+            <i />
+          </div>
         </main>
       </div>
     );
   } else if (layout === "split-screen") {
     composition = (
       <div className="preview-shell preview-split-shell">
-        <section><small>{labels[0]}</small><b>{labels[1]}</b><i /><button tabIndex={-1}>{labels[2]}</button></section>
-        <figure><span /><span /><span /></figure>
+        <section>
+          <small>{labels[0]}</small>
+          <b>{labels[1]}</b>
+          <i />
+          <button tabIndex={-1}>{labels[2]}</button>
+        </section>
+        <figure>
+          <span />
+          <span />
+          <span />
+        </figure>
       </div>
     );
   } else if (layout === "editorial") {
     composition = (
       <div className="preview-shell preview-editorial-shell">
-        <nav>{labels.slice(0, 3).map((label) => <span key={label}>{label}</span>)}</nav>
+        <nav>
+          {labels.slice(0, 3).map((label) => (
+            <span key={label}>{label}</span>
+          ))}
+        </nav>
         <h4>{labels[0]}</h4>
         <figure />
-        <div className="preview-columns"><p /><p /></div>
+        <div className="preview-columns">
+          <p />
+          <p />
+        </div>
       </div>
     );
   } else if (layout === "guided-flow") {
     composition = (
       <div className="preview-shell preview-guided-shell">
-        <div className="preview-steps"><b>1</b><i /><b>2</b><i /><b>3</b></div>
-        <section><small>{labels[0]}</small><h4>{labels[1]}</h4><p /><p /><button tabIndex={-1}>{labels[2]}</button></section>
+        <div className="preview-steps">
+          <b>1</b>
+          <i />
+          <b>2</b>
+          <i />
+          <b>3</b>
+        </div>
+        <section>
+          <small>{labels[0]}</small>
+          <h4>{labels[1]}</h4>
+          <p />
+          <p />
+          <button tabIndex={-1}>{labels[2]}</button>
+        </section>
       </div>
     );
   } else {
     composition = (
       <div className="preview-shell preview-canvas-shell">
-        <nav><b>{labels[0]}</b><span /><span /></nav>
-        <main><section><h4>{labels[1]}</h4><p /><button tabIndex={-1}>{labels[2]}</button></section><aside><i /><i /></aside></main>
+        <nav>
+          <b>{labels[0]}</b>
+          <span />
+          <span />
+        </nav>
+        <main>
+          <section>
+            <h4>{labels[1]}</h4>
+            <p />
+            <button tabIndex={-1}>{labels[2]}</button>
+          </section>
+          <aside>
+            <i />
+            <i />
+          </aside>
+        </main>
       </div>
     );
   }
+
   return (
-    <div className="direction-preview" data-density={system?.density} data-layout={layout} style={style} aria-hidden="true">
+    <div
+      className="direction-preview"
+      data-density={system?.density}
+      data-layout={layout}
+      style={style}
+      aria-hidden="true"
+    >
       {composition}
       <span className="direction-preview-mood">
-        {system?.typographyCategory ?? direction.preview.typographyCharacter.value} · {system?.density ?? direction.preview.spacingDensity.value}
+        {system?.typographyCategory ??
+          direction.preview.typographyCharacter.value}{" "}
+        · {system?.density ?? direction.preview.spacingDensity.value}
       </span>
     </div>
   );
+}
+
+function selectedDirectionName(
+  choice: DesignDirectionChoice,
+  alternatives: readonly DesignAlternative[],
+  direction: ProjectDesignDirection,
+) {
+  if (choice.mode === "other") {
+    return choice.value?.trim() || "Custom direction";
+  }
+
+  const selected = alternatives.find(
+    (item) =>
+      item.id === choice.optionId ||
+      (choice.mode === "recommended" && item.recommended.value),
+  );
+
+  return selected?.name.value ?? direction.recommendedStyle.value;
 }
 
 export function DesignDirection({
@@ -98,94 +184,73 @@ export function DesignDirection({
 }>) {
   const other = choice.mode === "other";
   const recommended = alternatives.find((item) => item.recommended.value);
-  const defaultId = recommended?.id ?? alternatives[0]?.id ?? "";
-  const [mix, setMix] = useState({
-    layout: defaultId,
-    colors: defaultId,
-    navigation: defaultId,
-    density: defaultId,
-  });
-  const byId = (id: string) => alternatives.find((item) => item.id === id) ?? alternatives[0];
-  const mixedBase = byId(mix.layout);
-  const mixedVisual = mixedBase?.visualSystem === undefined
-    ? undefined
-    : {
-        ...mixedBase.visualSystem,
-        colorRoles: byId(mix.colors)?.visualSystem?.colorRoles ?? mixedBase.visualSystem.colorRoles,
-        navigationType: byId(mix.navigation)?.visualSystem?.navigationType ?? mixedBase.visualSystem.navigationType,
-        density: byId(mix.density)?.visualSystem?.density ?? mixedBase.visualSystem.density,
-        spacingProfile: byId(mix.density)?.visualSystem?.spacingProfile ?? mixedBase.visualSystem.spacingProfile,
-      };
-
-  function updateMix(axis: keyof typeof mix, optionId: string) {
-    const next = { ...mix, [axis]: optionId };
-    setMix(next);
-    const name = (id: string) => byId(id)?.name.value ?? "the recommended direction";
-    onChange({
-      mode: "other",
-      value: `Compose the final design using the layout from ${name(next.layout)}, the color system from ${name(next.colors)}, the navigation from ${name(next.navigation)}, and the density from ${name(next.density)}. Preserve the project-specific accessibility and mobile requirements.`,
-    });
-  }
+  const selectedName = selectedDirectionName(choice, alternatives, direction);
+  const selectionLabel =
+    choice.mode === "recommended"
+      ? "Foundry’s recommendation is selected"
+      : choice.mode === "alternative"
+        ? "An alternative direction is selected"
+        : "Your custom direction is selected";
 
   return (
     <section className="act conversation-measure">
       <div className="conversation-heading">
-        <p className="t-label ink-tertiary">Design direction</p>
-        <h2 className="t-title-l">Choose how this project should feel</h2>
+        <p className="t-label ink-tertiary">Visual direction</p>
+        <h2 className="t-title-l">Choose the experience you want people to feel</h2>
         <p className="t-body-m ink-secondary">
-          These directions were created for this project. You can accept my
-          recommendation, choose a different direction, or describe your own.
+          These directions came from this project’s audience, workflows, and
+          purpose. Pick one, keep Foundry’s recommendation, or describe
+          something completely different.
         </p>
       </div>
 
-      {alternatives.length > 1 && mixedBase !== undefined && (
-        <section className="direction-mixer" aria-labelledby="direction-mixer-title">
+      <div className="banner banner-neutral" aria-live="polite">
+        <div className="banner-body">
+          <strong>{selectionLabel}</strong>
+          <p>{selectedName}</p>
+        </div>
+      </div>
+
+      {recommended !== undefined && (
+        <button
+          type="button"
+          className="design-recommendation direction-accept"
+          aria-pressed={choice.mode === "recommended"}
+          onClick={() =>
+            onChange({
+              mode: "recommended",
+              optionId: recommended.id,
+              value: recommended.name.value,
+            })
+          }
+        >
           <div>
-            <p className="t-label ink-tertiary">Mix directions</p>
-            <h3 className="t-title-m" id="direction-mixer-title">Compose the strongest parts</h3>
-            <p className="t-body-s ink-secondary">The concept preview updates as you combine layout, color, navigation, and density.</p>
+            <span className="badge">
+              {choice.mode === "recommended"
+                ? "Selected · Foundry recommends"
+                : "Restore Foundry’s recommendation"}
+            </span>
+            <h3 className="t-title-m">{recommended.name.value}</h3>
+            <p className="t-body-m ink-secondary">
+              {recommended.whyItFits.value}
+            </p>
           </div>
-          <DirectionPreview direction={mixedBase} index={alternatives.indexOf(mixedBase)} visualOverride={mixedVisual} />
-          <div className="direction-mix-controls">
-            {(["layout", "colors", "navigation", "density"] as const).map((axis) => (
-              <label className="t-body-s" key={axis}>
-                <span>{axis[0].toUpperCase() + axis.slice(1)}</span>
-                <select value={mix[axis]} onChange={(event) => updateMix(axis, event.target.value)}>
-                  {alternatives.map((alternative) => <option key={alternative.id} value={alternative.id}>{alternative.name.value}</option>)}
-                </select>
-              </label>
-            ))}
-          </div>
-        </section>
+          <span className="choice-check" aria-hidden="true">
+            {choice.mode === "recommended" ? "✓" : "↺"}
+          </span>
+        </button>
       )}
 
-      <button
-        type="button"
-        className="design-recommendation direction-accept"
-        aria-pressed={choice.mode === "recommended"}
-        onClick={() =>
-          onChange({
-            mode: "recommended",
-            optionId: recommended?.id,
-            value: direction.recommendedStyle.value,
-          })
-        }
+      <div
+        className="direction-card-grid"
+        role="radiogroup"
+        aria-label="Project-specific design directions"
       >
-        <div>
-          <span className="badge">Foundry recommends</span>
-          <h3 className="t-title-m">{direction.recommendedStyle.value}</h3>
-          <p className="t-body-m ink-secondary">{direction.reason.value}</p>
-        </div>
-        <span className="choice-check" aria-hidden="true">
-          &#10003;
-        </span>
-      </button>
-
-      <div className="direction-card-grid" role="radiogroup" aria-label="Generated design directions">
-        {alternatives.map((alternative, index) => {
+        {alternatives.map((alternative) => {
           const selected =
             (choice.mode === "recommended" && alternative.recommended.value) ||
-            (choice.mode === "alternative" && choice.optionId === alternative.id);
+            (choice.mode === "alternative" &&
+              choice.optionId === alternative.id);
           return (
             <button
               type="button"
@@ -210,7 +275,7 @@ export function DesignDirection({
                 )
               }
             >
-              <DirectionPreview direction={alternative} index={index} />
+              <DirectionPreview direction={alternative} />
               <span className="direction-card-head">
                 <strong>{alternative.name.value}</strong>
                 {alternative.recommended.value && (
@@ -221,15 +286,16 @@ export function DesignDirection({
                 {alternative.description.value}
               </span>
               <span className="direction-fit t-body-s">
-                <strong>Why it fits:</strong> {alternative.whyItFits.value}
+                <strong>Why it fits this project:</strong>{" "}
+                {alternative.whyItFits.value}
               </span>
               <dl className="direction-facts">
                 <div>
-                  <dt>Layout</dt>
+                  <dt>Composition</dt>
                   <dd>{alternative.layoutApproach.value}</dd>
                 </div>
                 <div>
-                  <dt>Density</dt>
+                  <dt>Information</dt>
                   <dd>{alternative.informationDensity.value}</dd>
                 </div>
                 <div>
@@ -252,35 +318,41 @@ export function DesignDirection({
         })}
       </div>
 
-      <button
-        type="button"
-        className="btn-quiet direction-other-toggle"
-        aria-expanded={other}
-        onClick={() =>
-          onChange(
-            other
-              ? {
-                  mode: "recommended",
-                  optionId: recommended?.id,
-                  value: direction.recommendedStyle.value,
-                }
-              : { mode: "other", value: "" },
-          )
-        }
-      >
-        Describe your own style
-      </button>
+      <div className="continue-row">
+        <button
+          type="button"
+          className={other ? "btn btn-secondary" : "btn-quiet"}
+          aria-expanded={other}
+          onClick={() =>
+            onChange(
+              other
+                ? {
+                    mode: "recommended",
+                    optionId: recommended?.id,
+                    value:
+                      recommended?.name.value ??
+                      direction.recommendedStyle.value,
+                  }
+                : { mode: "other", value: "" },
+            )
+          }
+        >
+          {other ? "Cancel custom direction" : "Describe your own direction"}
+        </button>
+      </div>
 
       {other && (
         <div className="design-other">
           <label htmlFor="design-direction-other" className="t-body-s">
-            Describe the feeling you want
+            Describe the feeling, references, colors, layout, or behavior you
+            want. Foundry will turn it into a structured direction before
+            building.
           </label>
           <textarea
             id="design-direction-other"
             className="plain-textarea"
-            rows={2}
-            placeholder="For example: warmer, more premium, or more playful"
+            rows={4}
+            placeholder="For example: cinematic and image-led, with almost no visible chrome; large photography; quiet typography; mobile should feel like a curated gallery."
             value={choice.value ?? ""}
             onChange={(event) =>
               onChange({ mode: "other", value: event.target.value })
