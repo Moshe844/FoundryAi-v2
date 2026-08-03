@@ -2,6 +2,12 @@ import {
   ProjectDesignQualityError,
   ProjectDesignValidationError,
 } from "./errors.js";
+import {
+  CREATIVE_DNA_SCHEMA,
+  deriveCreativeDNASet,
+  normalizeCreativeDNA,
+} from "./creative-direction.js";
+import { assessCreativeDirectionSet } from "./creative-direction-quality.js";
 
 const CONFIDENCE_SCHEMA = Object.freeze({
   type: "object",
@@ -212,6 +218,7 @@ export const PROJECT_DESIGN_SCHEMA = Object.freeze({
             },
           },
           visualSystem: DESIGN_VISUAL_SYSTEM_SCHEMA,
+          creativeDNA: CREATIVE_DNA_SCHEMA,
         },
       },
     },
@@ -509,6 +516,7 @@ export function normalizeDesignAlternativeList(value = []) {
   if (value.length < 3 || value.length > 7) {
     fail("designAlternatives must contain three to seven meaningful directions.");
   }
+  const derivedDNA = deriveCreativeDNASet(value);
   const normalized = value.map((entry, index) => {
     const label = `designAlternatives[${index}]`;
     const alternativeKeys = [
@@ -525,7 +533,10 @@ export function normalizeDesignAlternativeList(value = []) {
         "recommended",
         "preview",
       ];
-    exact(entry, Object.hasOwn(entry, "visualSystem") ? [...alternativeKeys, "visualSystem"] : alternativeKeys, label);
+    const optionalKeys = ["visualSystem", "creativeDNA"].filter((key) =>
+      Object.hasOwn(entry, key),
+    );
+    exact(entry, [...alternativeKeys, ...optionalKeys], label);
     if (typeof entry.recommended !== "boolean") {
       fail(`${label}.recommended must be boolean.`);
     }
@@ -540,6 +551,9 @@ export function normalizeDesignAlternativeList(value = []) {
       `${label}.preview`,
     );
     const visualSystem = normalizeVisualSystem(entry.visualSystem, entry, index, label);
+    const creativeDNA = entry.creativeDNA === undefined
+      ? derivedDNA[index]
+      : normalizeCreativeDNA(entry.creativeDNA, `${label}.creativeDNA`);
     return {
       name: text(entry.name, `${label}.name`),
       description: text(entry.description, `${label}.description`),
@@ -574,6 +588,7 @@ export function normalizeDesignAlternativeList(value = []) {
         hierarchy: text(entry.preview.hierarchy, `${label}.preview.hierarchy`),
       },
       visualSystem,
+      creativeDNA,
     };
   });
   if (
@@ -756,7 +771,10 @@ function wordCount(value) {
   return normalizeText(value).split(" ").filter(Boolean).length;
 }
 
-export function validateProjectDesignQuality(input, { originalRequest = "" } = {}) {
+export function validateProjectDesignQuality(
+  input,
+  { originalRequest = "", designFamily = "application" } = {},
+) {
   const design = normalizeProjectDesign(input);
   const issues = [];
   const intent = design.projectIntent;
@@ -782,16 +800,27 @@ export function validateProjectDesignQuality(input, { originalRequest = "" } = {
       issues.push(`designAlternatives[${index}] lacks a meaningful tradeoff.`);
     }
   }
-  for (let left = 0; left < design.designAlternatives.length; left += 1) {
-    for (let right = left + 1; right < design.designAlternatives.length; right += 1) {
-      const a = design.designAlternatives[left].visualSystem;
-      const b = design.designAlternatives[right].visualSystem;
-      const dimensions = Object.keys(VISUAL_ENUMS).filter((key) => a[key] !== b[key]).length;
-      const colorsDiffer = JSON.stringify(a.colorRoles) !== JSON.stringify(b.colorRoles);
-      if (dimensions + Number(colorsDiffer) < 5) {
-        issues.push(`designAlternatives[${left}] and designAlternatives[${right}] are visually indistinguishable.`);
-      }
-    }
+  // The production Creative Direction Quality Authority replaces the previous
+  // visual-enum counting heuristic. It compares every differentiation axis,
+  // rationale language, naming patterns and project relevance, and it reports a
+  // regeneration directive rather than only a pass/fail bit.
+  const creativeAssessment = assessCreativeDirectionSet(
+    design.designAlternatives.map((alternative, index) => ({
+      ...alternative,
+      id: `designAlternatives[${index}]`,
+    })),
+    { family: designFamily },
+  );
+  for (const issue of creativeAssessment.issues) {
+    issues.push(`${issue.code}: ${issue.message}`);
+  }
+  if (
+    creativeAssessment.issues.length === 0 &&
+    !creativeAssessment.publishable
+  ) {
+    issues.push(
+      `designAlternatives are only ${creativeAssessment.distinctnessScore}% distinct across composition, navigation, typography, color, imagery, interaction, responsive, density, surface and motion.`,
+    );
   }
   const recommendedAlternative = design.designAlternatives.find(
     (alternative) => alternative.recommended,

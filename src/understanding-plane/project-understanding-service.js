@@ -15,6 +15,7 @@ import {
   ProjectFamily,
   normalizeProjectProfile,
 } from "../domain/project-profile.js";
+import { CREATIVE_DNA_SCHEMA } from "../domain/creative-direction.js";
 import {
   DESIGN_VISUAL_SYSTEM_SCHEMA,
   PROJECT_DESIGN_SCHEMA,
@@ -437,23 +438,35 @@ export const FAST_INITIAL_UNDERSTANDING_SCHEMA = Object.freeze({
       items: {
         type: "object",
         additionalProperties: false,
+        // Every field here is per-alternative on purpose. Density, navigation
+        // and mobile behavior used to be inherited from the single recommended
+        // designDirection during expansion, which silently collapsed three
+        // "independent" directions onto one structure.
         required: [
           "name",
           "whyItFits",
           "visualPersonality",
           "layoutApproach",
+          "informationDensity",
+          "navigationApproach",
+          "mobileBehavior",
           "tradeoff",
           "recommended",
           "visualSystem",
+          "creativeDNA",
         ],
         properties: {
           name: fastText,
           whyItFits: fastText,
           visualPersonality: fastText,
           layoutApproach: fastText,
+          informationDensity: fastText,
+          navigationApproach: fastText,
+          mobileBehavior: fastText,
           tradeoff: fastText,
           recommended: { type: "boolean" },
           visualSystem: DESIGN_VISUAL_SYSTEM_SCHEMA,
+          creativeDNA: CREATIVE_DNA_SCHEMA,
         },
       },
     },
@@ -668,27 +681,40 @@ export function expandFastInitialUnderstanding(brief) {
       8,
     ),
   };
+  // Each alternative keeps its OWN density, navigation, mobile behavior and
+  // creative DNA. The shared designDirection is used only as a last-resort
+  // fallback for briefs produced before those fields existed — never as an
+  // override of a direction the model actually differentiated.
   const designAlternatives = brief.designAlternatives.map((item, index) => {
     const whyItFits = groundedFastText(item.whyItFits, primaryGoal, 8);
+    const dna = item.creativeDNA;
     return {
       name: item.name,
       description: whyItFits,
       whyItFits,
       layoutApproach: item.layoutApproach,
       visualPersonality: item.visualPersonality,
-      informationDensity: designDirection.informationDensity,
-      navigationApproach: designDirection.navigationApproach,
-      mobileBehavior: designDirection.responsivePriority,
+      informationDensity:
+        item.informationDensity ?? designDirection.informationDensity,
+      navigationApproach:
+        item.navigationApproach ?? designDirection.navigationApproach,
+      mobileBehavior: item.mobileBehavior ?? designDirection.responsivePriority,
       tradeoff: groundedFastText(item.tradeoff, primaryGoal, 5),
       confidence: { score: 0.75, rationale: whyItFits },
       recommended: index === recommendedIndex,
       preview: {
-        typographyCharacter: item.visualPersonality,
-        spacingDensity: designDirection.informationDensity,
+        typographyCharacter: dna?.typeVoice
+          ? `${dna.typeVoice.replaceAll("-", " ")}, ${dna.typeScale} scale`
+          : item.visualPersonality,
+        spacingDensity:
+          dna?.spacingRhythm?.replaceAll("-", " ") ??
+          item.informationDensity ??
+          designDirection.informationDensity,
         colorMood: item.visualPersonality,
-        hierarchy: item.layoutApproach,
+        hierarchy: dna?.surfaceSequence?.join(" → ") ?? item.layoutApproach,
       },
       visualSystem: item.visualSystem,
+      ...(dna === undefined ? {} : { creativeDNA: dna }),
     };
   });
   const decisions = brief.decisions.flatMap((item) => {
