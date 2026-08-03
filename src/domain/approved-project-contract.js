@@ -187,7 +187,9 @@ function assertDecisionLedgerConsistency(contract) {
     ) fail("Product Blueprint hash and version were not approved exactly.");
     if (
       blueprint.navigationApproach !== contract.selectedDesignDirection.navigationApproach ||
-      blueprint.designSpecification.visualPersonality !== contract.selectedDesignDirection.visualPersonality
+      (blueprint.designSpecification.objective?.visualPersonality ??
+        blueprint.designSpecification.visualPersonality) !==
+        contract.selectedDesignDirection.visualPersonality
     ) fail("Approved visual direction was lost between the Product Blueprint and contract.");
     const contractAudiences = new Set(contract.audiences.map((item) => item.toLowerCase()));
     if (blueprint.intendedUsers.some((item) => !contractAudiences.has(item.toLowerCase()))) {

@@ -68,6 +68,20 @@ function overlaps(left, right) {
 
 function preservesRequirementSubject(requirement, summary) {
   if (overlaps(requirement.statement, summary)) return true;
+  // Design requirements carry creative direction names and prose rationales
+  // ("Coastal calm. Soft blues convey trust."), so a faithful implementation
+  // summary legitimately shares no ≥4-letter token with the statement. Accept
+  // a summary that is unambiguously about implementing the visual design;
+  // summaries about unrelated features still fail. This mirrors the existing
+  // production-build carve-out below for the same token-overlap limitation.
+  if (
+    requirement.kind.startsWith("design-") &&
+    /\b(?:design(?:ed|s)?|visual(?:s|ly)?|styl(?:e[sd]?|ing)|direction|palette|colou?r(?:s|ed)?|typograph\w*|font\w*|layout\w*|navigat\w*|responsive|mobile|hierarch\w*|aesthetic\w*|brand(?:ed|ing)?|look|theme[sd]?|spacing|accessib\w*)\b/iu.test(
+      summary,
+    )
+  ) {
+    return true;
+  }
   return (
     requirement.kind === "acceptance-obligation" &&
     /\bproduction build\b/iu.test(requirement.statement) &&

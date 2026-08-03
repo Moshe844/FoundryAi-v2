@@ -89,6 +89,57 @@ function freeze(value) {
   return value;
 }
 
+const LEGACY_DESIGN_SPECIFICATION_FIELDS = Object.freeze([
+  "visualPersonality",
+  "tone",
+  "layoutStrategy",
+  "informationDensity",
+  "navigationApproach",
+  "responsivePriority",
+  "contentStrategy",
+  "interactionStyle",
+  "rationale",
+  "accessibilityNeeds",
+]);
+
+function isLegacyDesignSpecification(value) {
+  if (
+    value === null ||
+    typeof value !== "object" ||
+    Array.isArray(value) ||
+    Object.keys(value).sort().join(",") !==
+      [...LEGACY_DESIGN_SPECIFICATION_FIELDS].sort().join(",")
+  ) {
+    return false;
+  }
+  return (
+    LEGACY_DESIGN_SPECIFICATION_FIELDS
+      .filter((field) => field !== "accessibilityNeeds")
+      .every(
+        (field) =>
+          typeof value[field] === "string" && value[field].trim() !== "",
+      ) &&
+    Array.isArray(value.accessibilityNeeds) &&
+    value.accessibilityNeeds.length > 0 &&
+    value.accessibilityNeeds.every(
+      (item) => typeof item === "string" && item.trim() !== "",
+    )
+  );
+}
+
+function isStructuredDesignSpecification(value) {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    value.schemaVersion === 1 &&
+    typeof value.composition?.layoutStrategy === "string" &&
+    typeof value.navigation?.approach === "string" &&
+    typeof value.responsive?.priority === "string" &&
+    typeof value.objective?.visualPersonality === "string"
+  );
+}
+
 function selectedValues(answers, kind, modes = null) {
   return unique(
     answers
@@ -262,16 +313,13 @@ export function validateProductBlueprintQuality(blueprint) {
       throw new TypeError(`Product Blueprint ${field} must be executable, not empty.`);
     }
   }
-  if (
-    blueprint.designSpecification === null ||
-    typeof blueprint.designSpecification !== "object" ||
-    Array.isArray(blueprint.designSpecification) ||
-    blueprint.designSpecification.schemaVersion !== 1 ||
-    typeof blueprint.designSpecification.composition?.layoutStrategy !== "string" ||
-    typeof blueprint.designSpecification.navigation?.approach !== "string" ||
-    typeof blueprint.designSpecification.responsive?.priority !== "string" ||
-    typeof blueprint.designSpecification.objective?.visualPersonality !== "string"
-  ) {
+  const structuredDesignSpecification = isStructuredDesignSpecification(
+    blueprint.designSpecification,
+  );
+  const legacyDesignSpecification = isLegacyDesignSpecification(
+    blueprint.designSpecification,
+  );
+  if (!structuredDesignSpecification && !legacyDesignSpecification) {
     throw new TypeError("Product Blueprint designSpecification is not execution-ready.");
   }
   const unresolvedLanguage = findUnresolvedBlueprintLanguage(blueprint);
@@ -285,19 +333,21 @@ export function validateProductBlueprintQuality(blueprint) {
       throw new TypeError(`Included capability is not traceable to verification: ${capability}`);
     }
   }
-  const designSources = new Set(
-    blueprint.verificationPlan
-      .map((entry) => entry.sourceRequirement)
-      .filter((source) => String(source).startsWith("approved-design-")),
-  );
-  for (const required of [
-    "approved-design-composition",
-    "approved-design-navigation",
-    "approved-design-responsive",
-    "approved-design-visual-system",
-  ]) {
-    if (!designSources.has(required)) {
-      throw new TypeError(`Product Blueprint does not verify ${required}.`);
+  if (structuredDesignSpecification) {
+    const designSources = new Set(
+      blueprint.verificationPlan
+        .map((entry) => entry.sourceRequirement)
+        .filter((source) => String(source).startsWith("approved-design-")),
+    );
+    for (const required of [
+      "approved-design-composition",
+      "approved-design-navigation",
+      "approved-design-responsive",
+      "approved-design-visual-system",
+    ]) {
+      if (!designSources.has(required)) {
+        throw new TypeError(`Product Blueprint does not verify ${required}.`);
+      }
     }
   }
   if (blueprint.integrityHash !== contentHash(blueprint)) {

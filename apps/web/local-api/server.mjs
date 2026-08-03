@@ -82,7 +82,10 @@ const control = openMissionControl({
   environmentVariables: configuredEnvironment,
   aiDiscoveryAdapters: liveAdapters.discoveryAdapters,
   modelProviders: liveAdapters.executionAdapters,
-  maxModelProviderAttempts: 1,
+  // Two bounded attempts so a single structured-output validation miss during
+  // understanding retries with the exact failure fed back, instead of pushing
+  // the customer to a manual retry.
+  maxModelProviderAttempts: 2,
   requireProductBlueprintApproval: true,
 });
 const activeJobs = new Map();

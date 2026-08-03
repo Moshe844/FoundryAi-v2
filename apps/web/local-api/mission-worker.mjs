@@ -57,7 +57,11 @@ const control = openMissionControl({
   environmentVariables: configuredEnvironment,
   aiDiscoveryAdapters: liveAdapters.discoveryAdapters,
   modelProviders: liveAdapters.executionAdapters,
-  maxModelProviderAttempts: 1,
+  // One attempt disables the gateway's retry-with-feedback loop entirely: a
+  // single structured-output validation miss becomes an unrecoverable mission
+  // failure. Three bounded attempts let the model see the exact rejection and
+  // return a corrected object before anything is declared terminal.
+  maxModelProviderAttempts: 3,
 });
 
 let stopping = false;

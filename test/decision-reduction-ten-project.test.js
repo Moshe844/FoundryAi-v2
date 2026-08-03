@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
@@ -31,6 +32,24 @@ const cases = [
 ].map(([slug, request, users, subject, action, direction, options]) => ({
   slug, request, users, subject, action, direction, options,
 }));
+
+function blueprintContentHash(value) {
+  function canonical(candidate) {
+    if (Array.isArray(candidate)) {
+      return `[${candidate.map(canonical).join(",")}]`;
+    }
+    if (candidate !== null && typeof candidate === "object") {
+      return `{${Object.keys(candidate)
+        .sort()
+        .map((key) => `${JSON.stringify(key)}:${canonical(candidate[key])}`)
+        .join(",")}}`;
+    }
+    return JSON.stringify(candidate);
+  }
+  const payload = structuredClone(value);
+  delete payload.integrityHash;
+  return createHash("sha256").update(canonical(payload)).digest("hex");
+}
 
 test("blueprint quality distinguishes unresolved placeholders from anti-placeholder policy", () => {
   assert.equal(hasUnresolvedBlueprintLanguage("placeholder"), true);
@@ -280,6 +299,66 @@ test("a complete immutable Product Blueprint is projected from live project inte
   assert.throws(
     () => normalizeProductBlueprint(changed),
     /integrity hash/u,
+  );
+});
+
+test("legacy immutable Product Blueprints remain replayable after the structured design upgrade", () => {
+  const spec = cases[0];
+  const design = projectDesign(spec);
+  const current = createProductBlueprint({
+    missionId: "legacy-blueprint-customer-portal",
+    originalCustomerRequest: spec.request,
+    profile: {
+      profileVersion: 2,
+      family: "web-application",
+      name: "Customer Resolution Portal",
+      dataConcepts: ["customer account", "service request"],
+      architectureDecisions: [
+        "Persist request state locally",
+        "Render an accessible web application",
+      ],
+      selectedStack: {
+        stackId: "nextjs-typescript-sqlite-npm-playwright",
+        version: "1.0.0",
+      },
+    },
+    projectDesign: design,
+  });
+  const legacy = structuredClone(current);
+  const structured = current.designSpecification;
+  legacy.designSpecification = {
+    visualPersonality: structured.objective.visualPersonality,
+    tone: structured.color.mood,
+    layoutStrategy: structured.composition.layoutStrategy,
+    informationDensity: structured.composition.informationDensity,
+    navigationApproach: structured.navigation.approach,
+    responsivePriority: structured.responsive.priority,
+    contentStrategy: structured.surfaces.contentEmphasis,
+    interactionStyle: structured.navigation.interactionStyle,
+    rationale: structured.objective.rationale,
+    accessibilityNeeds: structured.accessibility.requirements,
+  };
+  legacy.verificationPlan = legacy.verificationPlan.filter(
+    (entry) => !entry.sourceRequirement.startsWith("approved-design-"),
+  );
+  legacy.acceptanceRequirements = legacy.verificationPlan.map(
+    (entry) => entry.observableOutcome,
+  );
+  legacy.integrityHash = blueprintContentHash(legacy);
+
+  const normalized = normalizeProductBlueprint(legacy);
+  assert.equal(normalized.integrityHash, legacy.integrityHash);
+  assert.equal(
+    normalized.designSpecification.layoutStrategy,
+    structured.composition.layoutStrategy,
+  );
+
+  const malformed = structuredClone(legacy);
+  delete malformed.designSpecification.navigationApproach;
+  malformed.integrityHash = blueprintContentHash(malformed);
+  assert.throws(
+    () => normalizeProductBlueprint(malformed),
+    /designSpecification is not execution-ready/u,
   );
 });
 
