@@ -102,6 +102,143 @@ function selectedValues(answers, kind, modes = null) {
   );
 }
 
+function latestDesignSelection(answers) {
+  return [...answers]
+    .reverse()
+    .map((answer) => answer?.selection)
+    .find((selection) => selection?.kind === "design-direction") ?? null;
+}
+
+function selectedDesignAlternative(projectDesign, selection) {
+  if (selection === null) {
+    return projectDesign.designAlternatives.find((item) => item.recommended) ?? null;
+  }
+  const match = /^alternative-(?<index>\d+)$/u.exec(String(selection.optionId ?? ""));
+  if (match?.groups?.index !== undefined) {
+    return projectDesign.designAlternatives[Number(match.groups.index) - 1] ?? null;
+  }
+  return projectDesign.designAlternatives.find(
+    (item) =>
+      item.name === selection.value ||
+      item.visualPersonality === selection.value,
+  ) ?? null;
+}
+
+function buildDesignSpecification(projectDesign, answers) {
+  const selection = latestDesignSelection(answers);
+  const alternative = selectedDesignAlternative(projectDesign, selection);
+  const direction = projectDesign.designDirection;
+  const customInstruction =
+    selection?.mode === "other" ? String(selection.value).trim() : null;
+
+  return {
+    schemaVersion: 1,
+    selection: {
+      mode: selection?.mode ?? "accept-recommendation",
+      optionId: selection?.optionId ?? null,
+      approvedLabel:
+        customInstruction ?? alternative?.name ?? direction.visualPersonality,
+      customerInstruction: customInstruction,
+      recommendationAccepted:
+        selection === null || selection.mode === "accept-recommendation",
+    },
+    objective: {
+      visualPersonality:
+        alternative?.visualPersonality ?? direction.visualPersonality,
+      intendedEmotionalResponse:
+        alternative?.description ?? direction.rationale,
+      rationale: alternative?.whyItFits ?? direction.rationale,
+    },
+    composition: {
+      layoutStrategy: alternative?.layoutApproach ?? direction.layoutStrategy,
+      informationDensity:
+        alternative?.informationDensity ?? direction.informationDensity,
+      contentHierarchy:
+        alternative?.preview?.hierarchy ?? direction.contentStrategy,
+      spacingDensity:
+        alternative?.preview?.spacingDensity ?? direction.informationDensity,
+    },
+    navigation: {
+      approach:
+        alternative?.navigationApproach ?? direction.navigationApproach,
+      interactionStyle: direction.interactionStyle,
+    },
+    typography: {
+      character:
+        alternative?.preview?.typographyCharacter ?? direction.visualPersonality,
+    },
+    color: {
+      mood: alternative?.preview?.colorMood ?? direction.tone,
+      roles: structuredClone(alternative?.visualSystem?.colorRoles ?? {}),
+    },
+    imagery: {
+      strategy: alternative?.visualSystem?.imageStrategy ?? "Project-appropriate imagery follows the approved visual hierarchy.",
+    },
+    surfaces: {
+      treatment: alternative?.visualSystem?.surfaceTreatment ?? "Use a coherent surface system that supports the approved visual personality.",
+      buttonTreatment: alternative?.visualSystem?.buttonTreatment ?? "Controls must follow the approved interaction personality and hierarchy.",
+      contentEmphasis: alternative?.visualSystem?.contentEmphasis ?? direction.contentStrategy,
+    },
+    responsive: {
+      priority: alternative?.mobileBehavior ?? direction.responsivePriority,
+    },
+    accessibility: {
+      requirements: unique(direction.accessibilityNeeds),
+    },
+    visualSystem: structuredClone(alternative?.visualSystem ?? null),
+    tradeoff: alternative?.tradeoff ?? null,
+    confidence: alternative?.confidence?.score ?? projectDesign.projectIntent.confidence.score,
+  };
+}
+
+function designVerificationEntries(productName, designSpecification) {
+  const entries = [
+    {
+      observableOutcome: `${productName} implements the approved composition: ${designSpecification.composition.layoutStrategy}`,
+      acceptanceMethod: "browser-check",
+      evidenceRequired: ["DOM structure and responsive screenshot evidence for the approved composition"],
+      sourceRequirement: "approved-design-composition",
+      origin: "foundry-derived",
+      dependencyIndexes: [],
+    },
+    {
+      observableOutcome: `${productName} implements the approved navigation behavior: ${designSpecification.navigation.approach}`,
+      acceptanceMethod: "browser-check",
+      evidenceRequired: ["Browser interaction evidence for the approved navigation behavior"],
+      sourceRequirement: "approved-design-navigation",
+      origin: "foundry-derived",
+      dependencyIndexes: [],
+    },
+    {
+      observableOutcome: `${productName} implements the approved responsive priority: ${designSpecification.responsive.priority}`,
+      acceptanceMethod: "browser-check",
+      evidenceRequired: ["Desktop, tablet, and mobile viewport evidence"],
+      sourceRequirement: "approved-design-responsive",
+      origin: "foundry-derived",
+      dependencyIndexes: [],
+    },
+    {
+      observableOutcome: `${productName} implements the approved visual character: ${designSpecification.objective.visualPersonality}; typography ${designSpecification.typography.character}; color mood ${designSpecification.color.mood}`,
+      acceptanceMethod: "browser-check",
+      evidenceRequired: ["Computed style, hierarchy, typography, and screenshot evidence"],
+      sourceRequirement: "approved-design-visual-system",
+      origin: "foundry-derived",
+      dependencyIndexes: [],
+    },
+  ];
+  if (designSpecification.accessibility.requirements.length > 0) {
+    entries.push({
+      observableOutcome: `${productName} satisfies the approved accessibility design requirements: ${designSpecification.accessibility.requirements.join(", ")}`,
+      acceptanceMethod: "browser-check",
+      evidenceRequired: ["Keyboard, focus, semantic, and contrast evidence"],
+      sourceRequirement: "approved-design-accessibility",
+      origin: "foundry-derived",
+      dependencyIndexes: [],
+    });
+  }
+  return entries;
+}
+
 export function validateProductBlueprintQuality(blueprint) {
   const scores = {
     specificity: 1,
@@ -125,6 +262,18 @@ export function validateProductBlueprintQuality(blueprint) {
       throw new TypeError(`Product Blueprint ${field} must be executable, not empty.`);
     }
   }
+  if (
+    blueprint.designSpecification === null ||
+    typeof blueprint.designSpecification !== "object" ||
+    Array.isArray(blueprint.designSpecification) ||
+    blueprint.designSpecification.schemaVersion !== 1 ||
+    typeof blueprint.designSpecification.composition?.layoutStrategy !== "string" ||
+    typeof blueprint.designSpecification.navigation?.approach !== "string" ||
+    typeof blueprint.designSpecification.responsive?.priority !== "string" ||
+    typeof blueprint.designSpecification.objective?.visualPersonality !== "string"
+  ) {
+    throw new TypeError("Product Blueprint designSpecification is not execution-ready.");
+  }
   const unresolvedLanguage = findUnresolvedBlueprintLanguage(blueprint);
   if (unresolvedLanguage !== null) {
     throw new TypeError(
@@ -134,6 +283,21 @@ export function validateProductBlueprintQuality(blueprint) {
   for (const capability of blueprint.includedNow) {
     if (!blueprint.verificationPlan.some((entry) => entry.observableOutcome.startsWith(capability))) {
       throw new TypeError(`Included capability is not traceable to verification: ${capability}`);
+    }
+  }
+  const designSources = new Set(
+    blueprint.verificationPlan
+      .map((entry) => entry.sourceRequirement)
+      .filter((source) => String(source).startsWith("approved-design-")),
+  );
+  for (const required of [
+    "approved-design-composition",
+    "approved-design-navigation",
+    "approved-design-responsive",
+    "approved-design-visual-system",
+  ]) {
+    if (!designSources.has(required)) {
+      throw new TypeError(`Product Blueprint does not verify ${required}.`);
     }
   }
   if (blueprint.integrityHash !== contentHash(blueprint)) {
@@ -233,6 +397,20 @@ export function createProductBlueprint({
       .map((answer) => answer.answer),
     ...projectDesign.recommendations.flatMap((recommendation) => recommendation.requiredDependencies),
   ]);
+  const designSpecification = buildDesignSpecification(projectDesign, answers);
+  const designVerification = designVerificationEntries(profile.name, designSpecification);
+  const verificationPlan = [
+    ...structuredClone(projectDesign.verificationPlan),
+    ...designVerification.filter(
+      (candidate) =>
+        !projectDesign.verificationPlan.some(
+          (existing) => existing.sourceRequirement === candidate.sourceRequirement,
+        ),
+    ),
+  ];
+  const acceptanceRequirements = unique(
+    verificationPlan.map((entry) => entry.observableOutcome),
+  );
   const draft = {
     schemaVersion: PRODUCT_BLUEPRINT_SCHEMA_VERSION,
     missionId,
@@ -247,16 +425,16 @@ export function createProductBlueprint({
     primaryWorkflows: unique(projectDesign.userExperiencePlan.primaryJourneys),
     supportingWorkflows: unique(projectDesign.userExperiencePlan.secondaryJourneys),
     requiredSurfaces: unique(projectDesign.productProposal.essentialCapabilities),
-    navigationApproach: projectDesign.designDirection.navigationApproach,
-    contentStructure: projectDesign.designDirection.contentStrategy,
+    navigationApproach: designSpecification.navigation.approach,
+    contentStructure: designSpecification.surfaces.contentEmphasis,
     administrationNeeds: unique(projectDesign.userExperiencePlan.adminResponsibilities),
     securityConsiderations: unique([
       ...projectDesign.userExperiencePlan.trustMoments,
       ...projectDesign.foundryInsights.risks,
     ]),
     dataAndPersistenceNeeds: unique(profile.dataConcepts),
-    responsivePriorities: projectDesign.designDirection.responsivePriority,
-    accessibilityNeeds: unique(projectDesign.designDirection.accessibilityNeeds),
+    responsivePriorities: designSpecification.responsive.priority,
+    accessibilityNeeds: unique(designSpecification.accessibility.requirements),
     experienceStates: {
       empty: unique(projectDesign.userExperiencePlan.criticalMoments),
       loading: unique(projectDesign.userExperiencePlan.repeatedTasks.length > 0
@@ -268,7 +446,7 @@ export function createProductBlueprint({
     includedNow: unique(projectDesign.productProposal.essentialCapabilities),
     excludedFromV1: unique(projectDesign.productProposal.intentionallyExcludedCapabilities),
     recommendedLater: unique(projectDesign.productProposal.futureCapabilities),
-    designSpecification: structuredClone(projectDesign.designDirection),
+    designSpecification,
     selectedFeatures,
     rejectedRecommendations,
     foundryDecisions,
@@ -279,8 +457,8 @@ export function createProductBlueprint({
     assumptions: unique(projectDesign.foundryInsights.assumptions),
     architecture: unique(profile.architectureDecisions),
     certifiedStackCapability: structuredClone(profile.selectedStack),
-    acceptanceRequirements: unique(projectDesign.verificationPlan.map((entry) => entry.observableOutcome)),
-    verificationPlan: structuredClone(projectDesign.verificationPlan),
+    acceptanceRequirements,
+    verificationPlan,
     quality: {
       specificity: 1, completeness: 1, usefulness: 1, differentiation: 1,
       feasibility: 1, clarity: 1, designQuality: 1, executionReadiness: 1,
