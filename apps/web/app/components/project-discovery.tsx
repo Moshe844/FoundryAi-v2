@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import type {
   ClarificationDecision,
@@ -24,15 +24,76 @@ import { FoundryObservations } from "./foundry-observations";
 import { FoundryRecommendations } from "./foundry-recommendations";
 import { ProjectUnderstanding } from "./project-understanding";
 
-const stages = [
-  { id: "read", short: "Foundry's read", title: "What I understood" },
-  { id: "direction", short: "Direction", title: "The experience direction" },
-  { id: "design", short: "Design", title: "How it should feel" },
-  { id: "ideas", short: "Ideas", title: "Useful ideas" },
-  { id: "decisions", short: "Decisions", title: "Choices that matter" },
-  { id: "conversation", short: "Your input", title: "Your instructions" },
-  { id: "review", short: "Review", title: "Ready for the plan" },
-] as const;
+type StageId =
+  | "read"
+  | "direction"
+  | "design"
+  | "ideas"
+  | "decisions"
+  | "conversation"
+  | "review";
+
+type DiscoveryStage = Readonly<{
+  id: StageId;
+  short: string;
+  title: string;
+}>;
+
+function buildStages(
+  understanding: ProjectUnderstandingModel,
+  decisions: readonly ClarificationDecision[],
+): DiscoveryStage[] {
+  const proposal = understanding.proposal;
+  const stages: DiscoveryStage[] = [
+    { id: "read", short: "Understanding", title: "What I understood" },
+  ];
+
+  if (
+    proposal.observations.length > 0 ||
+    understanding.journeys.length > 0 ||
+    proposal.reasoning.value.length > 0
+  ) {
+    stages.push({
+      id: "direction",
+      short: "Product direction",
+      title: "What I recommend building",
+    });
+  }
+
+  if (
+    proposal.alternatives.length > 0 ||
+    proposal.designDirection.recommendedStyle.value.trim().length > 0
+  ) {
+    stages.push({
+      id: "design",
+      short: "Visual direction",
+      title: "How it should feel",
+    });
+  }
+
+  if (proposal.recommendations.length > 0) {
+    stages.push({
+      id: "ideas",
+      short: "Useful ideas",
+      title: "Ideas worth considering",
+    });
+  }
+
+  if (decisions.length > 0) {
+    stages.push({
+      id: "decisions",
+      short: "Important choices",
+      title: "Choices that change the result",
+    });
+  }
+
+  stages.push(
+    { id: "conversation", short: "Your input", title: "Anything else?" },
+    { id: "review", short: "Review", title: "Ready for the plan" },
+  );
+
+  return stages;
+}
 
 export function ProjectDiscovery({
   busy,
@@ -53,7 +114,12 @@ export function ProjectDiscovery({
   profileVersion: number;
   understanding: ProjectUnderstandingModel;
 }>) {
-  const [stage, setStage] = useState(0);
+  const stages = useMemo(
+    () => buildStages(understanding, decisions),
+    [understanding, decisions],
+  );
+  const [stageId, setStageId] = useState<StageId>("read");
+  const [furthestStageIndex, setFurthestStageIndex] = useState(0);
   const [answers, setAnswers] = useState<Record<string, ClarificationAnswer>>({});
   const [selected, setSelected] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(
@@ -81,18 +147,41 @@ export function ProjectDiscovery({
   const answeredCount = decisions.filter((decision) =>
     answerIsExplicit(answers[decision.questionId]),
   ).length;
+  const currentStageIndex = Math.max(
+    0,
+    stages.findIndex((item) => item.id === stageId),
+  );
+  const currentStage = stages[currentStageIndex];
+
+  useEffect(() => {
+    if (!stages.some((item) => item.id === stageId)) {
+      setStageId(stages[0].id);
+      setFurthestStageIndex(0);
+    }
+  }, [stageId, stages]);
 
   useEffect(() => {
     stageRef.current?.focus({ preventScroll: true });
-  }, [stage]);
+  }, [stageId]);
 
-  function moveTo(next: number) {
-    setStage(Math.max(0, Math.min(stages.length - 1, next)));
+  function moveToIndex(next: number, allowFuture = false) {
+    const bounded = Math.max(0, Math.min(stages.length - 1, next));
+    if (!allowFuture && bounded > furthestStageIndex) return;
+    setStageId(stages[bounded].id);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function advance() {
+    const next = Math.min(stages.length - 1, currentStageIndex + 1);
+    setFurthestStageIndex((current) => Math.max(current, next));
+    setStageId(stages[next].id);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   function inviteInput() {
-    document.querySelector<HTMLTextAreaElement>("#customer-conversation-message")?.focus();
+    document
+      .querySelector<HTMLTextAreaElement>("#customer-conversation-message")
+      ?.focus();
   }
 
   async function submitCustomerInput(answer: CustomerFollowUpAnswer) {
@@ -115,12 +204,13 @@ export function ProjectDiscovery({
         : designChoice.mode === "alternative"
           ? "select-option"
           : "accept-recommendation";
+
     return {
       questionId: "customer-design-direction",
       answer:
         mode === "other"
-          ? `Customer design direction: ${value}.`
-          : `Use this design direction: ${value}.`,
+          ? `Customer-approved custom design direction: ${value}.`
+          : `Customer-approved design direction: ${value}.`,
       selection: {
         kind: "design-direction",
         subjectId: "design-direction",
@@ -128,7 +218,8 @@ export function ProjectDiscovery({
         optionId: selectedDirection?.id ?? null,
         value,
         reason:
-          selectedDirection?.whyItFits.value ?? proposal.designDirection.reason.value,
+          selectedDirection?.whyItFits.value ??
+          proposal.designDirection.reason.value,
         classification: "design preference",
         sourceProfileVersion: profileVersion,
       },
@@ -137,7 +228,7 @@ export function ProjectDiscovery({
 
   async function continueFromDesign() {
     if (designChoice.mode === "other" && !designChoice.value?.trim()) return;
-    if (await onClarify([designFollowUp()])) moveTo(3);
+    if (await onClarify([designFollowUp()])) advance();
   }
 
   async function toggleRecommendation(id: string) {
@@ -223,31 +314,38 @@ export function ProjectDiscovery({
     setDesignChoice({ mode: "recommended" });
   }
 
-  const currentStage = stages[stage];
   return (
-    <section className="discovery-session" aria-label="Project discovery working session">
+    <section
+      className="discovery-session"
+      aria-label="Project discovery working session"
+    >
       <header className="discovery-progress">
         <div>
           <p className="t-label ink-tertiary">Working session</p>
           <p className="t-body-s ink-secondary">
-            Step {stage + 1} of {stages.length} &middot; {currentStage.title}
+            {currentStage.title} &middot; {currentStageIndex + 1} of{" "}
+            {stages.length}
           </p>
         </div>
         <nav aria-label="Discovery progress">
           <ol>
-            {stages.map((item, index) => (
-              <li key={item.id}>
-                <button
-                  type="button"
-                  aria-current={stage === index ? "step" : undefined}
-                  aria-label={`Step ${index + 1}: ${item.short}`}
-                  onClick={() => moveTo(index)}
-                >
-                  <span>{index + 1}</span>
-                  <em>{item.short}</em>
-                </button>
-              </li>
-            ))}
+            {stages.map((item, index) => {
+              const available = index <= furthestStageIndex;
+              return (
+                <li key={item.id}>
+                  <button
+                    type="button"
+                    aria-current={stageId === item.id ? "step" : undefined}
+                    aria-label={`${item.short}${available ? "" : " — available after the previous step"}`}
+                    disabled={!available}
+                    onClick={() => moveToIndex(index)}
+                  >
+                    <span>{index + 1}</span>
+                    <em>{item.short}</em>
+                  </button>
+                </li>
+              );
+            })}
           </ol>
         </nav>
       </header>
@@ -263,11 +361,11 @@ export function ProjectDiscovery({
             {currentStage.title}
           </h1>
 
-          {stage === 0 && (
+          {stageId === "read" && (
             <>
               <ProjectUnderstanding understanding={understanding} />
               <div className="stage-actions">
-                <button className="btn btn-primary" onClick={() => moveTo(1)}>
+                <button className="btn btn-primary" onClick={advance}>
                   That&rsquo;s right
                 </button>
                 <button className="btn btn-secondary" onClick={inviteInput}>
@@ -280,7 +378,7 @@ export function ProjectDiscovery({
             </>
           )}
 
-          {stage === 1 && (
+          {stageId === "direction" && (
             <>
               <FoundryObservations observations={proposal.observations} />
               <FoundryProposal
@@ -289,20 +387,20 @@ export function ProjectDiscovery({
                 proposal={proposal}
               />
               <div className="stage-actions">
-                <button className="btn btn-primary" onClick={() => moveTo(2)}>
-                  Use this direction
+                <button className="btn btn-primary" onClick={advance}>
+                  Use this product direction
                 </button>
                 <button className="btn btn-secondary" onClick={inviteInput}>
                   Change something
                 </button>
                 <button className="btn-quiet" onClick={inviteInput}>
-                  Let Foundry revise it
+                  Ask Foundry to revise it
                 </button>
               </div>
             </>
           )}
 
-          {stage === 2 && (
+          {stageId === "design" && (
             <>
               <DesignDirection
                 alternatives={proposal.alternatives}
@@ -311,17 +409,33 @@ export function ProjectDiscovery({
                 onChange={setDesignChoice}
               />
               <div className="stage-actions">
-                <button className="btn btn-primary" disabled={interactionBusy} onClick={() => void continueFromDesign()}>
-                  {interactionBusy ? "Adapting choices…" : "Use this direction"}
+                <button
+                  className="btn btn-primary"
+                  disabled={
+                    interactionBusy ||
+                    (designChoice.mode === "other" &&
+                      !designChoice.value?.trim())
+                  }
+                  onClick={() => void continueFromDesign()}
+                >
+                  {interactionBusy
+                    ? "Saving the design…"
+                    : designChoice.mode === "other"
+                      ? "Use my custom direction"
+                      : designChoice.mode === "alternative"
+                        ? "Use selected direction"
+                        : "Use Foundry’s recommendation"}
                 </button>
-                <button className="btn-quiet" onClick={inviteInput}>
-                  Describe another style
-                </button>
+                {designChoice.mode !== "other" && (
+                  <button className="btn-quiet" onClick={inviteInput}>
+                    Add a design note
+                  </button>
+                )}
               </div>
             </>
           )}
 
-          {stage === 3 && (
+          {stageId === "ideas" && (
             <>
               <FoundryRecommendations
                 recommendations={proposal.recommendations.slice(0, 5)}
@@ -329,8 +443,8 @@ export function ProjectDiscovery({
                 onToggle={(id) => void toggleRecommendation(id)}
               />
               <div className="stage-actions">
-                <button className="btn btn-primary" onClick={() => moveTo(4)}>
-                  Continue
+                <button className="btn btn-primary" onClick={advance}>
+                  Keep these choices
                 </button>
                 <button className="btn-quiet" onClick={inviteInput}>
                   Add my own idea
@@ -339,7 +453,7 @@ export function ProjectDiscovery({
             </>
           )}
 
-          {stage === 4 && (
+          {stageId === "decisions" && (
             <>
               <ClarificationQuestions
                 decisions={decisions}
@@ -364,49 +478,44 @@ export function ProjectDiscovery({
                   })
                 }
               />
-              {decisions.length === 0 && (
-                <div className="empty-decision-state">
-                  <p className="t-label ink-tertiary">Decisions</p>
-                  <h2 className="t-title-l">Nothing you need to decide</h2>
-                  <p className="t-body-m ink-secondary">
-                    I can make the remaining professional choices from the direction you approved.
-                  </p>
-                </div>
-              )}
               <div className="stage-actions">
-                <button className="btn btn-primary" onClick={() => moveTo(5)}>
+                <button className="btn btn-primary" onClick={advance}>
                   Continue with Foundry&rsquo;s recommendations
                 </button>
-                {decisions.length > 0 && (
-                  <span className="t-body-s continue-note">
-                    {answeredCount === 0
-                      ? `All ${decisions.length} left to me — that's a perfectly good answer.`
-                      : `${answeredCount} answered · ${decisions.length - answeredCount} left to me`}
-                  </span>
-                )}
+                <span className="t-body-s continue-note">
+                  {answeredCount === 0
+                    ? `You can leave all ${decisions.length} to Foundry.`
+                    : `${answeredCount} answered · ${decisions.length - answeredCount} left to Foundry`}
+                </span>
               </div>
             </>
           )}
 
-          {stage === 5 && (
-            <section className="act conversation-measure anything-else" aria-label="Anything else?">
+          {stageId === "conversation" && (
+            <section
+              className="act conversation-measure anything-else"
+              aria-label="Anything else?"
+            >
               <div className="conversation-heading">
                 <p className="t-label ink-tertiary">Open conversation</p>
-                <h2 className="t-title-l">Anything else?</h2>
+                <h2 className="t-title-l">Anything else Foundry should know?</h2>
                 <p className="t-body-m ink-secondary">
-                  Use the conversation beside this plan to add a workflow, role,
-                  rule, integration, limitation, acceptance expectation, or any
-                  other instruction. I&rsquo;ll revise the proposal after every message.
+                  Write naturally. Add a workflow, design preference, role,
+                  business rule, limitation, integration, or anything else.
+                  Foundry will classify it and revise only the affected parts of
+                  the proposal.
                 </p>
               </div>
               {(proposal.observations.length > 0 ||
                 proposal.reasoning.value.length > 0 ||
                 proposal.exclusions.value.length > 0) && (
                 <details className="conversation-details rationale-details">
-                  <summary className="t-body-m">Why I recommend this</summary>
+                  <summary className="t-body-m">
+                    Why Foundry recommends this
+                  </summary>
                   {proposal.observations.length > 0 && (
                     <div>
-                      <h3 className="t-title-s">What I noticed</h3>
+                      <h3 className="t-title-s">What Foundry noticed</h3>
                       <ul className="detail-list">
                         {proposal.observations.map((item) => (
                           <li key={item.id}>{item.observation.value}</li>
@@ -416,41 +525,46 @@ export function ProjectDiscovery({
                   )}
                   {proposal.reasoning.value.length > 0 && (
                     <div>
-                      <h3 className="t-title-s">The calls I made</h3>
+                      <h3 className="t-title-s">The decisions Foundry made</h3>
                       <ul className="detail-list">
-                        {proposal.reasoning.value.map((item) => <li key={item}>{item}</li>)}
+                        {proposal.reasoning.value.map((item) => (
+                          <li key={item}>{item}</li>
+                        ))}
                       </ul>
                     </div>
                   )}
                   {proposal.exclusions.value.length > 0 && (
                     <div>
-                      <h3 className="t-title-s">What I left out for now</h3>
+                      <h3 className="t-title-s">What is intentionally left out</h3>
                       <ul className="detail-list">
-                        {proposal.exclusions.value.map((item) => <li key={item}>{item}</li>)}
+                        {proposal.exclusions.value.map((item) => (
+                          <li key={item}>{item}</li>
+                        ))}
                       </ul>
                     </div>
                   )}
                 </details>
               )}
               <div className="stage-actions">
-                <button className="btn btn-primary" onClick={() => moveTo(6)}>
+                <button className="btn btn-primary" onClick={advance}>
                   Review the plan
                 </button>
               </div>
             </section>
           )}
 
-          {stage === 6 && (
+          {stageId === "review" && (
             <section className="act confirm-band conversation-measure">
               <p className="t-label ink-tertiary">Final review</p>
               <h2 className="t-title-l">Ready when you are</h2>
-              <p className="t-body-m lead">
-                {understanding.summary.value}
-              </p>
+              <p className="t-body-m lead">{understanding.summary.value}</p>
               <dl className="discovery-review-summary">
                 <div>
                   <dt>Design</dt>
-                  <dd>{designChoice.value?.trim() || proposal.designDirection.recommendedStyle.value}</dd>
+                  <dd>
+                    {designChoice.value?.trim() ||
+                      proposal.designDirection.recommendedStyle.value}
+                  </dd>
                 </div>
                 <div>
                   <dt>Your instructions</dt>
@@ -458,7 +572,10 @@ export function ProjectDiscovery({
                 </div>
                 <div>
                   <dt>Decisions</dt>
-                  <dd>{answeredCount} yours &middot; {decisions.length - answeredCount} delegated</dd>
+                  <dd>
+                    {answeredCount} yours &middot;{" "}
+                    {decisions.length - answeredCount} delegated
+                  </dd>
                 </div>
                 <div>
                   <dt>Additional ideas</dt>
@@ -466,9 +583,9 @@ export function ProjectDiscovery({
                 </div>
               </dl>
               <p className="t-body-s ink-secondary">
-                You can leave everything unchanged. Foundry will use the recommended
-                choices, record every assumption, and let you revise the Decision Brief
-                before execution.
+                Leaving an item unchanged means Foundry will use its current
+                recommendation and record that decision in the plan before
+                execution.
               </p>
               <div className="continue-row">
                 <button
@@ -476,7 +593,9 @@ export function ProjectDiscovery({
                   disabled={interactionBusy}
                   onClick={() => void submit()}
                 >
-                  {interactionBusy ? "Updating the plan\u2026" : "Continue to the Decision Brief"}
+                  {interactionBusy
+                    ? "Updating the plan…"
+                    : "Continue to the Decision Brief"}
                 </button>
                 <button className="btn-quiet" onClick={inviteInput}>
                   Add another instruction
@@ -485,9 +604,12 @@ export function ProjectDiscovery({
             </section>
           )}
 
-          {stage > 0 && (
-            <button className="stage-back btn-quiet small" onClick={() => moveTo(stage - 1)}>
-              Back to {stages[stage - 1].short}
+          {currentStageIndex > 0 && (
+            <button
+              className="stage-back btn-quiet small"
+              onClick={() => moveToIndex(currentStageIndex - 1)}
+            >
+              Back to {stages[currentStageIndex - 1].short}
             </button>
           )}
         </main>
