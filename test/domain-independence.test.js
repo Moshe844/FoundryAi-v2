@@ -577,8 +577,13 @@ test("browser verification keeps Runtime Service authoritative and forbids paid 
     /rehydrationBeforeCommands\.endTimestamp\s*<\s*restoreBeforeCommands\.occurredAt/u,
   );
   assert.match(source, /rehydratedBeforeCommands/u);
-  assert.match(source, /MAX_BROWSER_REPAIR_CALLS = 0/u);
+  // The repair budget must be a real, bounded, non-zero number: zero silently
+  // disables the entire evidence-backed browser repair loop and turns every
+  // first-pass check failure into an immediate mission failure.
+  assert.match(source, /MAX_BROWSER_REPAIR_CALLS = 5/u);
+  assert.match(source, /MAX_RUNTIME_RESTARTS = 2/u);
   assert.match(source, /browser-first-pass-failed/u);
+  assert.match(source, /browser-repair-budget-exhausted/u);
   assert.match(source, /Prior evidence-backed browser repairs/u);
   assert.match(source, /sourceOnlyBrowserRepair/u);
   assert.match(source, /changing Playwright tests or configuration is not permitted/u);

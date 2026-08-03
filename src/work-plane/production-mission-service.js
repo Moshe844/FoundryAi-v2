@@ -51,10 +51,21 @@ export const ProductionRepairScope = Object.freeze({
 // A certified production run must succeed from the original generation.
 // Model-backed corrections remain deliberately disabled: they are not a
 // substitute for a sound generation contract and deterministic scaffold.
-const MAX_GENERATION_CORRECTION_CALLS = 0;
-const MAX_PROCEDURE_REPAIR_CALLS = 0;
-const MAX_BROWSER_REPAIR_CALLS = 0;
-const MAX_RUNTIME_RESTARTS = 0;
+// Bounded paid-correction budgets. Zero disables the corresponding repair
+// loop entirely and turns every first-pass failure into a terminal mission —
+// which is why finished-looking builds used to die at the last step. Each
+// loop below is already evidence-backed, checkpoint-restored, and bounded.
+const MAX_GENERATION_CORRECTION_CALLS = 2;
+const MAX_PROCEDURE_REPAIR_CALLS = 6;
+// Browser verification is the last gate, and a generated UI failing its first
+// real browser pass is the single most common recoverable event in the whole
+// pipeline. These budgets enable the evidence-backed repair loop below (which
+// restores the pre-work checkpoint, requests one narrowly scoped correction,
+// rebuilds, and reruns verification). Five paid corrections fit inside the
+// outer rerun bound of seven browser attempts; a zero budget turns every
+// first-pass check failure into an immediate mission failure.
+const MAX_BROWSER_REPAIR_CALLS = 5;
+const MAX_RUNTIME_RESTARTS = 2;
 
 export function hasBalancedJavaScriptDelimiters(source) {
   const pairs = { ")": "(", "]": "[", "}": "{" };
@@ -2439,7 +2450,9 @@ export function createProductionMissionService({
             ).length;
           if (correctionCount >= MAX_GENERATION_CORRECTION_CALLS) {
             throw new Error(
-              `The original generated bundle failed deterministic admission; no paid regeneration was attempted: ${error.message}`,
+              correctionCount === 0
+                ? `The original generated bundle failed deterministic admission; no paid regeneration was attempted: ${error.message}`
+                : `The generated bundle still failed deterministic admission after ${correctionCount} paid regenerations: ${error.message}`,
             );
           }
           const correctionSequence = correctionCount + 1;
@@ -3349,16 +3362,27 @@ export function createProductionMissionService({
           }));
         const repairPrefix = `${contractRequestNamespace}-browser-repair-`;
         if (priorRepairCalls.length >= MAX_BROWSER_REPAIR_CALLS) {
+          // Two distinct honest outcomes share this gate. A zero budget means
+          // the first pass failed with no correction attempted (FAILED); a
+          // spent budget means every safe correction was tried (EXHAUSTED).
+          const repairsWereAttempted = priorRepairCalls.length > 0;
           orchestrator.transition({
             missionId,
-            eventId: `${missionId}-browser-first-pass-failed`,
+            eventId: repairsWereAttempted
+              ? `${missionId}-browser-repair-budget-exhausted`
+              : `${missionId}-browser-first-pass-failed`,
             causationId: browser.workUnitId,
-            to: MissionState.FAILED,
-            reason:
-              "The original generated project failed browser verification; no paid correction or browser rerun was attempted.",
+            to: repairsWereAttempted
+              ? MissionState.EXHAUSTED
+              : MissionState.FAILED,
+            reason: repairsWereAttempted
+              ? `Browser verification still failed after ${priorRepairCalls.length} evidence-backed corrections; the safe repair budget is exhausted and every attempt is preserved.`
+              : "The original generated project failed browser verification; no paid correction or browser rerun was attempted.",
           });
           throw new Error(
-            "Browser verification failed on the first pass; its exact evidence is persisted and no paid repair was attempted.",
+            repairsWereAttempted
+              ? `Browser verification still failed after ${priorRepairCalls.length} evidence-backed corrections; the repair budget is exhausted and its exact evidence is persisted.`
+              : "Browser verification failed on the first pass; its exact evidence is persisted and no paid repair was attempted.",
           );
         }
         const latestPriorRepair = priorRepairCalls[0];
