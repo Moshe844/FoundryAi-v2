@@ -811,6 +811,9 @@ export function validateProjectDesignQuality(
     })),
     { family: designFamily },
   );
+  const retryStrategy = creativeAssessment.regenerationDirective
+    ? `creative-direction-retry-strategy: ${creativeAssessment.regenerationDirective}`
+    : null;
   for (const issue of creativeAssessment.issues) {
     issues.push(`${issue.code}: ${issue.message}`);
   }
@@ -874,7 +877,14 @@ export function validateProjectDesignQuality(
     if (requirementTokens.size > 0 && !covered) issues.push(`productProposal.essentialCapabilities[${index}] has no traceable verification outcome.`);
   }
   if (issues.length > 0) {
-    throw new ProjectDesignQualityError(`Project design quality validation failed: ${issues.join(" ")}`, issues);
+    // The retry strategy leads: the correction loop truncates this message
+    // before feeding it back, and a changed strategy matters more than the
+    // tail of the defect list.
+    const reported = retryStrategy === null ? issues : [retryStrategy, ...issues];
+    throw new ProjectDesignQualityError(
+      `Project design quality validation failed: ${reported.join(" ")}`,
+      reported,
+    );
   }
   return design;
 }

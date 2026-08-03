@@ -197,3 +197,84 @@ test("an alternative keeps its own density, navigation and mobile behaviour", ()
     ["one work per screen", "table collapses to cards", "one question per screen"],
   );
 });
+
+test("a rejected direction set feeds a changed retry strategy back to the model", async () => {
+  const { validateProjectDesignQuality } = await import("../src/domain/project-design.js");
+  const base = {
+    projectIntent: {
+      customerOutcome: "Photographers can publish a portfolio that sells prints to collectors.",
+      businessContext: "An independent fine-art photographer selling limited-edition prints online.",
+      intendedUsers: ["Collectors"],
+      primaryGoal: "Collectors can browse the work and enquire about a specific print.",
+      secondaryGoals: [],
+      successDefinition: "A collector finds a print and sends an enquiry without assistance.",
+      constraints: [],
+      confidence: { score: 0.8, rationale: "The audience and outcome are explicit." },
+    },
+    userExperiencePlan: {
+      primaryJourneys: ["A collector browses the work and enquires about one print."],
+      secondaryJourneys: [], criticalMoments: ["The collector sees the print at full size."],
+      failureStates: ["A missing image explains itself and offers a next step."],
+      trustMoments: ["Edition and price are stated beside every print."],
+      repeatedTasks: [], adminResponsibilities: [],
+    },
+    productProposal: {
+      essentialCapabilities: ["Collectors can browse prints and send an enquiry."],
+      recommendedCapabilities: [], intentionallyExcludedCapabilities: [], futureCapabilities: [],
+      rationale: "The first release completes browsing and enquiry before adding commerce.",
+      dependencies: [], scopeImpact: "Scope stays on browsing and enquiry.",
+    },
+    designDirection: {
+      visualPersonality: "Quiet gallery restraint", tone: "Unhurried",
+      layoutStrategy: "The print leads every screen", informationDensity: "One work at a time",
+      navigationApproach: "Hidden index", responsivePriority: "One work per phone screen",
+      accessibilityNeeds: ["Meaning never depends on colour alone."],
+      contentStrategy: "Let the print carry the page before any words do",
+      interactionStyle: "Direct", rationale: "Collectors judge the print before they read anything at all.",
+    },
+    foundryInsights: {
+      observations: ["Collectors judge a fine-art print before reading any supporting text."],
+      opportunities: ["Edition details beside each print remove a round of enquiry email."],
+      risks: ["Large photographic files can make the first view slow on poor connections."],
+      ambiguities: [], assumptions: [],
+      confidence: { score: 0.8, rationale: "The portfolio audience is well understood." },
+    },
+    decisions: [],
+    recommendations: Array.from({ length: 3 }, (_, index) => ({
+      title: `Recommendation ${index + 1}`,
+      specificValue: `Give collectors a concrete improvement number ${index + 1} here.`,
+      whyThisProjectNeedsIt: `Collectors need this specific portfolio behaviour number ${index + 1} to enquire.`,
+      impact: "Higher enquiry rate", selectedByDefault: true,
+      confidence: { score: 0.8, rationale: "Grounded in the stated outcome." },
+      requiredDependencies: [],
+    })),
+    verificationPlan: [{
+      observableOutcome: "Collectors can browse prints and send an enquiry in the running product.",
+      acceptanceMethod: "browser-check", evidenceRequired: ["Recorded browser evidence"],
+      sourceRequirement: "customer-intent-1", origin: "customer-stated", dependencyIndexes: [],
+    }],
+    // Three directions that are one idea renamed: identical prose, shared suffix.
+    designAlternatives: Array.from({ length: 3 }, (_, index) => ({
+      name: `Gallery Studio`,
+      description: "A clean modern professional portfolio that is intuitive and user-friendly.",
+      whyItFits: "A clean modern professional portfolio that is intuitive and user-friendly.",
+      layoutApproach: "A grid of work", visualPersonality: "Clean and modern",
+      informationDensity: "Balanced", navigationApproach: "Top bar",
+      mobileBehavior: "Stacks", tradeoff: "It is a simple interface.",
+      confidence: { score: 0.7, rationale: "Generic." }, recommended: index === 0,
+      preview: { typographyCharacter: "a", spacingDensity: "b", colorMood: "c", hierarchy: "d" },
+    })),
+  };
+
+  assert.throws(
+    () => validateProjectDesignQuality(base, { originalRequest: "portfolio", designFamily: "portfolio" }),
+    (error) => {
+      assert.equal(error.code, "PROJECT_DESIGN_QUALITY");
+      // The directive must lead, so it survives truncation on the way back to
+      // the model, and it must name a different strategy rather than repeat.
+      assert.match(error.issues[0], /^creative-direction-retry-strategy:/u);
+      assert.match(error.issues.join(" "), /repeated-naming|interchangeable-rationale|generic-rationale/u);
+      return true;
+    },
+  );
+});
