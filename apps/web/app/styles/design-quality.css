@@ -1,0 +1,131 @@
+.design-quality-blocker {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-5);
+  border: 1px solid color-mix(in srgb, var(--fault) 42%, var(--line-hairline));
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--fault) 7%, var(--surface-raised));
+}
+
+.design-quality-blocker > .t-label {
+  color: var(--fault);
+}
+
+.design-quality-issues {
+  display: grid;
+  gap: var(--space-2);
+  color: var(--ink-secondary);
+  font: 400 13px/20px var(--font-text);
+}
+
+.design-quality-issues li {
+  position: relative;
+  padding-left: 18px;
+}
+
+.design-quality-issues li::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 9px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--fault);
+}
+
+.design-quality-score {
+  display: grid;
+  justify-items: end;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.design-quality-score strong {
+  font: 600 17px/22px var(--font-mono);
+  color: var(--accent-fill);
+}
+
+.art-direction-card[data-disabled="true"] {
+  opacity: .64;
+  filter: saturate(.72);
+}
+
+.art-direction-card[data-disabled="true"]:hover {
+  border-color: var(--line-hairline);
+  box-shadow: var(--shadow-1);
+  transform: none;
+}
+
+.art-direction-select:disabled {
+  cursor: not-allowed;
+}
+
+.art-board[data-composition="documentation"] {
+  grid-template-columns: 138px minmax(0, 1fr);
+  background: var(--board-surface);
+}
+
+.art-board[data-composition="documentation"] .art-board-side {
+  grid-column: 1;
+  grid-row: 1;
+  grid-template-rows: 1fr auto;
+  background: var(--board-primary);
+}
+
+.art-board[data-composition="documentation"] .art-board-main {
+  grid-column: 2;
+  padding: 22px;
+}
+
+.art-board[data-composition="documentation"] .art-board-image {
+  margin: 14px;
+  background:
+    repeating-linear-gradient(
+      to bottom,
+      color-mix(in srgb, var(--board-surface) 72%, transparent) 0 4px,
+      transparent 4px 13px
+    );
+}
+
+.art-board[data-composition="documentation"] .art-board-palette {
+  padding: 12px;
+}
+
+.art-board[data-typography="editorial"] .art-board-title,
+.art-board[data-typography*="serif"] .art-board-title {
+  font-family: Georgia, "Times New Roman", serif;
+  font-weight: 500;
+  letter-spacing: -.035em;
+}
+
+.art-board[data-typography="technical"] .art-board-title,
+.art-board[data-typography="compact"] .art-board-title {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  letter-spacing: -.025em;
+}
+
+.art-board[data-density="dense"] .art-board-main {
+  gap: 12px;
+  padding: 18px;
+}
+
+.art-board[data-density="dense"] .art-board-hero {
+  gap: 7px;
+}
+
+.art-board[data-density="spacious"] .art-board-main {
+  padding: 32px;
+}
+
+.art-board[data-density="spacious"] .art-board-hero {
+  gap: 16px;
+}
+
+@media (max-width: 680px) {
+  .design-quality-score {
+    justify-items: start;
+    margin-left: 0;
+  }
+}

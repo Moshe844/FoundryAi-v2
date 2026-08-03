@@ -7,6 +7,7 @@ import type {
   DesignAlternative,
   ProjectDesignDirection,
 } from "../../experience/contracts";
+import { assessCreativeDirectionSet } from "../../experience/creative-direction-quality";
 
 export type DesignDirectionChoice = Readonly<{
   mode: "recommended" | "alternative" | "other";
@@ -31,6 +32,7 @@ function compositionFor(direction: DesignAlternative) {
   if (/editorial|magazine|casebook|journal|narrative|story/.test(source)) return "editorial";
   if (/dashboard|workspace|sidebar|admin|operations|table|grid/.test(source)) return "workspace";
   if (/guided|booking|calendar|wizard|timeline|step/.test(source)) return "guided";
+  if (/documentation|reference|developer|endpoint|api/.test(source)) return "documentation";
   return "split";
 }
 
@@ -59,6 +61,9 @@ function ArtDirectionBoard({ direction }: Readonly<{ direction: DesignAlternativ
       className="art-board"
       data-composition={compositionFor(direction)}
       data-density={system?.density ?? direction.informationDensity.value}
+      data-navigation={system?.navigationType ?? direction.navigationApproach.value}
+      data-typography={system?.typographyCategory ?? direction.preview.typographyCharacter.value}
+      data-imagery={system?.imageStrategy ?? direction.preview.hierarchy.value}
       style={style}
       aria-hidden="true"
     >
@@ -118,6 +123,7 @@ export function DesignDirection({ alternatives, choice, direction, onChange }: R
   direction: ProjectDesignDirection;
   onChange: (choice: DesignDirectionChoice) => void;
 }>) {
+  const assessment = useMemo(() => assessCreativeDirectionSet(alternatives), [alternatives]);
   const recommended = alternatives.find((item) => item.recommended.value) ?? alternatives[0];
   const refinements = useMemo(() => buildRefinements(alternatives), [alternatives]);
   const [customOpen, setCustomOpen] = useState(choice.mode === "other");
@@ -132,6 +138,7 @@ export function DesignDirection({ alternatives, choice, direction, onChange }: R
     : selectedAlternative?.name.value ?? direction.recommendedStyle.value;
 
   function selectDirection(alternative: DesignAlternative) {
+    if (!assessment.publishable) return;
     setCustomOpen(false);
     setSelectedRefinements(new Set());
     setCustomNote("");
@@ -143,6 +150,7 @@ export function DesignDirection({ alternatives, choice, direction, onChange }: R
   }
 
   function publishCustom(nextIds: Set<string>, nextNote: string) {
+    if (!assessment.publishable) return;
     onChange({ mode: "other", value: customDirectionValue(refinements, nextIds, nextNote) });
   }
 
@@ -154,6 +162,7 @@ export function DesignDirection({ alternatives, choice, direction, onChange }: R
   }
 
   function openCustom() {
+    if (!assessment.publishable) return;
     setCustomOpen(true);
     if (selectedRefinements.size === 0 && !customNote.trim()) {
       const seeds = refinements
@@ -175,10 +184,27 @@ export function DesignDirection({ alternatives, choice, direction, onChange }: R
         </p>
       </div>
 
+      {!assessment.publishable && (
+        <section className="design-quality-blocker" role="alert">
+          <p className="t-label">Foundry is revising these directions</p>
+          <h3 className="t-title-m">These choices are not different or specific enough yet.</h3>
+          <p className="t-body-s">
+            Foundry will not ask you to choose between cosmetic variations. Selection is paused until the creative directions pass the quality gate.
+          </p>
+          <ul className="design-quality-issues">
+            {assessment.issues.slice(0, 4).map((issue) => <li key={`${issue.code}-${issue.directionIds.join("-")}`}>{issue.message}</li>)}
+          </ul>
+        </section>
+      )}
+
       <div className="design-current" aria-live="polite">
         <div>
           <p className="t-caption ink-tertiary">Current art direction</p>
           <strong className="t-title-s">{selectedLabel}</strong>
+        </div>
+        <div className="design-quality-score">
+          <span className="t-caption ink-tertiary">Direction distinctness</span>
+          <strong>{assessment.distinctnessScore}%</strong>
         </div>
         <button type="button" className="btn-quiet small" onClick={() => setCompareOpen((value) => !value)}>
           {compareOpen ? "Close comparison" : "Compare directions"}
@@ -204,13 +230,13 @@ export function DesignDirection({ alternatives, choice, direction, onChange }: R
         </section>
       )}
 
-      <div className="art-direction-grid" role="radiogroup" aria-label="Project-specific art directions">
+      <div className="art-direction-grid" role="radiogroup" aria-label="Project-specific art directions" aria-disabled={!assessment.publishable}>
         {alternatives.map((alternative) => {
           const selected = choice.mode !== "other" && selectedAlternative?.id === alternative.id;
           const system = alternative.visualSystem;
           return (
-            <article className="art-direction-card" data-selected={selected} key={alternative.id}>
-              <button type="button" role="radio" aria-checked={selected} className="art-direction-select" onClick={() => selectDirection(alternative)}>
+            <article className="art-direction-card" data-selected={selected} data-disabled={!assessment.publishable} key={alternative.id}>
+              <button disabled={!assessment.publishable} type="button" role="radio" aria-checked={selected} className="art-direction-select" onClick={() => selectDirection(alternative)}>
                 <ArtDirectionBoard direction={alternative} />
                 <span className="art-direction-body">
                   <span className="art-direction-title-row">
@@ -245,17 +271,17 @@ export function DesignDirection({ alternatives, choice, direction, onChange }: R
       </div>
 
       <div className="stage-actions">
-        <button type="button" className={customOpen ? "btn btn-primary" : "btn btn-secondary"} onClick={openCustom}>
+        <button disabled={!assessment.publishable} type="button" className={customOpen ? "btn btn-primary" : "btn btn-secondary"} onClick={openCustom}>
           Combine the strongest ideas
         </button>
         {choice.mode !== "recommended" && recommended && (
-          <button type="button" className="btn-quiet" onClick={() => selectDirection(recommended)}>
+          <button disabled={!assessment.publishable} type="button" className="btn-quiet" onClick={() => selectDirection(recommended)}>
             Restore Foundry’s recommendation
           </button>
         )}
       </div>
 
-      {customOpen && (
+      {customOpen && assessment.publishable && (
         <section className="design-other" aria-label="Custom art direction">
           <div>
             <p className="t-label ink-tertiary">Create your own direction</p>
