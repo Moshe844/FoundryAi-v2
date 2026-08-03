@@ -324,8 +324,17 @@
   inset-block-end: calc(var(--ab-beat) * 1.2);
   inset-inline-start: calc(var(--ab-beat) * 1.2);
   inset-inline-end: calc(var(--ab-beat) * 1.2);
-  color: var(--ab-surface);
-  mix-blend-mode: difference;
+  /* A blend mode can make the caption vanish against a mid-tone plate. A
+     scrim keeps the overlay legible whatever palette the direction chose. */
+  padding: 6px 8px;
+  border-radius: 4px;
+  color: #fff;
+  text-shadow: 0 1px 3px rgb(0 0 0 / 0.55);
+  background: linear-gradient(
+    to top,
+    rgb(0 0 0 / 0.55),
+    rgb(0 0 0 / 0.12)
+  );
 }
 
 /* ---- responsive transform inset --------------------------------------- */

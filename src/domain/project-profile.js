@@ -317,6 +317,7 @@ function normalizeDesignAlternative(alternative, index) {
       "confidence",
       "preview",
       "visualSystem",
+      "creativeDNA",
       "tradeoffs",
     ],
     `designAlternatives[${index}]`,

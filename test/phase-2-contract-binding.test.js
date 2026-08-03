@@ -187,7 +187,7 @@ function validPlan(contract) {
       {
         path: "tests/design.spec.ts",
         content:
-          "await page.setViewportSize({ width: 390, height: 844 }); await page.screenshot({ path: 'phone.png' }); const phone = await page.locator('main').evaluate((el) => { const style = getComputedStyle(el); return { box: el.getBoundingClientRect(), fontFamily: style.fontFamily, fontSize: style.fontSize, backgroundColor: style.backgroundColor, color: style.color }; }); await page.setViewportSize({ width: 1280, height: 900 }); await page.screenshot({ path: 'desktop.png' }); const desktop = await page.locator('main').boundingBox();",
+          "await page.setViewportSize({ width: 390, height: 844 }); await page.screenshot({ path: 'phone.png' }); const phone = await page.locator('main').evaluate((el) => { const style = getComputedStyle(el); return { box: el.getBoundingClientRect(), fontFamily: style.fontFamily, fontSize: style.fontSize, backgroundColor: style.backgroundColor, color: style.color }; }); await page.setViewportSize({ width: 768, height: 1024 }); await page.screenshot({ path: 'tablet.png' }); const tablet = await page.locator('main').boundingBox(); await page.setViewportSize({ width: 1280, height: 900 }); await page.screenshot({ path: 'desktop.png' }); const desktop = await page.locator('main').boundingBox(); const overflow = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth); await page.keyboard.press('Tab'); const focused = await page.evaluate(() => document.activeElement?.tagName);",
         contractRequirementIds: [ids[0]],
       },
     ],
