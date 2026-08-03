@@ -278,3 +278,39 @@ test("a rejected direction set feeds a changed retry strategy back to the model"
     },
   );
 });
+
+test("the generator instruction and the fidelity validator encode the same contract", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const [instructionSource, validatorSource] = await Promise.all([
+    readFile(new URL("../src/domain/contract-bound-execution.js", import.meta.url), "utf8"),
+    readFile(new URL("../src/domain/design-fidelity.js", import.meta.url), "utf8"),
+  ]);
+
+  // Tightening the validator without updating the instruction makes valid work
+  // unbuildable, and it only surfaces in a multi-minute live mission where it
+  // looks like a model-quality problem. Keep the two in step here instead.
+  const instruction = instructionSource.slice(
+    instructionSource.indexOf("The structured output must include designFidelity"),
+  ).slice(0, 2000);
+
+  const requiredOfGenerator = [
+    // Every viewport class the validator's regexes will look for.
+    [/375|390|414/u, "a phone viewport"],
+    [/768|810|834|1024/u, "a tablet viewport"],
+    [/1280|1440|1512|1728/u, "a desktop viewport"],
+    [/scrollWidth/u, "the horizontal-overflow probe"],
+    [/activeElement|focus-visible/u, "the keyboard-focus probe"],
+    [/prefers-reduced-motion/u, "the reduced-motion fallback"],
+  ];
+
+  for (const [pattern, label] of requiredOfGenerator) {
+    assert.ok(
+      pattern.test(validatorSource),
+      `design-fidelity.js no longer checks ${label}; drop it from the instruction too.`,
+    );
+    assert.ok(
+      pattern.test(instruction),
+      `The generation instruction never asks for ${label}, but design-fidelity.js rejects output without it.`,
+    );
+  }
+});
