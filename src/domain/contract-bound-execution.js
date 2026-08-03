@@ -2,6 +2,11 @@ import { createHash } from "node:crypto";
 
 import { ContractBindingValidationError } from "./errors.js";
 import { normalizeApprovedProjectContract } from "./approved-project-contract.js";
+import {
+  DESIGN_FIDELITY_SCHEMA,
+  designExecutionBrief,
+  validateGeneratedDesignFidelity,
+} from "./design-fidelity.js";
 
 const IDENTIFIER = /^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,127})$/u;
 const STOP_WORDS = new Set([
@@ -63,15 +68,10 @@ function overlaps(left, right) {
 
 function preservesRequirementSubject(requirement, summary) {
   if (overlaps(requirement.statement, summary)) return true;
-  // Production-build claims are often expressed by models as compiling,
-  // packaging, or bundling. Those are concrete execution synonyms, while the
-  // generic word "build" is intentionally excluded from ordinary overlap.
   return (
     requirement.kind === "acceptance-obligation" &&
     /\bproduction build\b/iu.test(requirement.statement) &&
-    /\b(?:production|compile[sd]?|compilation|package[sd]?|packaging|bundle[sd]?)\b/iu.test(
-      summary,
-    )
+    /\b(?:production|compile[sd]?|compilation|package[sd]?|packaging|bundle[sd]?)\b/iu.test(summary)
   );
 }
 
@@ -85,6 +85,32 @@ function freeze(value) {
 
 function entry(requirementId, kind, statement) {
   return { requirementId, kind, statement: text(statement, `${requirementId}.statement`) };
+}
+
+function addBlueprintDesignRequirements(add, implementation, blueprint) {
+  const design = blueprint.designSpecification;
+  if (design === null || typeof design !== "object") return;
+  const composition = design.composition ?? {};
+  const visual = design.visualCharacter ?? {};
+  const additions = [
+    ["blueprint-design-direction", "design-direction", `${design.selectedDirectionName ?? design.visualPersonality}. ${design.rationale ?? ""}`],
+    ["blueprint-design-composition", "design-composition", `${composition.layoutApproach ?? design.layoutStrategy}. ${visual.hierarchy ?? ""}`],
+    ["blueprint-design-navigation", "design-navigation", `${composition.navigationApproach ?? design.navigationApproach}. ${design.interactionStyle ?? ""}`],
+    ["blueprint-design-typography", "design-typography", `${visual.typography ?? design.typographyDirection ?? design.visualPersonality}`],
+    ["blueprint-design-color", "design-color", `${visual.colorMood ?? design.colorStrategy ?? design.tone}`],
+    ["blueprint-design-responsive", "design-responsive", `${composition.mobileBehavior ?? design.responsivePriority}`],
+  ];
+  for (const [id, kind, statement] of additions) {
+    if (typeof statement === "string" && statement.trim().length > 2) {
+      add(implementation, entry(id, kind, statement));
+    }
+  }
+  for (const [index, requirement] of (design.accessibilityRequirements ?? design.accessibilityNeeds ?? []).entries()) {
+    add(implementation, entry(`blueprint-design-accessibility-${index + 1}`, "design-accessibility", requirement));
+  }
+  if (typeof design.customerInstructions === "string" && design.customerInstructions.trim() !== "") {
+    add(implementation, entry("blueprint-design-customer-instructions", "design-customer-instructions", design.customerInstructions));
+  }
 }
 
 export function approvedContractRequirementCatalogue(contractInput) {
@@ -132,6 +158,7 @@ export function approvedContractRequirementCatalogue(contractInput) {
       implementation,
       entry(`blueprint-acceptance-${index + 1}`, "acceptance", requirement),
     ));
+    addBlueprintDesignRequirements(add, implementation, blueprint);
     blueprint.excludedFromV1.forEach((statement, index) => add(
       exclusions,
       entry(`blueprint-exclusion-${index + 1}`, "blueprint-exclusion", statement),
@@ -168,11 +195,7 @@ export function approvedContractRequirementCatalogue(contractInput) {
   if (selectedDecisions.length > 0) {
     selectedDecisions.forEach((selection, index) => add(
       implementation,
-      entry(
-        `approved-decision-${index + 1}`,
-        "approved-decision",
-        `${selection.value}. ${selection.reason}`,
-      ),
+      entry(`approved-decision-${index + 1}`, "approved-decision", `${selection.value}. ${selection.reason}`),
     ));
   } else {
     [...contract.customerDecisions, ...contract.foundryDecisions].forEach((decision, index) => add(
@@ -234,6 +257,7 @@ export const CONTRACT_BOUND_BUNDLE_SCHEMA = Object.freeze({
     "contractVersion",
     "supportedPlatform",
     "designDirectionHash",
+    "designFidelity",
     "requirementClaims",
     "explicitExclusionIds",
     "files",
@@ -243,6 +267,7 @@ export const CONTRACT_BOUND_BUNDLE_SCHEMA = Object.freeze({
     contractVersion: { type: "integer" },
     supportedPlatform: { type: "string", minLength: 1 },
     designDirectionHash: { type: "string", minLength: 64 },
+    designFidelity: DESIGN_FIDELITY_SCHEMA,
     requirementClaims: {
       type: "array",
       minItems: 1,
@@ -288,7 +313,7 @@ export function approvedDesignDirectionHash(contractInput) {
 export function validateContractBoundMissionPlan(plan, contractInput) {
   const contract = normalizeApprovedProjectContract(contractInput);
   const catalogue = approvedContractRequirementCatalogue(contract);
-  exact(plan, ["contractHash", "contractVersion", "supportedPlatform", "designDirectionHash", "requirementClaims", "explicitExclusionIds", "files"], "generatedMissionPlan");
+  exact(plan, ["contractHash", "contractVersion", "supportedPlatform", "designDirectionHash", "designFidelity", "requirementClaims", "explicitExclusionIds", "files"], "generatedMissionPlan");
   if (plan.contractHash !== contract.contentHash || plan.contractVersion !== contract.contractVersion) fail("Generated mission plan is not bound to the approved contract version and hash.");
   if (plan.supportedPlatform !== contract.supportedPlatform) fail("Generated mission plan changed the approved platform.");
   if (plan.designDirectionHash !== approvedDesignDirectionHash(contract)) fail("Generated mission plan changed the approved design direction.");
@@ -325,6 +350,8 @@ export function validateContractBoundMissionPlan(plan, contractInput) {
     }
     return { path, content: String(file.content), contractRequirementIds: ids };
   });
+  const normalizedPlan = { ...plan, files };
+  validateGeneratedDesignFidelity(normalizedPlan, contract, fail);
   const untraced = [...requiredById.keys()].filter((requirementId) => !traced.has(requirementId));
   if (untraced.length > 0) fail(`No generated file traces to approved requirements: ${untraced.join(", ")}.`);
   return freeze({
@@ -332,53 +359,28 @@ export function validateContractBoundMissionPlan(plan, contractInput) {
     contractVersion: contract.contractVersion,
     supportedPlatform: contract.supportedPlatform,
     designDirectionHash: plan.designDirectionHash,
+    designFidelity: structuredClone(plan.designFidelity),
     requirementClaims: [...claims].map(([requirementId, implementationSummary]) => ({ requirementId, implementationSummary })),
     explicitExclusionIds: actualExclusions,
     files,
   });
 }
 
-export function validateContractRequirementTrace(
-  requirementIds,
-  contractInput,
-  allowedRequirementIds,
-) {
+export function validateContractRequirementTrace(requirementIds, contractInput, allowedRequirementIds) {
   const catalogue = approvedContractRequirementCatalogue(contractInput);
-  const approvedIds = new Set(
-    catalogue.implementationRequirements.map((item) => item.requirementId),
-  );
-  const allowedIds = new Set(
-    uniqueIdentifiers(allowedRequirementIds, "allowedRequirementIds"),
-  );
+  const approvedIds = new Set(catalogue.implementationRequirements.map((item) => item.requirementId));
+  const allowedIds = new Set(uniqueIdentifiers(allowedRequirementIds, "allowedRequirementIds"));
   for (const requirementId of allowedIds) {
-    if (!approvedIds.has(requirementId)) {
-      fail(`Repair scope references unknown requirement "${requirementId}".`);
-    }
+    if (!approvedIds.has(requirementId)) fail(`Repair scope references unknown requirement "${requirementId}".`);
   }
-  const trace = uniqueIdentifiers(
-    requirementIds,
-    "contractRequirementIds",
-  );
+  const trace = uniqueIdentifiers(requirementIds, "contractRequirementIds");
   for (const requirementId of trace) {
-    if (!allowedIds.has(requirementId)) {
-      fail(
-        `Repair traces to requirement "${requirementId}" outside its approved task scope.`,
-      );
-    }
+    if (!allowedIds.has(requirementId)) fail(`Repair traces to requirement "${requirementId}" outside its approved task scope.`);
   }
   return freeze([...trace]);
 }
 
-export function createModelTaskContract({
-  approvedContract,
-  routingRequirements,
-  taskObjective,
-  allowedScope,
-  forbiddenChanges,
-  relevantRequirementIds,
-  currentCheckpoint,
-  expectedOutputSchema,
-}) {
+export function createModelTaskContract({ approvedContract, routingRequirements, taskObjective, allowedScope, forbiddenChanges, relevantRequirementIds, currentCheckpoint, expectedOutputSchema }) {
   const contract = normalizeApprovedProjectContract(approvedContract);
   const catalogue = approvedContractRequirementCatalogue(contract);
   const byId = new Map(catalogue.implementationRequirements.map((item) => [item.requirementId, item]));
@@ -403,6 +405,7 @@ export function createModelTaskContract({
       workflows: contract.workflows,
       selectedDesignDirection: contract.selectedDesignDirection,
       selectedDesignDirectionHash: approvedDesignDirectionHash(contract),
+      designExecutionBrief: designExecutionBrief(contract),
       acceptedRecommendations: contract.acceptedRecommendations,
       rejectedRecommendations: contract.rejectedRecommendations,
       customerDecisions: contract.customerDecisions,
@@ -411,9 +414,7 @@ export function createModelTaskContract({
       productBlueprint: contract.productBlueprint ?? null,
       assumptions: contract.assumptions,
       explicitExclusions: contract.explicitExclusions,
-      explicitExclusionIds: catalogue.exclusionRequirements.map(
-        (requirement) => requirement.requirementId,
-      ),
+      explicitExclusionIds: catalogue.exclusionRequirements.map((requirement) => requirement.requirementId),
       architectureConstraints: contract.architectureConstraints,
       supportedPlatform: contract.supportedPlatform,
       selectedStackCapability: contract.selectedStackCapability,
@@ -433,6 +434,9 @@ export function contractBoundModelPrompt(taskContract, instructions) {
   return [
     "MODEL TASK CONTRACT — BINDING",
     JSON.stringify(taskContract),
+    "DESIGN-DIRECTED GENERATION — BINDING",
+    "Implement the approved designExecutionBrief as the real structural design of the application, not as descriptive copy. Translate its composition, navigation, hierarchy, typography, color roles, spacing density, interaction behavior, imagery strategy, mobile transformation, accessibility requirements, and customer instructions into concrete source. The finished project must be recognizably the approved direction. Reusing a generic dashboard, card stack, or universal shell that merely changes colors or labels is a contract violation.",
+    "The structured output must include designFidelity explaining exactly where each design rule is implemented. designFidelity.sourceFiles must identify the actual customer-facing layout and style files. The generated Playwright test must capture screenshots at both phone and desktop widths and must measure rendered composition, typography, color, and responsive transformation using real DOM/computed-style evidence. A screenshot alone is not a passing verdict, but screenshots are mandatory evidence for review and repair.",
     "Copy authoritative contractHash, contractVersion, supportedPlatform, designDirectionHash, and explicitExclusionIds values exactly from the binding task contract when the output schema requests them. Never calculate, abbreviate, or reinterpret those values. Return exactly one requirementClaims entry for every requiredImplementationRequirementIds value and trace every one of those identifiers to at least one generated file. In each implementationSummary, preserve at least one exact distinctive subject word from that requirement; for a production-build requirement, explicitly describe the production compilation, packaging, or bundle.",
     "INSTRUCTIONS",
     ...instructions.map((instruction, index) => `${index + 1}. ${text(instruction, `instructions[${index}]`)}`),
