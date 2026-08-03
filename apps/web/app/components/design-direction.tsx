@@ -20,67 +20,68 @@ type Refinement = Readonly<{
   value: string;
 }>;
 
-function DirectionPreview({ direction }: Readonly<{ direction: DesignAlternative }>) {
-  const system = direction.visualSystem;
-  const rawLayout = (system?.layoutType ?? direction.layoutApproach.value).toLowerCase();
-  const labels = system?.sampleLabels ?? [
-    direction.name.value,
+function compositionFor(direction: DesignAlternative) {
+  const source = [
+    direction.visualSystem?.layoutType,
     direction.layoutApproach.value,
-    direction.navigationApproach.value,
-  ];
-  const style = {
-    "--preview-bg": system?.colorRoles.background ?? "#f4f2ed",
-    "--preview-surface": system?.colorRoles.surface ?? "#ffffff",
-    "--preview-primary": system?.colorRoles.primary ?? "#203b36",
-    "--preview-accent": system?.colorRoles.accent ?? "#d27b45",
-    "--preview-text": system?.colorRoles.text ?? "#17201e",
-  } as CSSProperties;
+    direction.visualSystem?.contentEmphasis,
+    direction.visualSystem?.imageStrategy,
+  ].filter(Boolean).join(" ").toLowerCase();
+  if (/cinematic|immersive|full[- ]?screen|hero|image[- ]led|gallery/.test(source)) return "immersive";
+  if (/editorial|magazine|casebook|journal|narrative|story/.test(source)) return "editorial";
+  if (/dashboard|workspace|sidebar|admin|operations|table|grid/.test(source)) return "workspace";
+  if (/guided|booking|calendar|wizard|timeline|step/.test(source)) return "guided";
+  return "split";
+}
 
-  let composition;
-  if (/gallery|portfolio|cinematic|immersive|image/.test(rawLayout)) {
-    composition = (
-      <div className="preview-shell preview-editorial-shell">
-        <nav><b>{labels[0]}</b><span>{labels[1]}</span><span>{labels[2]}</span></nav>
-        <figure />
-        <div className="preview-columns"><p /><p /></div>
-      </div>
-    );
-  } else if (/calendar|booking|schedule|timeline/.test(rawLayout)) {
-    composition = (
-      <div className="preview-shell preview-guided-shell">
-        <div className="preview-steps"><b>1</b><i /><b>2</b><i /><b>3</b></div>
-        <section><small>{labels[0]}</small><h4>{labels[1]}</h4><p /><p /><button tabIndex={-1}>{labels[2]}</button></section>
-      </div>
-    );
-  } else if (/dashboard|workspace|sidebar|operations|table|admin/.test(rawLayout)) {
-    composition = (
-      <div className="preview-shell preview-sidebar-shell">
-        <aside>{labels.slice(0, 3).map((label) => <span key={label}>{label}</span>)}</aside>
-        <main><header><b>{labels[0]}</b><i /></header><div className="preview-stat-row"><span /><span /><span /></div><div className="preview-table"><i /><i /><i /><i /></div></main>
-      </div>
-    );
-  } else if (/split|profile|index|detail/.test(rawLayout)) {
-    composition = (
-      <div className="preview-shell preview-split-shell">
-        <section><small>{labels[0]}</small><b>{labels[1]}</b><i /><button tabIndex={-1}>{labels[2]}</button></section>
-        <figure><span /><span /><span /></figure>
-      </div>
-    );
-  } else {
-    composition = (
-      <div className="preview-shell preview-canvas-shell">
-        <nav><b>{labels[0]}</b><span /><span /></nav>
-        <main><section><h4>{labels[1]}</h4><p /><button tabIndex={-1}>{labels[2]}</button></section><aside><i /><i /></aside></main>
-      </div>
-    );
-  }
+function ArtDirectionBoard({ direction }: Readonly<{ direction: DesignAlternative }>) {
+  const system = direction.visualSystem;
+  const labels = system?.sampleLabels?.length
+    ? system.sampleLabels
+    : [direction.name.value, direction.layoutApproach.value, direction.navigationApproach.value];
+  const style = {
+    "--board-bg": system?.colorRoles.background ?? "#f4f2ed",
+    "--board-surface": system?.colorRoles.surface ?? "#ffffff",
+    "--board-primary": system?.colorRoles.primary ?? "#203b36",
+    "--board-accent": system?.colorRoles.accent ?? "#d27b45",
+    "--board-text": system?.colorRoles.text ?? "#17201e",
+  } as CSSProperties;
+  const palette = [
+    system?.colorRoles.background,
+    system?.colorRoles.surface,
+    system?.colorRoles.primary,
+    system?.colorRoles.accent,
+    system?.colorRoles.text,
+  ].filter((value): value is string => Boolean(value));
 
   return (
-    <div className="direction-preview" data-density={system?.density} data-layout={rawLayout} style={style} aria-hidden="true">
-      {composition}
-      <span className="direction-preview-mood">
-        {system?.typographyCategory ?? direction.preview.typographyCharacter.value} · {system?.density ?? direction.preview.spacingDensity.value}
-      </span>
+    <div
+      className="art-board"
+      data-composition={compositionFor(direction)}
+      data-density={system?.density ?? direction.informationDensity.value}
+      style={style}
+      aria-hidden="true"
+    >
+      <div className="art-board-main">
+        <div className="art-board-nav">
+          <strong>{labels[0] ?? direction.name.value}</strong>
+          <span>{labels[2] ?? direction.navigationApproach.value}</span>
+        </div>
+        <div className="art-board-hero">
+          <span className="art-board-kicker">{direction.visualPersonality.value}</span>
+          <span className="art-board-title">{labels[1] ?? direction.name.value}</span>
+          <span className="art-board-copy">{direction.description.value}</span>
+          <span className="art-board-action">Explore the experience</span>
+        </div>
+      </div>
+      <div className="art-board-side">
+        <div className="art-board-image" />
+        <div className="art-board-palette">
+          {(palette.length ? palette : ["#f4f2ed", "#ffffff", "#203b36", "#d27b45", "#17201e"]).map((color) => (
+            <i key={color} style={{ background: color }} />
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
@@ -93,6 +94,8 @@ function buildRefinements(alternatives: readonly DesignAlternative[]): readonly 
     { id: `${alternative.id}-color`, label: alternative.preview.colorMood.value, value: `Color direction: ${alternative.preview.colorMood.value}` },
     { id: `${alternative.id}-navigation`, label: alternative.navigationApproach.value, value: `Navigation: ${alternative.navigationApproach.value}` },
     { id: `${alternative.id}-mobile`, label: alternative.mobileBehavior.value, value: `Mobile behavior: ${alternative.mobileBehavior.value}` },
+    { id: `${alternative.id}-imagery`, label: alternative.visualSystem?.imageStrategy ?? alternative.preview.hierarchy.value, value: `Imagery and hierarchy: ${alternative.visualSystem?.imageStrategy ?? alternative.preview.hierarchy.value}` },
+    { id: `${alternative.id}-interaction`, label: alternative.visualSystem?.interactionModel ?? alternative.tradeoff.value, value: `Interaction character: ${alternative.visualSystem?.interactionModel ?? alternative.tradeoff.value}` },
   ]);
   const seen = new Set<string>();
   return candidates.filter((candidate) => {
@@ -100,7 +103,7 @@ function buildRefinements(alternatives: readonly DesignAlternative[]): readonly 
     if (!normalized || seen.has(normalized)) return false;
     seen.add(normalized);
     return true;
-  }).slice(0, 10);
+  }).slice(0, 14);
 }
 
 function customDirectionValue(refinements: readonly Refinement[], selectedIds: ReadonlySet<string>, note: string) {
@@ -118,13 +121,14 @@ export function DesignDirection({ alternatives, choice, direction, onChange }: R
   const recommended = alternatives.find((item) => item.recommended.value) ?? alternatives[0];
   const refinements = useMemo(() => buildRefinements(alternatives), [alternatives]);
   const [customOpen, setCustomOpen] = useState(choice.mode === "other");
+  const [compareOpen, setCompareOpen] = useState(false);
   const [selectedRefinements, setSelectedRefinements] = useState<Set<string>>(() => new Set());
   const [customNote, setCustomNote] = useState("");
 
   const selectedAlternative = alternatives.find((item) => item.id === choice.optionId) ??
     (choice.mode === "recommended" ? recommended : undefined);
   const selectedLabel = choice.mode === "other"
-    ? (choice.value?.trim() ? "Custom direction ready" : "Build a custom direction")
+    ? (choice.value?.trim() ? "Your combined art direction" : "Custom direction")
     : selectedAlternative?.name.value ?? direction.recommendedStyle.value;
 
   function selectDirection(alternative: DesignAlternative) {
@@ -152,47 +156,88 @@ export function DesignDirection({ alternatives, choice, direction, onChange }: R
   function openCustom() {
     setCustomOpen(true);
     if (selectedRefinements.size === 0 && !customNote.trim()) {
-      const seed = refinements.find((item) => item.label === recommended?.visualPersonality.value) ?? refinements[0];
-      const next = seed ? new Set([seed.id]) : new Set<string>();
+      const seeds = refinements
+        .filter((item) => item.id.startsWith(`${recommended?.id}-`))
+        .slice(0, 2);
+      const next = new Set(seeds.map((item) => item.id));
       setSelectedRefinements(next);
       publishCustom(next, customNote);
     }
   }
 
   return (
-    <section className="act conversation-measure">
-      <div className="conversation-heading">
-        <p className="t-label ink-tertiary">Visual direction</p>
-        <h2 className="t-title-l">Choose the direction Foundry should build</h2>
+    <section className="act design-studio">
+      <div className="design-studio-intro">
+        <p className="t-label ink-tertiary">Creative direction</p>
+        <h2 className="t-title-l">Choose the experience Foundry should bring to life</h2>
         <p className="t-body-m ink-secondary">
-          Compare a few distinct directions created for this project. Select one as-is, or combine the parts you like. You never need to write a design specification.
+          These are project-specific art directions, not reusable templates. Each one defines composition, visual mood, typography, navigation, imagery, interaction, and mobile behavior. The approved direction becomes part of the binding build contract.
         </p>
       </div>
 
-      <div className="banner banner-neutral" aria-live="polite">
-        <div className="banner-body"><strong>Current choice</strong><p>{selectedLabel}</p></div>
+      <div className="design-current" aria-live="polite">
+        <div>
+          <p className="t-caption ink-tertiary">Current art direction</p>
+          <strong className="t-title-s">{selectedLabel}</strong>
+        </div>
+        <button type="button" className="btn-quiet small" onClick={() => setCompareOpen((value) => !value)}>
+          {compareOpen ? "Close comparison" : "Compare directions"}
+        </button>
       </div>
 
-      <div className="direction-card-grid" role="radiogroup" aria-label="Project-specific design directions">
+      {compareOpen && (
+        <section className="design-comparison" aria-label="Design direction comparison">
+          <div>
+            <p className="t-label ink-tertiary">At a glance</p>
+            <h3 className="t-title-m">How the directions differ</h3>
+          </div>
+          <div className="design-comparison-grid">
+            {alternatives.map((alternative) => (
+              <div className="design-comparison-item" key={alternative.id}>
+                <strong>{alternative.name.value}</strong>
+                <span><b>Best for:</b> {alternative.whyItFits.value}</span>
+                <span><b>Experience:</b> {alternative.visualPersonality.value}</span>
+                <span><b>Tradeoff:</b> {alternative.tradeoff.value}</span>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      <div className="art-direction-grid" role="radiogroup" aria-label="Project-specific art directions">
         {alternatives.map((alternative) => {
           const selected = choice.mode !== "other" && selectedAlternative?.id === alternative.id;
+          const system = alternative.visualSystem;
           return (
-            <article className="direction-card" data-selected={selected} key={alternative.id}>
-              <button type="button" role="radio" aria-checked={selected} className="direction-card-select" onClick={() => selectDirection(alternative)}>
-                <DirectionPreview direction={alternative} />
-                <span className="direction-card-head"><strong>{alternative.name.value}</strong>{alternative.recommended.value && <span className="badge">Recommended</span>}</span>
-                <span className="t-body-s ink-secondary">{alternative.description.value}</span>
-                <span className="direction-fit t-body-s"><strong>Why it fits:</strong> {alternative.whyItFits.value}</span>
+            <article className="art-direction-card" data-selected={selected} key={alternative.id}>
+              <button type="button" role="radio" aria-checked={selected} className="art-direction-select" onClick={() => selectDirection(alternative)}>
+                <ArtDirectionBoard direction={alternative} />
+                <span className="art-direction-body">
+                  <span className="art-direction-title-row">
+                    <strong>{alternative.name.value}</strong>
+                    {alternative.recommended.value && <span className="badge">Foundry recommends</span>}
+                  </span>
+                  <span className="t-body-s ink-secondary">{alternative.description.value}</span>
+                  <span className="art-direction-reason t-body-s"><strong>Why this fits your project:</strong> {alternative.whyItFits.value}</span>
+                  <dl className="art-direction-signals">
+                    <div className="art-direction-signal"><dt>Composition</dt><dd>{alternative.layoutApproach.value}</dd></div>
+                    <div className="art-direction-signal"><dt>Typography</dt><dd>{alternative.preview.typographyCharacter.value}</dd></div>
+                    <div className="art-direction-signal"><dt>Imagery</dt><dd>{system?.imageStrategy ?? alternative.preview.hierarchy.value}</dd></div>
+                    <div className="art-direction-signal"><dt>Mobile</dt><dd>{alternative.mobileBehavior.value}</dd></div>
+                  </dl>
+                </span>
               </button>
-              <details className="conversation-details">
-                <summary className="t-body-s">See design details</summary>
-                <dl className="direction-facts">
-                  <div><dt>Composition</dt><dd>{alternative.layoutApproach.value}</dd></div>
-                  <div><dt>Personality</dt><dd>{alternative.visualPersonality.value}</dd></div>
-                  <div><dt>Navigation</dt><dd>{alternative.navigationApproach.value}</dd></div>
-                  <div><dt>Mobile</dt><dd>{alternative.mobileBehavior.value}</dd></div>
-                </dl>
-                <p className="t-caption">Tradeoff: {alternative.tradeoff.value}</p>
+              <details className="art-direction-details">
+                <summary className="t-body-s">Open the full creative brief</summary>
+                <div className="art-direction-story">
+                  <p className="t-body-s"><strong>Visual personality:</strong> {alternative.visualPersonality.value}</p>
+                  <p className="t-body-s"><strong>Navigation:</strong> {alternative.navigationApproach.value}</p>
+                  <p className="t-body-s"><strong>Information density:</strong> {alternative.informationDensity.value}</p>
+                  <p className="t-body-s"><strong>Interaction character:</strong> {system?.interactionModel ?? "Defined by the selected direction and approved workflows."}</p>
+                  <p className="t-body-s"><strong>Surface treatment:</strong> {system?.surfaceTreatment ?? alternative.preview.spacingDensity.value}</p>
+                  <p className="t-body-s"><strong>Tradeoff:</strong> {alternative.tradeoff.value}</p>
+                  <p className="t-caption ink-tertiary">Confidence: {Math.round(alternative.confidence.value * 100)}%</p>
+                </div>
               </details>
             </article>
           );
@@ -201,7 +246,7 @@ export function DesignDirection({ alternatives, choice, direction, onChange }: R
 
       <div className="stage-actions">
         <button type="button" className={customOpen ? "btn btn-primary" : "btn btn-secondary"} onClick={openCustom}>
-          Combine ideas into my own direction
+          Combine the strongest ideas
         </button>
         {choice.mode !== "recommended" && recommended && (
           <button type="button" className="btn-quiet" onClick={() => selectDirection(recommended)}>
@@ -211,15 +256,15 @@ export function DesignDirection({ alternatives, choice, direction, onChange }: R
       </div>
 
       {customOpen && (
-        <section className="design-other" aria-label="Custom design direction">
+        <section className="design-other" aria-label="Custom art direction">
           <div>
-            <p className="t-label ink-tertiary">Your direction</p>
-            <h3 className="t-title-m">Pick the ideas that feel right</h3>
+            <p className="t-label ink-tertiary">Create your own direction</p>
+            <h3 className="t-title-m">Choose the parts you want Foundry to combine</h3>
             <p className="t-body-s ink-secondary">
-              Selecting one or more ideas is enough. The note below is optional.
+              These ideas come from the project-specific directions above. Choosing one or more is enough; writing is optional.
             </p>
           </div>
-          <div className="continue-row" role="group" aria-label="Design refinements">
+          <div className="continue-row" role="group" aria-label="Art direction refinements">
             {refinements.map((refinement) => {
               const selected = selectedRefinements.has(refinement.id);
               return (
@@ -229,14 +274,14 @@ export function DesignDirection({ alternatives, choice, direction, onChange }: R
               );
             })}
           </div>
-          <label htmlFor="design-direction-other" className="t-body-s">Optional: add one detail Foundry did not suggest</label>
-          <textarea id="design-direction-other" className="plain-textarea" rows={3} placeholder="Example: Use our navy and gold brand colors, or avoid animation." value={customNote} onChange={(event) => {
+          <label htmlFor="design-direction-other" className="t-body-s">Optional: add a detail only you know</label>
+          <textarea id="design-direction-other" className="plain-textarea" rows={3} placeholder="Example: Use our navy and gold identity, prioritize full-screen photography, or keep motion very restrained." value={customNote} onChange={(event) => {
             const nextNote = event.target.value;
             setCustomNote(nextNote);
             publishCustom(selectedRefinements, nextNote);
           }} />
           <p className="t-caption ink-tertiary">
-            {selectedRefinements.size > 0 ? `${selectedRefinements.size} design idea${selectedRefinements.size === 1 ? "" : "s"} selected. You can continue now.` : "Choose at least one idea, or add a note."}
+            {selectedRefinements.size > 0 ? `${selectedRefinements.size} art-direction idea${selectedRefinements.size === 1 ? "" : "s"} selected. This is ready to build.` : "Choose at least one idea, or add a note."}
           </p>
         </section>
       )}
