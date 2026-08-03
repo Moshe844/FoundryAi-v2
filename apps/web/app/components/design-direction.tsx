@@ -1,10 +1,10 @@
 "use client";
 
 import type { CSSProperties } from "react";
+import { useMemo, useState } from "react";
 
 import type {
   DesignAlternative,
-  DesignVisualSystem,
   ProjectDesignDirection,
 } from "../../experience/contracts";
 
@@ -12,6 +12,12 @@ export type DesignDirectionChoice = Readonly<{
   mode: "recommended" | "alternative" | "other";
   optionId?: string;
   value?: string;
+}>;
+
+type Refinement = Readonly<{
+  id: string;
+  label: string;
+  value: string;
 }>;
 
 function DirectionPreview({
@@ -171,6 +177,65 @@ function selectedDirectionName(
   return selected?.name.value ?? direction.recommendedStyle.value;
 }
 
+function buildRefinements(
+  alternatives: readonly DesignAlternative[],
+): readonly Refinement[] {
+  const candidates = alternatives.flatMap((alternative) => [
+    {
+      id: `${alternative.id}-personality`,
+      label: alternative.visualPersonality.value,
+      value: `Visual personality: ${alternative.visualPersonality.value}`,
+    },
+    {
+      id: `${alternative.id}-composition`,
+      label: alternative.layoutApproach.value,
+      value: `Composition: ${alternative.layoutApproach.value}`,
+    },
+    {
+      id: `${alternative.id}-type`,
+      label: alternative.preview.typographyCharacter.value,
+      value: `Typography: ${alternative.preview.typographyCharacter.value}`,
+    },
+    {
+      id: `${alternative.id}-color`,
+      label: alternative.preview.colorMood.value,
+      value: `Color direction: ${alternative.preview.colorMood.value}`,
+    },
+    {
+      id: `${alternative.id}-navigation`,
+      label: alternative.navigationApproach.value,
+      value: `Navigation: ${alternative.navigationApproach.value}`,
+    },
+    {
+      id: `${alternative.id}-mobile`,
+      label: alternative.mobileBehavior.value,
+      value: `Mobile behavior: ${alternative.mobileBehavior.value}`,
+    },
+  ]);
+
+  const seen = new Set<string>();
+  return candidates.filter((candidate) => {
+    const normalized = candidate.label.trim().toLowerCase();
+    if (!normalized || seen.has(normalized)) return false;
+    seen.add(normalized);
+    return true;
+  });
+}
+
+function customDirectionValue(
+  refinements: readonly Refinement[],
+  selectedIds: ReadonlySet<string>,
+  note: string,
+) {
+  const selected = refinements
+    .filter((refinement) => selectedIds.has(refinement.id))
+    .map((refinement) => refinement.value);
+  const trimmedNote = note.trim();
+
+  if (trimmedNote) selected.push(`Customer note: ${trimmedNote}`);
+  return selected.join(". ");
+}
+
 export function DesignDirection({
   alternatives,
   choice,
@@ -191,6 +256,39 @@ export function DesignDirection({
       : choice.mode === "alternative"
         ? "An alternative direction is selected"
         : "Your custom direction is selected";
+  const refinements = useMemo(
+    () => buildRefinements(alternatives),
+    [alternatives],
+  );
+  const [selectedRefinements, setSelectedRefinements] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [customNote, setCustomNote] = useState("");
+
+  function publishCustom(nextIds: Set<string>, nextNote: string) {
+    onChange({
+      mode: "other",
+      value: customDirectionValue(refinements, nextIds, nextNote),
+    });
+  }
+
+  function toggleRefinement(id: string) {
+    const next = new Set(selectedRefinements);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setSelectedRefinements(next);
+    publishCustom(next, customNote);
+  }
+
+  function resetToRecommended() {
+    setSelectedRefinements(new Set());
+    setCustomNote("");
+    onChange({
+      mode: "recommended",
+      optionId: recommended?.id,
+      value: recommended?.name.value ?? direction.recommendedStyle.value,
+    });
+  }
 
   return (
     <section className="act conversation-measure">
@@ -199,8 +297,8 @@ export function DesignDirection({
         <h2 className="t-title-l">Choose the experience you want people to feel</h2>
         <p className="t-body-m ink-secondary">
           These directions came from this project’s audience, workflows, and
-          purpose. Pick one, keep Foundry’s recommendation, or describe
-          something completely different.
+          purpose. Pick one, keep Foundry’s recommendation, or combine the
+          project-specific ideas that fit your vision.
         </p>
       </div>
 
@@ -216,13 +314,7 @@ export function DesignDirection({
           type="button"
           className="design-recommendation direction-accept"
           aria-pressed={choice.mode === "recommended"}
-          onClick={() =>
-            onChange({
-              mode: "recommended",
-              optionId: recommended.id,
-              value: recommended.name.value,
-            })
-          }
+          onClick={resetToRecommended}
         >
           <div>
             <span className="badge">
@@ -259,7 +351,9 @@ export function DesignDirection({
               className="direction-card"
               data-selected={selected}
               key={alternative.id}
-              onClick={() =>
+              onClick={() => {
+                setSelectedRefinements(new Set());
+                setCustomNote("");
                 onChange(
                   alternative.recommended.value
                     ? {
@@ -272,8 +366,8 @@ export function DesignDirection({
                         optionId: alternative.id,
                         value: alternative.name.value,
                       },
-                )
-              }
+                );
+              }}
             >
               <DirectionPreview direction={alternative} />
               <span className="direction-card-head">
@@ -323,42 +417,63 @@ export function DesignDirection({
           type="button"
           className={other ? "btn btn-secondary" : "btn-quiet"}
           aria-expanded={other}
-          onClick={() =>
-            onChange(
-              other
-                ? {
-                    mode: "recommended",
-                    optionId: recommended?.id,
-                    value:
-                      recommended?.name.value ??
-                      direction.recommendedStyle.value,
-                  }
-                : { mode: "other", value: "" },
-            )
-          }
+          onClick={() => {
+            if (other) resetToRecommended();
+            else onChange({ mode: "other", value: "" });
+          }}
         >
-          {other ? "Cancel custom direction" : "Describe your own direction"}
+          {other ? "Cancel custom direction" : "Create another direction"}
         </button>
       </div>
 
       {other && (
-        <div className="design-other">
+        <section className="design-other" aria-label="Create a custom design direction">
+          <div>
+            <p className="t-label ink-tertiary">Project-specific design ideas</p>
+            <h3 className="t-title-m">Choose any ideas that feel right</h3>
+            <p className="t-body-s ink-secondary">
+              These choices were taken from the directions Foundry created for
+              this project. Pick none, one, or several, then add your own note if
+              needed.
+            </p>
+          </div>
+
+          <div className="continue-row" role="group" aria-label="Design refinements">
+            {refinements.slice(0, 12).map((refinement) => {
+              const selected = selectedRefinements.has(refinement.id);
+              return (
+                <button
+                  type="button"
+                  className={selected ? "btn btn-primary small" : "btn btn-secondary small"}
+                  aria-pressed={selected}
+                  key={refinement.id}
+                  onClick={() => toggleRefinement(refinement.id)}
+                >
+                  {refinement.label}
+                </button>
+              );
+            })}
+          </div>
+
           <label htmlFor="design-direction-other" className="t-body-s">
-            Describe the feeling, references, colors, layout, or behavior you
-            want. Foundry will turn it into a structured direction before
-            building.
+            Add anything Foundry has not suggested
           </label>
           <textarea
             id="design-direction-other"
             className="plain-textarea"
             rows={4}
-            placeholder="For example: cinematic and image-led, with almost no visible chrome; large photography; quiet typography; mobile should feel like a curated gallery."
-            value={choice.value ?? ""}
-            onChange={(event) =>
-              onChange({ mode: "other", value: event.target.value })
-            }
+            placeholder="For example: use our navy and gold brand colors, avoid animation, and make the mobile experience feel like a curated gallery."
+            value={customNote}
+            onChange={(event) => {
+              const nextNote = event.target.value;
+              setCustomNote(nextNote);
+              publishCustom(selectedRefinements, nextNote);
+            }}
           />
-        </div>
+          <p className="t-caption ink-tertiary">
+            You can also leave this empty and return to Foundry’s recommendation.
+          </p>
+        </section>
       )}
     </section>
   );
