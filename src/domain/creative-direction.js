@@ -440,10 +440,21 @@ export function normalizeCreativeDNA(value, label = "creativeDNA") {
   if (unexpected.length > 0) {
     fail(`${label} contains unsupported fields: ${unexpected.join(", ")}.`);
   }
-  const missing = CREATIVE_DNA_KEYS.filter((key) => !Object.hasOwn(value, key));
+  // surfaceLabels and primaryAction are requested from the model but must never
+  // be able to fail an otherwise valid direction: adding a required field to a
+  // schema the model may not yet satisfy takes the whole mission down. They are
+  // filled from the composition's own regions when absent.
+  const SOFT_KEYS = new Set(["surfaceLabels", "primaryAction"]);
+  const missing = CREATIVE_DNA_KEYS.filter(
+    (key) => !Object.hasOwn(value, key) && !SOFT_KEYS.has(key),
+  );
   if (missing.length > 0) {
     fail(`${label} is missing: ${missing.join(", ")}.`);
   }
+  const spec = COMPOSITION_PRIMITIVES[value.compositionPrimitive];
+  const fallbackLabels = spec
+    ? [...new Set(spec.surfaceRoles.map(humanizeRegion))].slice(0, 6)
+    : ["Section", "Section"];
   for (const key of CREATIVE_DNA_ENUM_KEYS) {
     if (!CREATIVE_DNA_ENUMS[key].includes(value[key])) {
       fail(`${label}.${key} is unsupported: ${String(value[key])}.`);
@@ -453,7 +464,9 @@ export function normalizeCreativeDNA(value, label = "creativeDNA") {
     thesis: text(value.thesis, `${label}.thesis`, { max: 240 }),
     emotionalGoal: text(value.emotionalGoal, `${label}.emotionalGoal`, { max: 160 }),
     audienceResponse: text(value.audienceResponse, `${label}.audienceResponse`, { max: 160 }),
-    primaryAction: text(value.primaryAction, `${label}.primaryAction`, { max: 32 }),
+    primaryAction: Object.hasOwn(value, "primaryAction")
+      ? text(value.primaryAction, `${label}.primaryAction`, { max: 32 })
+      : "Continue",
     ...Object.fromEntries(CREATIVE_DNA_ENUM_KEYS.map((key) => [key, value[key]])),
     surfaceSequence: Object.freeze(
       // A surface sequence is an ordered walk, so a repeated region (two
@@ -468,7 +481,9 @@ export function normalizeCreativeDNA(value, label = "creativeDNA") {
       stringList(value.exclusions, `${label}.exclusions`, { min: 1, max: 4 }),
     ),
     surfaceLabels: Object.freeze(
-      stringList(value.surfaceLabels, `${label}.surfaceLabels`, { min: 2, max: 8 }),
+      Object.hasOwn(value, "surfaceLabels")
+        ? stringList(value.surfaceLabels, `${label}.surfaceLabels`, { min: 2, max: 8 })
+        : fallbackLabels,
     ),
   });
 }
