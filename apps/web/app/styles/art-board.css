@@ -427,3 +427,67 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* ---- real copy, real navigation, real actions -------------------------- */
+
+/* Boards render the page's actual words, so the customer is looking at a
+   miniature of the result rather than a wireframe standing in for it. */
+.ab-prose {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  color: color-mix(in srgb, var(--ab-text) 72%, transparent);
+  letter-spacing: 0.002em;
+}
+
+.ab-copy {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  color: var(--ab-text);
+}
+.ab-copy[data-dim] { color: color-mix(in srgb, var(--ab-text) 66%, transparent); }
+
+.ab-navreal { display: flex; gap: 9px; align-items: center; flex-wrap: wrap; }
+.ab-navreal[data-stack] { flex-direction: column; align-items: flex-start; gap: 5px; }
+.ab-navreal > i {
+  font-style: normal;
+  font-size: 0.46rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--ab-text) 70%, transparent);
+  white-space: nowrap;
+}
+
+.ab-action[data-label] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: auto;
+  min-inline-size: 42%;
+  padding: 4px 10px;
+  font-size: 0.46rem;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  color: var(--ab-bg);
+  background: var(--ab-primary);
+}
+
+.ab-chips[data-real] > i {
+  inline-size: auto;
+  padding: 2px 7px;
+  font-style: normal;
+  font-size: 0.42rem;
+  letter-spacing: 0.03em;
+  color: var(--ab-text);
+  background: color-mix(in srgb, var(--ab-accent) 26%, transparent);
+}
+
+/* Plates should read as photography, not as flat fills. */
+.ab-plate {
+  background:
+    radial-gradient(120% 80% at 22% 18%, color-mix(in srgb, var(--ab-surface) 42%, transparent), transparent 60%),
+    linear-gradient(148deg,
+      color-mix(in srgb, var(--ab-primary) 92%, transparent),
+      color-mix(in srgb, var(--ab-accent) 78%, transparent));
+}

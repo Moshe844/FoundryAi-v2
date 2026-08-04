@@ -134,21 +134,43 @@ function TypeSpecimen({
   return <span className="ab-specimen" style={style}>{text}</span>;
 }
 
-/** Rule lines showing the spacing rhythm as an actual visible beat. */
-function Rhythm({ dna, lines = 3 }: Readonly<{ dna?: CreativeDNA; lines?: number }>) {
+/**
+ * Real copy set at the approved rhythm.
+ *
+ * This used to draw grey placeholder bars, which made every board read as a
+ * wireframe rather than as the page the customer will actually get. It now
+ * renders the direction's own words in the approved typeface, so the board is
+ * a miniature of the result instead of a schematic beside it.
+ */
+function Rhythm({
+  dna,
+  lines = 3,
+  text,
+}: Readonly<{ dna?: CreativeDNA; lines?: number; text?: string }>) {
   const beat = SPACING_BEAT[dna?.spacingRhythm ?? "steady-beat"] ?? 6;
-  const irregular = dna?.spacingRhythm === "irregular-accent";
+  const copy = text ?? dna?.audienceResponse ?? dna?.thesis ?? "";
+  if (copy.trim() === "") {
+    return (
+      <span className="ab-rhythm" aria-hidden="true">
+        {Array.from({ length: lines }, (_, index) => (
+          <i key={index} style={{ marginBlockEnd: `${beat}px`, inlineSize: `${100 - index * 13}%` }} />
+        ))}
+      </span>
+    );
+  }
   return (
-    <span className="ab-rhythm" aria-hidden="true">
-      {Array.from({ length: lines }, (_, index) => (
-        <i
-          key={index}
-          style={{
-            marginBlockEnd: `${irregular ? beat * (index % 2 === 0 ? 1.9 : 0.5) : beat}px`,
-            inlineSize: `${100 - index * (irregular ? 21 : 13)}%`,
-          }}
-        />
-      ))}
+    <span
+      className="ab-prose"
+      aria-hidden="true"
+      style={{
+        fontFamily: TYPE_VOICE_STACK[dna?.typeVoice ?? "grotesque-neutral"],
+        fontSize: `${0.34 + ratio(dna) * 0.16}rem`,
+        lineHeight: 1.45,
+        marginBlockEnd: `${beat}px`,
+        WebkitLineClamp: lines,
+      }}
+    >
+      {copy}
     </span>
   );
 }
