@@ -1,3 +1,10 @@
+import {
+  designRendererRequirements,
+  renderDesignConceptDocument,
+} from "./design-concept-renderer.js";
+import { productRenderSpecRequirements } from "./product-render-spec.js";
+import { designFidelityRequiresPrototypeEvidence } from "./live-concept-studio.js";
+
 const GENERIC_LAYOUT_PATTERNS = Object.freeze([
   /\b(?:three|3)\s+(?:generic\s+)?cards?\b/iu,
   /\bgeneric\s+(?:dashboard|portfolio|landing page|layout)\b/iu,
@@ -76,6 +83,13 @@ function designSpecification(contract) {
 
 export function designExecutionBrief(contract) {
   const specification = designSpecification(contract);
+  const approvedDesignContract = specification.approvedDesignContract ?? null;
+  // A legacy visual-direction render contract is discovery input, not approval
+  // evidence. Strict renderer binding starts only after a live prototype has
+  // been selected and frozen into an ApprovedDesignContract.
+  const renderContract = designFidelityRequiresPrototypeEvidence(specification)
+    ? specification.renderContract ?? null
+    : null;
   return Object.freeze({
     direction: specification.selectedDirectionName ?? specification.visualPersonality,
     customerInstructions: specification.customerInstructions ?? null,
@@ -94,6 +108,21 @@ export function designExecutionBrief(contract) {
     },
     visualSystem: specification.visualSystem ?? null,
     creativeDNA: specification.creativeDNA ?? null,
+    approvedDesignContract,
+    renderContract,
+    canonicalRendererDocument:
+      renderContract === null
+        ? null
+        : renderDesignConceptDocument(renderContract),
+    canonicalRendererRequirements:
+      renderContract === null
+        ? null
+        : designRendererRequirements(renderContract),
+    productRenderSpec: renderContract?.productRenderSpec ?? null,
+    productRenderSpecRequirements:
+      renderContract?.productRenderSpec === undefined
+        ? null
+        : productRenderSpecRequirements(renderContract.productRenderSpec),
     accessibilityRequirements:
       specification.accessibilityRequirements ?? specification.accessibilityNeeds ?? [],
     interactionStyle:
@@ -242,6 +271,181 @@ export function validateGeneratedDesignFidelity(plan, contract, fail) {
     }
     if (dna.imageryTreatment === "none" && /<img\b|next\/image/u.test(sourceText)) {
       fail("The approved direction excludes imagery, but the generated source renders images.");
+    }
+  }
+
+  const renderContract = designFidelityRequiresPrototypeEvidence(specification)
+    ? specification.renderContract
+    : null;
+  if (renderContract !== null && renderContract !== undefined) {
+    const rendererRequirements = designRendererRequirements(renderContract);
+    const productSpec = renderContract.productRenderSpec ?? null;
+    if (!sourceText.includes(renderContract.renderContractId)) {
+      fail(
+        `Customer-facing source does not use approved render contract "${renderContract.renderContractId}".`,
+      );
+    }
+    if (!/data-foundry-render-contract/iu.test(sourceText)) {
+      fail("Customer-facing source does not expose the shared renderer contract marker.");
+    }
+    if (productSpec !== null) {
+      if (
+        !sourceText.includes(productSpec.renderSpecId) ||
+        !/data-foundry-render-spec/iu.test(sourceText)
+      ) {
+        fail(`Customer-facing source does not use approved product render spec "${productSpec.renderSpecId}".`);
+      }
+      if (!sourceText.includes("approved-product-render-spec.json")) {
+        fail("Customer-facing source must import the frozen approved-product-render-spec.json artifact instead of reconstructing the product tree from prose.");
+      }
+      for (const screen of productSpec.screens) {
+        if (!sourceText.includes(screen.id)) {
+          fail(`Customer-facing source omitted approved product screen "${screen.id}".`);
+        }
+        // The frozen render-spec artifact owns screen action copy. Exact button
+        // wording is not a structural design invariant: the initial screen may
+        // have no transition button at all, and equivalent customer-facing copy
+        // is verified later by the workflow/browser obligations. Requiring each
+        // literal here caused valid generated applications to fail admission.
+        for (const region of screen.regions) {
+          if (!sourceText.includes(region.id)) {
+            fail(`Customer-facing source omitted approved product region "${region.id}".`);
+          }
+        }
+      }
+    }
+    if (
+      !/data-foundry-primitive/iu.test(sourceText) ||
+      !sourceText.includes(renderContract.primitive)
+    ) {
+      fail(
+        `Customer-facing source does not expose approved renderer primitive "${renderContract.primitive}".`,
+      );
+    }
+    for (const className of rendererRequirements.requiredClasses) {
+      if (!sourceText.includes(className)) {
+        fail(
+          `Customer-facing source does not share the canonical renderer class "${className}" used by Visual Direction.`,
+        );
+      }
+    }
+    if (renderContract.authentication?.required) {
+      if (!/<form\b/iu.test(sourceText)) {
+        fail("The approved authentication journey requires a real sign-in form, not a decorative sign-in label.");
+      }
+      if (
+        !/<input\b[^>]*(?:type\s*=\s*["'](?:email|text)["']|name\s*=\s*["'](?:email|username|identity)["'])/iu.test(sourceText) ||
+        !/<input\b[^>]*type\s*=\s*["']password["']/iu.test(sourceText) ||
+        !/(?:type\s*=\s*["']submit["']|onSubmit\s*=|onsubmit\s*=)/iu.test(sourceText)
+      ) {
+        fail("The approved authentication journey requires labeled identity and password controls wired to submission.");
+      }
+      if (
+        !/(?:\.fill\s*\(|\.type\s*\()/u.test(browserSource) ||
+        !/(?:type\s*=\s*["']password["']|getByLabel\s*\([^)]*password)/iu.test(browserSource) ||
+        !/(?:\.click\s*\(|\.press\s*\()/u.test(browserSource) ||
+        !/concept-product-surface/u.test(browserSource)
+      ) {
+        fail("Browser verification must complete sign-in and assert the post-authentication product surface.");
+      }
+    }
+    const familyGeometry = {
+      editorial: [
+        /\.concept-hero[^{}]*\{[^{}]*grid-template-columns\s*:\s*1\.55fr\s+\.75fr/isu,
+        /\.concept-spread[^{}]*\{[^{}]*grid-template-columns\s*:\s*\.65fr\s+1fr\s+1\.35fr/isu,
+      ],
+      gallery: [
+        /\.concept-gallery[^{}]*\{[^{}]*grid-template-columns\s*:\s*185px\s+1fr/isu,
+        /\.concept-grid[^{}]*\{[^{}]*grid-template-columns\s*:\s*repeat\(\s*4\s*,\s*1fr\s*\)/isu,
+      ],
+      workspace: [
+        /\.concept-workspace[^{}]*\{[^{}]*grid-template-columns\s*:\s*150px\s+1fr/isu,
+        /\.concept-metrics[^{}]*\{[^{}]*grid-template-columns\s*:\s*repeat\(\s*3\s*,\s*1fr\s*\)/isu,
+      ],
+      guided: [
+        /\.concept-guided[^{}]*\{[^{}]*grid-template-columns\s*:\s*1\.15fr\s+\.85fr/isu,
+      ],
+      technical: [
+        /\.concept-technical[^{}]*\{[^{}]*grid-template-columns\s*:\s*165px\s+1fr/isu,
+      ],
+    }[rendererRequirements.family] ?? [];
+    if (familyGeometry.some((pattern) => !pattern.test(sourceText))) {
+      fail(
+        `Customer-facing source changed the canonical ${rendererRequirements.family} renderer geometry shown in Visual Direction.`,
+      );
+    }
+    if (
+      !/@media\s*\(\s*max-width\s*:\s*560px\s*\)/iu.test(sourceText) ||
+      !new RegExp(
+        `\\.${rendererRequirements.responsiveClass}[^{}]*\\{[^{}]*grid-template-columns\\s*:\\s*1fr`,
+        "isu",
+      ).test(sourceText)
+    ) {
+      fail(
+        "Customer-facing source changed the canonical renderer's 560px responsive transformation.",
+      );
+    }
+    for (const color of Object.values(renderContract.colors ?? {})) {
+      if (!sourceText.toLowerCase().includes(String(color).toLowerCase())) {
+        fail(`Customer-facing source changed approved renderer color token "${color}".`);
+      }
+    }
+    if (!sourceText.includes(renderContract.primaryAction)) {
+      fail(
+        `Customer-facing source omitted approved primary action "${renderContract.primaryAction}".`,
+      );
+    }
+    if (
+      renderContract.imageryTreatment !== "none" &&
+      /placeholder/iu.test(sourceText)
+    ) {
+      fail(
+        "Customer-facing source substitutes placeholder imagery for the approved renderer treatment.",
+      );
+    }
+    const escapedPrimaryAction = renderContract.primaryAction.replace(
+      /[.*+?^${}()|[\]\\]/gu,
+      "\\$&",
+    );
+    if (
+      new RegExp(
+        `<a\\b[^>]*href\\s*=\\s*["']#[^"']+["'][^>]*>[\\s\\S]{0,160}${escapedPrimaryAction}[\\s\\S]{0,40}</a>`,
+        "iu",
+      ).test(sourceText)
+    ) {
+      fail(
+        "The approved primary action is a same-page no-op anchor instead of a working interaction.",
+      );
+    }
+    const regionTerms = (renderContract.regions ?? []).filter(
+      (region) => typeof region === "string" && region.length > 3,
+    );
+    if (
+      regionTerms.length > 0 &&
+      overlapCount(regionTerms.join(" "), sourceText) <
+        Math.min(2, regionTerms.length)
+    ) {
+      fail("Customer-facing source does not preserve the shared renderer's approved product regions.");
+    }
+    if (
+      !browserSource.includes(renderContract.renderContractId) ||
+      !/data-foundry-render-contract/iu.test(browserSource)
+    ) {
+      fail("Browser verification does not assert the exact shared renderer contract used by the studio preview.");
+    }
+    if (
+      !rendererRequirements.requiredClasses.every((className) =>
+        browserSource.includes(className),
+      )
+    ) {
+      fail(
+        "Browser verification does not measure every canonical renderer region used by Visual Direction.",
+      );
+    }
+    if (!/(?:expect\s*\(|assert(?:\.|\s*\())/u.test(browserSource)) {
+      fail(
+        "Browser verification measures the canonical renderer but never asserts its geometry or visual tokens.",
+      );
     }
   }
 

@@ -324,6 +324,29 @@ export {
   validateProductBlueprintQuality,
 } from "./domain/product-blueprint.js";
 export {
+  createDesignRenderContract,
+  designRendererRequirements,
+  renderDesignConceptDocument,
+} from "./domain/design-concept-renderer.js";
+export {
+  createProductRenderSpec,
+  productRenderSpecRequirements,
+} from "./domain/product-render-spec.js";
+export {
+  APPROVED_DESIGN_CONTRACT_SCHEMA_VERSION,
+  CONCEPT_COMPOSITION_SCHEMA_VERSION,
+  CONCEPT_PROTOTYPE_SCHEMA_VERSION,
+  ConceptStrategy,
+  computeApprovedDesignIntegrityHash,
+  computeConceptPrototypeIntegrityHash,
+  createApprovedDesignContract,
+  createConceptComposition,
+  createConceptPrototypeContract,
+  designFidelityRequiresPrototypeEvidence,
+  normalizeApprovedDesignContract,
+  normalizeConceptPrototypeContract,
+} from "./domain/live-concept-studio.js";
+export {
   PROJECT_UNDERSTANDING_SOURCE,
   cumulativeCustomerFollowUpAnswers,
   createProjectUnderstandingService,
