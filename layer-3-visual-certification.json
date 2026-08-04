@@ -1,0 +1,46 @@
+{
+  "startedAt": "2026-08-04T00:07:06.537Z",
+  "runs": [
+    {
+      "project": "Fine-art photographer portfolio",
+      "attempt": 1,
+      "startedAt": "2026-08-04T00:07:06.539Z",
+      "missionId": "mission-1785802026558-ed536eac",
+      "directionCount": 3,
+      "primitives": [
+        "editorial-spread",
+        "modular-gallery",
+        "narrative-scroll"
+      ],
+      "directionNames": [
+        "The Quiet Exhibition",
+        "The Curated Archive",
+        "The Visual Essay"
+      ],
+      "problems": [],
+      "outcome": "DESIGN_OK",
+      "durationMs": 18335
+    },
+    {
+      "project": "Fine-art photographer portfolio",
+      "attempt": 1,
+      "startedAt": "2026-08-04T00:07:54.067Z",
+      "missionId": "mission-1785802074087-1a500951",
+      "directionCount": 3,
+      "primitives": [
+        "editorial-spread",
+        "modular-gallery",
+        "narrative-scroll"
+      ],
+      "directionNames": [
+        "The Exhibition Catalogue",
+        "The Living Archive",
+        "The Visual Poem"
+      ],
+      "problems": [],
+      "state": "FAILED",
+      "outcome": "FAIL",
+      "durationMs": 392265
+    }
+  ]
+}
