@@ -14,12 +14,13 @@
   container-type: inline-size;
 }
 
+/* The status used to right-align hard against the companion rail, so it read
+   as colliding with it. It now sits under the thesis as a calm inline row. */
 .studio-masthead {
   display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 16px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
   padding-block-end: 16px;
   border-block-end: 1px solid var(--hairline, rgb(0 0 0 / 0.1));
 }
@@ -30,11 +31,13 @@
 
 .studio-status {
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 2px;
-  text-align: end;
+  flex-direction: row;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+  text-align: start;
 }
+.studio-status > p { margin: 0; }
 
 .studio-distinct {
   font-size: 0.72rem;

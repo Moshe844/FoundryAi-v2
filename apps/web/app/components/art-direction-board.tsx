@@ -28,7 +28,7 @@ type RegionKind =
   | "filter-bar" | "record-table" | "bulk-action-bar"
   | "period-header" | "track-lane" | "event-detail"
   | "range-switcher" | "grid-field" | "slot-detail"
-  | "progress-spine" | "single-question" | "assurance-note" | "advance-action"
+  | "progress-spine" | "single-question" | "assurance-note" | "advance-action" | "form-panel"
   | "command-input" | "result-list" | "keyboard-legend"
   | "thread-rail" | "message-stream" | "composer-dock"
   | "reference-tree" | "prose-column" | "example-pane"
@@ -238,7 +238,17 @@ function Region({
     "range-switcher": <span className="ab-chips" aria-hidden="true"><i /><i /><i /></span>,
     "grid-field": <span className="ab-calendar" aria-hidden="true">{Array.from({ length: 21 }, (_, index) => <i key={index} />)}</span>,
     "slot-detail": <Rhythm dna={dna} lines={2} />,
+    // A guided flow is where sign-in, booking and application surfaces land,
+    // so it renders an actual form rather than abstract bands. A board for a
+    // login page must look like a login page.
     "progress-spine": <span className="ab-steps" aria-hidden="true"><i data-on /><i /><i /></span>,
+    "form-panel": (
+      <span className="ab-form" aria-hidden="true">
+        <em>Email</em><i />
+        <em>Password</em><i />
+        <b>Sign in</b>
+      </span>
+    ),
     "single-question": <><TypeSpecimen dna={dna} text={words} scale={0.6} weight={500} /><Rhythm dna={dna} lines={2} /></>,
     "assurance-note": <Rhythm dna={dna} lines={1} />,
     "advance-action": <span className="ab-action" aria-hidden="true" />,

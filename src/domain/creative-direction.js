@@ -72,7 +72,7 @@ export const COMPOSITION_PRIMITIVES = Object.freeze({
   }),
   "guided-flow": Object.freeze({
     label: "Guided conversion flow",
-    surfaceRoles: Object.freeze(["progress-spine", "single-question", "assurance-note", "advance-action"]),
+    surfaceRoles: Object.freeze(["progress-spine", "form-panel", "assurance-note", "advance-action"]),
     suits: Object.freeze(["application", "marketing", "operations"]),
     density: "spacious",
   }),
