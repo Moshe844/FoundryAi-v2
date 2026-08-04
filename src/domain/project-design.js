@@ -600,6 +600,21 @@ export function normalizeDesignAlternativeList(value = [], { family } = {}) {
   return freeze(normalized);
 }
 
+/**
+ * Curated fallback palettes, used only when the model does not author its own.
+ * Each is a deliberate pairing with real figure/ground contrast — a gallery
+ * white, a darkroom, a warm paper, a cool archive, an ink-and-ochre press.
+ */
+const DESIGNED_PALETTES = Object.freeze([
+  Object.freeze({ background: "#f6f4ef", surface: "#ffffff", primary: "#1c1b19", accent: "#b4552d", text: "#171614" }),
+  Object.freeze({ background: "#111214", surface: "#1a1c1f", primary: "#f4f2ed", accent: "#d8a657", text: "#f2f0eb" }),
+  Object.freeze({ background: "#fbf9f4", surface: "#ffffff", primary: "#243b34", accent: "#c2603c", text: "#1a201d" }),
+  Object.freeze({ background: "#f2f4f7", surface: "#ffffff", primary: "#1e2a3a", accent: "#3d6fb4", text: "#141b24" }),
+  Object.freeze({ background: "#f7f3ec", surface: "#fffdf9", primary: "#2b2118", accent: "#9c6b3f", text: "#221a13" }),
+  Object.freeze({ background: "#0f1512", surface: "#18201c", primary: "#eef2ef", accent: "#7fbf9a", text: "#e8ede9" }),
+  Object.freeze({ background: "#fdf7f5", surface: "#ffffff", primary: "#3a1f26", accent: "#a8354f", text: "#241318" }),
+]);
+
 function hashSeed(value) {
   let hash = 2166136261;
   for (const character of String(value)) {
@@ -633,13 +648,14 @@ function derivedVisualSystem(entry, index) {
     imageStrategy: pick("imageStrategy", index),
     interactionModel: pick("interactionModel", index * 2),
     buttonTreatment: pick("buttonTreatment", index * 3),
-    colorRoles: {
-      background: hex(hue, 0.12, 0.96),
-      surface: hex(hue, 0.08, 0.99),
-      primary: hex(hue, 0.55, 0.32),
-      accent: hex((hue + 58) % 360, 0.68, 0.52),
-      text: hex(hue, 0.22, 0.14),
-    },
+    // Palettes are designed, not hashed.
+    //
+    // Deriving a hue from a hash of the direction name produced washed-out,
+    // frequently-colliding colour — three "different" directions all rendering
+    // the same green. Colour is the first thing a customer judges, so the
+    // fallback now draws from curated palettes with real contrast and a real
+    // point of view, de-collided across the set by index.
+    colorRoles: DESIGNED_PALETTES[index % DESIGNED_PALETTES.length],
     sampleLabels: [
       String(entry.name).slice(0, 48),
       `Tone: ${String(entry.visualPersonality).slice(0, 40)}`,
