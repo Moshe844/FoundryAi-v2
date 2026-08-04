@@ -225,9 +225,16 @@ export function parseBrowserResult(stdout, { allowEmptyChecks = false } = {}) {
       { cause: error },
     );
   }
+  const hasDiagnostics = Object.hasOwn(parsed, "diagnostics");
   exact(
     parsed,
-    ["captureProbeErrors", "checks", "consoleErrors", "pageErrors"],
+    [
+      "captureProbeErrors",
+      "checks",
+      "consoleErrors",
+      ...(hasDiagnostics ? ["diagnostics"] : []),
+      "pageErrors",
+    ],
     "browser result",
   );
   if (
@@ -241,6 +248,23 @@ export function parseBrowserResult(stdout, { allowEmptyChecks = false } = {}) {
     );
   }
   const checkNames = Object.keys(parsed.checks);
+  const diagnostics = hasDiagnostics ? parsed.diagnostics : {};
+  const diagnosticsAreValid =
+    diagnostics !== null &&
+    typeof diagnostics === "object" &&
+    !Array.isArray(diagnostics) &&
+    Object.getPrototypeOf(diagnostics) === Object.prototype &&
+    Object.entries(diagnostics).every(
+      ([checkId, subchecks]) =>
+        IDENTIFIER.test(checkId) &&
+        subchecks !== null &&
+        typeof subchecks === "object" &&
+        !Array.isArray(subchecks) &&
+        Object.getPrototypeOf(subchecks) === Object.prototype &&
+        Object.entries(subchecks).every(
+          ([name, passed]) => IDENTIFIER.test(name) && typeof passed === "boolean",
+        ),
+    );
   if (
     (!allowEmptyChecks && checkNames.length === 0) ||
     checkNames.some(
@@ -251,6 +275,7 @@ export function parseBrowserResult(stdout, { allowEmptyChecks = false } = {}) {
     !Array.isArray(parsed.consoleErrors) ||
     !Array.isArray(parsed.pageErrors) ||
     !Array.isArray(parsed.captureProbeErrors) ||
+    !diagnosticsAreValid ||
     [
       ...parsed.captureProbeErrors,
       ...parsed.consoleErrors,
@@ -265,6 +290,18 @@ export function parseBrowserResult(stdout, { allowEmptyChecks = false } = {}) {
   }
   return freezeExecutionValue({
     ...parsed,
+    diagnostics: Object.fromEntries(
+      Object.entries(diagnostics)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([checkId, subchecks]) => [
+          checkId,
+          Object.fromEntries(
+            Object.entries(subchecks).sort(([left], [right]) =>
+              left.localeCompare(right)
+            ),
+          ),
+        ]),
+    ),
     checks: Object.fromEntries(
       checkNames
         .sort((left, right) => left.localeCompare(right))

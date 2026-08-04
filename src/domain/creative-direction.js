@@ -168,9 +168,17 @@ const CREATIVE_DNA_TEXT_KEYS = Object.freeze([
   "thesis",
   "emotionalGoal",
   "audienceResponse",
+  "primaryAction",
 ]);
 
-const CREATIVE_DNA_LIST_KEYS = Object.freeze(["surfaceSequence", "exclusions"]);
+const CREATIVE_DNA_LIST_KEYS = Object.freeze([
+  "surfaceSequence",
+  "exclusions",
+  // The words the surface actually shows. Without these the renderer has no
+  // idea whether it is drawing a login, a booking flow or a gallery, and any
+  // label it invents is a hardcode that is wrong for the next project.
+  "surfaceLabels",
+]);
 
 export const CREATIVE_DNA_KEYS = Object.freeze([
   ...CREATIVE_DNA_TEXT_KEYS,
@@ -186,6 +194,7 @@ export const CREATIVE_DNA_SCHEMA = Object.freeze({
     thesis: { type: "string", minLength: 1, maxLength: 240 },
     emotionalGoal: { type: "string", minLength: 1, maxLength: 160 },
     audienceResponse: { type: "string", minLength: 1, maxLength: 160 },
+    primaryAction: { type: "string", minLength: 1, maxLength: 32 },
     ...Object.fromEntries(
       CREATIVE_DNA_ENUM_KEYS.map((key) => [
         key,
@@ -203,6 +212,12 @@ export const CREATIVE_DNA_SCHEMA = Object.freeze({
       minItems: 1,
       maxItems: 4,
       items: { type: "string", minLength: 1, maxLength: 120 },
+    },
+    surfaceLabels: {
+      type: "array",
+      minItems: 2,
+      maxItems: 8,
+      items: { type: "string", minLength: 1, maxLength: 32 },
     },
   }),
 });
@@ -291,7 +306,20 @@ export function deriveCreativeDNA(alternative, { family = "application", index =
     exclusions: [
       `This direction deliberately omits treatments that fight its ${spec.label.toLowerCase()} composition.`,
     ],
+    // Derived from the direction's own regions, never from a guess about the
+    // product. A fallback that said "Sign in" would be right once and wrong
+    // everywhere else, so it says only what the composition already implies.
+    // A sequence may repeat a region (two chapter bands); a label list may not.
+    surfaceLabels: [...new Set(spec.surfaceRoles.map(humanizeRegion))].slice(0, 6),
+    primaryAction: "Continue",
   });
+}
+
+function humanizeRegion(region) {
+  return String(region)
+    .split("-")
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
 }
 
 /**
@@ -350,6 +378,9 @@ export function deriveCreativeDNASet(alternatives, options = {}) {
       exclusions: Object.freeze([
         `This direction deliberately omits treatments that fight its ${spec.label.toLowerCase()} composition.`,
       ]),
+      surfaceLabels: Object.freeze(
+        [...new Set(spec.surfaceRoles.map(humanizeRegion))].slice(0, 6),
+      ),
     });
   });
 }
@@ -422,6 +453,7 @@ export function normalizeCreativeDNA(value, label = "creativeDNA") {
     thesis: text(value.thesis, `${label}.thesis`, { max: 240 }),
     emotionalGoal: text(value.emotionalGoal, `${label}.emotionalGoal`, { max: 160 }),
     audienceResponse: text(value.audienceResponse, `${label}.audienceResponse`, { max: 160 }),
+    primaryAction: text(value.primaryAction, `${label}.primaryAction`, { max: 32 }),
     ...Object.fromEntries(CREATIVE_DNA_ENUM_KEYS.map((key) => [key, value[key]])),
     surfaceSequence: Object.freeze(
       // A surface sequence is an ordered walk, so a repeated region (two
@@ -434,6 +466,9 @@ export function normalizeCreativeDNA(value, label = "creativeDNA") {
     ),
     exclusions: Object.freeze(
       stringList(value.exclusions, `${label}.exclusions`, { min: 1, max: 4 }),
+    ),
+    surfaceLabels: Object.freeze(
+      stringList(value.surfaceLabels, `${label}.surfaceLabels`, { min: 2, max: 8 }),
     ),
   });
 }

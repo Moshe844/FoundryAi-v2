@@ -109,6 +109,8 @@ function creativeDna(value: unknown, path: string) {
     responsiveTransform: text(input.responsiveTransform, `${path}.responsiveTransform`),
     surfaceSequence: textList(input.surfaceSequence, `${path}.surfaceSequence`),
     exclusions: textList(input.exclusions, `${path}.exclusions`),
+    surfaceLabels: textList(input.surfaceLabels, `${path}.surfaceLabels`),
+    primaryAction: text(input.primaryAction, `${path}.primaryAction`),
   };
 }
 

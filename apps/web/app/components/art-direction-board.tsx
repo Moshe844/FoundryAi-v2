@@ -204,6 +204,12 @@ function Region({
 }: Readonly<{ kind: RegionKind; direction: DesignAlternative; dna?: CreativeDNA }>) {
   const name = direction.name.value;
   const words = dna?.emotionalGoal ?? direction.visualPersonality.value;
+  // Every visible word comes from the model-authored DNA. The renderer must
+  // never invent product vocabulary: a hardcoded "Sign in" is correct for one
+  // project and wrong for every other.
+  const labels = dna?.surfaceLabels ?? [];
+  const action = dna?.primaryAction ?? "Continue";
+
 
   const content: Partial<Record<RegionKind, ReactNode>> = {
     "full-bleed-stage": <><Plate dna={dna} tall /><span className="ab-overlay"><TypeSpecimen dna={dna} text={name} /></span></>,
@@ -244,9 +250,13 @@ function Region({
     "progress-spine": <span className="ab-steps" aria-hidden="true"><i data-on /><i /><i /></span>,
     "form-panel": (
       <span className="ab-form" aria-hidden="true">
-        <em>Email</em><i />
-        <em>Password</em><i />
-        <b>Sign in</b>
+        {(labels.length > 0 ? labels : ["Field", "Field"]).slice(0, 3).map((label) => (
+          <span className="ab-field" key={label}>
+            <em>{label}</em>
+            <i />
+          </span>
+        ))}
+        <b>{action}</b>
       </span>
     ),
     "single-question": <><TypeSpecimen dna={dna} text={words} scale={0.6} weight={500} /><Rhythm dna={dna} lines={2} /></>,

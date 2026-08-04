@@ -77,6 +77,8 @@ export type CreativeDNA = Readonly<{
   responsiveTransform: string;
   surfaceSequence: readonly string[];
   exclusions: readonly string[];
+  surfaceLabels: readonly string[];
+  primaryAction: string;
 }>;
 
 export type DesignAlternative = Readonly<{
