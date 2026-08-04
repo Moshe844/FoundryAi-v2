@@ -115,6 +115,30 @@ export {
   validateProjectDesignQuality,
 } from "./domain/project-design.js";
 export {
+  COMPOSITION_PRIMITIVES,
+  CREATIVE_DNA_SCHEMA,
+  deriveCreativeDNASet,
+  normalizeCreativeDNA,
+} from "./domain/creative-direction.js";
+export {
+  CREATIVE_DIRECTION_AXES,
+  MAX_CREATIVE_DIRECTION_ATTEMPTS,
+  assessCreativeDirectionSet,
+  regenerationDirective,
+} from "./domain/creative-direction-quality.js";
+export {
+  AspectVerdict,
+  DESIGN_ASPECTS,
+  evaluateDesignFidelity,
+} from "./domain/design-fidelity-verdicts.js";
+export {
+  VISUAL_CRITIQUE_SCHEMA,
+  combineFidelityAndCritique,
+  normalizeVisualCritique,
+  visualCritiquePrompt,
+  visualCritiqueRequest,
+} from "./domain/visual-critique.js";
+export {
   APPROVED_PROJECT_CONTRACT_SCHEMA_VERSION,
   APPROVED_PROJECT_CONTRACT_SOURCE,
   computeApprovedProjectContractHash,
