@@ -101,6 +101,37 @@ test("certified stack scaffold deterministically owns readiness, icon, and brows
   assert.doesNotMatch(playwright.content, /webServer/u);
 });
 
+test("certified stack scaffold does not mistake an unlinked public favicon for Next metadata", () => {
+  const files = ensureCertifiedStackScaffold([
+    { path: "app/page.tsx", content: "export default function Page() { return null; }" },
+    { path: "public/favicon.svg", content: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"></svg>' },
+  ]);
+  assert(files.some((file) => file.path === "public/favicon.svg"));
+  assert(files.some((file) => file.path === "app/icon.svg"));
+});
+
+test("certified stack scaffold stabilizes color probes and emits failed sub-check diagnostics", () => {
+  const files = ensureCertifiedStackScaffold([{
+    path: "tests/design.spec.ts",
+    content: [
+      "import { test } from '@playwright/test';",
+      "const captureProbeErrors: string[] = []; const consoleErrors: string[] = []; const pageErrors: string[] = [];",
+      "const checks: Record<string, boolean> = { 'check-design': false };",
+      "const hasPalette = true; const hasHierarchy = false;",
+      "try {",
+      "  const btnBg = await page.evaluate(() => getComputedStyle(document.querySelector('button')!).backgroundColor);",
+      "  void btnBg;",
+      "  checks['check-design'] = hasPalette && hasHierarchy;",
+      "} finally { console.log('FOUNDRY_BROWSER_RESULT:' + JSON.stringify({captureProbeErrors, checks, consoleErrors, pageErrors})); }",
+    ].join("\n"),
+  }]);
+  const source = files.find((file) => file.path === "tests/design.spec.ts").content;
+  assert.match(source, /await page\.mouse\.move\(0, 0\)/u);
+  assert.match(source, /await page\.waitForTimeout\(200\)/u);
+  assert.match(source, /diagnostics\["check-design"\] = \{ hasPalette, hasHierarchy \}/u);
+  assert.match(source, /JSON\.stringify\(\{ captureProbeErrors, checks, diagnostics, consoleErrors, pageErrors \}\)/u);
+});
+
 test("certified stack scaffold preserves application mutations misplaced at the health route", () => {
   const files = ensureCertifiedStackScaffold([
     {
@@ -1612,6 +1643,20 @@ test("browser observations accept verification-plan check IDs rather than a fixe
     );
     assert.deepEqual(parsed.checks, checks);
   }
+  const withDiagnostics = parseBrowserResult(
+    `FOUNDRY_BROWSER_RESULT:${JSON.stringify({
+      captureProbeErrors: [],
+      checks: { "check-design": false },
+      diagnostics: {
+        "check-design": { colorOk: false, typographyOk: true },
+      },
+      consoleErrors: [],
+      pageErrors: [],
+    })}`,
+  );
+  assert.deepEqual(withDiagnostics.diagnostics, {
+    "check-design": { colorOk: false, typographyOk: true },
+  });
   assert.throws(
     () =>
       parseBrowserResult(

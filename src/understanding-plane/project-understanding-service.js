@@ -2512,8 +2512,14 @@ export function createProjectUnderstandingService({
         answers: cumulativeAnswers,
         productTypeDiscovery: latestProductTypeDiscovery(ledger, missionId),
       });
+      // Bindings must come from the SAME plan the ApprovedProjectContract turns
+      // into obligations. The blueprint appends design-verification entries to
+      // the project plan, so binding only the project plan left those
+      // obligations with an ID and no binding: they never reached
+      // requiredBrowserCheckIds, the generator was never told to emit a check
+      // for them, and they stayed PENDING until the mission gave up.
       const verificationBindings = Object.fromEntries(
-        projectDesign.verificationPlan.map((obligation, index) => [
+        productBlueprint.verificationPlan.map((obligation, index) => [
           identifier("obligation", index),
           obligation.acceptanceMethod,
         ]),
@@ -3058,8 +3064,14 @@ export function createProjectUnderstandingService({
         answers: cumulativeAnswers,
         productTypeDiscovery: currentProductTypeDiscovery,
       });
+      // Bindings must come from the SAME plan the ApprovedProjectContract turns
+      // into obligations. The blueprint appends design-verification entries to
+      // the project plan, so binding only the project plan left those
+      // obligations with an ID and no binding: they never reached
+      // requiredBrowserCheckIds, the generator was never told to emit a check
+      // for them, and they stayed PENDING until the mission gave up.
       const verificationBindings = Object.fromEntries(
-        projectDesign.verificationPlan.map((obligation, index) => [
+        productBlueprint.verificationPlan.map((obligation, index) => [
           identifier("obligation", index),
           obligation.acceptanceMethod,
         ]),

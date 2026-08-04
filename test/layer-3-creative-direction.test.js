@@ -314,3 +314,30 @@ test("the generator instruction and the fidelity validator encode the same contr
     );
   }
 });
+
+test("verification bindings are derived from the plan the contract turns into obligations", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const source = await readFile(
+    new URL("../src/understanding-plane/project-understanding-service.js", import.meta.url),
+    "utf8",
+  );
+
+  // The ApprovedProjectContract turns blueprint.verificationPlan into
+  // obligations. The blueprint APPENDS design-verification entries to the
+  // project plan, so binding from projectDesign.verificationPlan leaves those
+  // obligations with an ID and no binding. They never reach
+  // requiredBrowserCheckIds, the generator is never told to emit a check for
+  // them, and they stay PENDING until the mission gives up — which is exactly
+  // how a fully passing build reported FAILED with 31/31 sub-checks green.
+  const bindingSites = [...source.matchAll(/const verificationBindings = Object\.fromEntries\(\s*([A-Za-z]+)\.verificationPlan/gu)]
+    .map((match) => match[1]);
+
+  assert.ok(bindingSites.length >= 2, `expected at least two binding sites, found ${bindingSites.length}`);
+  for (const site of bindingSites) {
+    assert.equal(
+      site,
+      "productBlueprint",
+      `verificationBindings must bind ${"productBlueprint"}.verificationPlan, not ${site}.verificationPlan`,
+    );
+  }
+});

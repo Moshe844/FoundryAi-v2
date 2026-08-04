@@ -906,6 +906,16 @@ export function ensureCertifiedStackScaffold(files, contractRequirementIds = [])
           `page.getByRole('button', { name: ${quote}${label}${quote}, exact: true }).click()`,
       );
     if (
+      !/page\.mouse\.move\(\s*0\s*,\s*0\s*\)/u.test(
+        readinessNormalizedContent,
+      )
+    ) {
+      readinessNormalizedContent = readinessNormalizedContent.replace(
+        /^(\s*)(const\s+[A-Za-z_$][\w$]*(?:bg|color|background)[A-Za-z_$\d]*\s*=\s*await\s+page\.evaluate\s*\()/gimu,
+        "$1await page.mouse.move(0, 0);\n$1await page.waitForTimeout(200);\n$1$2",
+      );
+    }
+    if (
       /scrollWidth/u.test(readinessNormalizedContent) &&
       !/(?:viewport\s*:\s*\{|setViewportSize\s*\()/u.test(
         readinessNormalizedContent,
@@ -924,6 +934,40 @@ export function ensureCertifiedStackScaffold(files, contractRequirementIds = [])
         `  captureProbeErrors.push(${errorName} instanceof Error ? ${errorName}.message : String(${errorName}));\n` +
         "}",
     );
+    let diagnosticNormalizedContent = lintNormalizedContent;
+    if (!/\bdiagnostics\b/u.test(diagnosticNormalizedContent)) {
+      let instrumented = false;
+      diagnosticNormalizedContent = diagnosticNormalizedContent.replace(
+        /^(\s*)(checks\s*\[\s*(["'])([^"']+)\3\s*\]\s*=\s*)((?:[A-Za-z_$][\w$]*\s*&&\s*)+[A-Za-z_$][\w$]*)\s*;/gmu,
+        (_match, indentation, assignment, _quote, checkId, expression) => {
+          const names = [...expression.matchAll(/[A-Za-z_$][\w$]*/gu)]
+            .map((entry) => entry[0]);
+          instrumented = true;
+          return `${indentation}diagnostics[${JSON.stringify(checkId)}] = { ${names.join(", ")} };\n${indentation}${assignment}${expression};`;
+        },
+      );
+      if (instrumented) {
+        const withDiagnosticResult = diagnosticNormalizedContent.replace(
+          /JSON\.stringify\(\s*\{\s*captureProbeErrors\s*,\s*checks\s*,\s*consoleErrors\s*,\s*pageErrors\s*,?\s*\}\s*\)/gu,
+          "JSON.stringify({ captureProbeErrors, checks, diagnostics, consoleErrors, pageErrors })",
+        );
+        if (withDiagnosticResult !== diagnosticNormalizedContent) {
+          diagnosticNormalizedContent = withDiagnosticResult;
+          const declaration = /\.(?:ts|tsx)$/u.test(stackNormalizedFile.path)
+            ? "const diagnostics: Record<string, Record<string, boolean>> = {};\n"
+            : "const diagnostics = {};\n";
+          const imports = /^(\s*(?:import[^\r\n]*\r?\n)+)/u.exec(
+            diagnosticNormalizedContent,
+          );
+          diagnosticNormalizedContent = imports === null
+            ? declaration + diagnosticNormalizedContent
+            : diagnosticNormalizedContent.replace(
+                imports[0],
+                imports[0] + declaration,
+              );
+        }
+      }
+    }
     const declarations = [];
     for (const collection of [
       "captureProbeErrors",
@@ -934,13 +978,13 @@ export function ensureCertifiedStackScaffold(files, contractRequirementIds = [])
         `(?:const|let)\\s+${collection}(?:\\s*:[^=;]+)?\\s*=\\s*\\[\\s*\\]`,
         "u",
       );
-      if (!emptyArrayDeclaration.test(lintNormalizedContent)) {
+      if (!emptyArrayDeclaration.test(diagnosticNormalizedContent)) {
         declarations.push(`const ${collection}: string[] = [];`);
       }
     }
     if (
       declarations.length === 0 &&
-      lintNormalizedContent === stackNormalizedFile.content
+      diagnosticNormalizedContent === stackNormalizedFile.content
     ) {
       return stackNormalizedFile;
     }
@@ -948,7 +992,7 @@ export function ensureCertifiedStackScaffold(files, contractRequirementIds = [])
       ...stackNormalizedFile,
       content:
         `${declarations.length === 0 ? "" : `${declarations.join("\n")}\n`}` +
-        lintNormalizedContent,
+        diagnosticNormalizedContent,
     };
   });
   const paths = new Set(protocolNormalizedFiles.map((file) => file.path));
@@ -965,7 +1009,7 @@ export function ensureCertifiedStackScaffold(files, contractRequirementIds = [])
     ...trace,
   });
   const hasIcon = [...paths].some((path) =>
-    /^(?:(?:src\/)?app\/(?:favicon\.ico|icon\.(?:ico|jpg|jpeg|png|svg))|public\/(?:favicon|icon)\.(?:ico|jpg|jpeg|png|svg))$/u.test(path),
+    /^(?:src\/)?app\/(?:favicon\.ico|icon\.(?:ico|jpg|jpeg|png|svg))$/u.test(path),
   );
   if (!hasIcon) {
     scaffold.push({
@@ -1881,7 +1925,7 @@ function bundlePrompt(profile, contract, bindings) {
     "Do not configure Playwright webServer or start another application process from the test configuration. Foundry's Runtime & Preview Service exclusively owns the already-ready application process and supplies its URL through FOUNDRY_PREVIEW_URL.",
     "Use domcontentloaded plus explicit visible UI selectors for browser navigation readiness. Do not wait for networkidle: framework prefetching and long-lived application requests make it nondeterministic.",
     "Do not use a custom Playwright reporter that can suppress test-process stdout. The FOUNDRY_BROWSER_RESULT line must reach the controlled command evidence stream.",
-    "The Playwright test must exercise every supplied browser check through the running UI. It must collect console errors and page errors and finish by writing exactly one stdout line starting FOUNDRY_BROWSER_RESULT: followed by JSON with captureProbeErrors, checks, consoleErrors, and pageErrors. Every checks key must be the exact checkId supplied and its boolean must reflect the actual assertion result.",
+    "The Playwright test must exercise every supplied browser check through the running UI. It must collect console errors and page errors and finish by writing exactly one stdout line starting FOUNDRY_BROWSER_RESULT: followed by JSON with captureProbeErrors, checks, diagnostics, consoleErrors, and pageErrors. diagnostics must map each checkId to the named boolean sub-checks used to compute it, so a false composite verdict identifies its exact failed predicate. Every checks key must be the exact checkId supplied and its boolean must reflect the actual assertion result.",
     "Do not prove error handling by intentionally requesting a nonexistent resource or an HTTP 4xx/5xx endpoint, because that creates a blocking browser console error. Exercise a visible client-side validation or recovery path that prevents the invalid request, while still observing the real error message and recovery behavior.",
     "For mutable availability such as appointment times, select an observed enabled control at runtime. Never hard-code a slot that an earlier step may have consumed or disabled.",
     "Locate an asynchronously loaded booking slot by its semantic accessible label, not by a visual class shared with Back or secondary-action buttons.",
@@ -1890,7 +1934,7 @@ function bundlePrompt(profile, contract, bindings) {
     "For every responsiveQualityRequired browser check, use a real 280–480px phone viewport and compute the verdict from measured horizontal overflow, workflow height relative to viewport height, and a finite bound on interactive controls in the active choice surface after the primary interaction. A long ungrouped list of controls is a failure even when the workflow can technically be completed; redesign it with progressive disclosure, grouping, filtering, or pagination rather than weakening the check.",
     "Set the phone viewport in executable Playwright setup before navigation or measurement; numeric width/height constants and comments alone are not viewport setup.",
     "For every accessibilityQualityRequired browser check, press Tab through the real page, observe actual focus through document.activeElement, :focus-visible, or an equivalent Playwright focus assertion, and verify a nonzero set of controls has an accessible label. Include both measured focus and label results in that check's boolean expression; zero-or-more comparisons are not evidence.",
-    "Initialize captureProbeErrors, consoleErrors, and pageErrors as arrays. Wrap browser observation work in try/finally and emit FOUNDRY_BROWSER_RESULT from the finally block so failures remain inspectable.",
+    "Initialize captureProbeErrors, consoleErrors, and pageErrors as arrays. Move the pointer away from interactive controls and wait for CSS transitions to settle before measuring computed resting colors so hover and active styles cannot falsify the palette observation. Wrap browser observation work in try/finally and emit FOUNDRY_BROWSER_RESULT from the finally block so failures remain inspectable.",
     "For any credential-gated local workflow, read the runtime-only credential from FOUNDRY_RUNTIME_ACCESS_VALUE in both application code and Playwright. Do not invent a default password, persist the value, or print it.",
     "When a credential-gated workflow passes with FOUNDRY_RUNTIME_ACCESS_VALUE but the customer's final credential is still listed in customerContent.missingBeforeLaunch, describe the runtime value as development-only. Keep the owner-facing launch checklist visible and never imply that final customer access was supplied or that the project is launch-ready.",
     "Do not use mocked APIs, mocked persistence, fake build results, screenshots as proof, or a prebuilt sample project.",
@@ -3310,9 +3354,22 @@ export function createProductionMissionService({
                 `Observed: ${JSON.stringify(observedCheckIds)}`,
               ].join("\n"));
             } else if (failedChecks.length > 0) {
-              observationFailures.push(
-                `The following real browser checks were false: ${failedChecks.join(", ")}.`,
+              const failedSubchecks = Object.fromEntries(
+                failedChecks.flatMap((checkId) => {
+                  const failed = Object.entries(
+                    browserResult.diagnostics?.[checkId] ?? {},
+                  )
+                    .filter(([, passed]) => passed === false)
+                    .map(([name]) => name);
+                  return failed.length === 0 ? [] : [[checkId, failed]];
+                }),
               );
+              observationFailures.push([
+                `The following real browser checks were false: ${failedChecks.join(", ")}.`,
+                ...(Object.keys(failedSubchecks).length === 0
+                  ? []
+                  : [`Failed named sub-checks: ${JSON.stringify(failedSubchecks)}.`]),
+              ].join("\n"));
             } else if (blockingErrors.length > 0) {
               observationFailures.push([
                 "The browser observation recorded blocking errors.",
@@ -3508,7 +3565,8 @@ export function createProductionMissionService({
             "If the UI exposes no stable identifier or complete composite label, capture the exact scoped collection and indexed element used for the interaction, then compare that same scope's observable count or state before and after. Do not invent a missing test ID or assert that repeated visible text is globally unique.",
             "After navigation, reload, or client hydration, wait for the first expected element or an explicit ready condition before measuring collection counts. Never capture a zero baseline while the requested data is still loading.",
             "The checks object must contain exactly the supplied browser-check obligation IDs, each computed from the observed running application. Do not include build, structured-test, or browser-error obligations as checks because those are verified from their own evidence.",
-            "The test must finish by writing exactly one stdout line starting with the literal prefix FOUNDRY_BROWSER_RESULT: followed immediately by JSON containing captureProbeErrors as a string array, checks as the exact boolean map, consoleErrors as a string array, and pageErrors as a string array. Replace any other marker name.",
+            "The test must finish by writing exactly one stdout line starting with the literal prefix FOUNDRY_BROWSER_RESULT: followed immediately by JSON containing captureProbeErrors as a string array, checks as the exact boolean map, diagnostics as a map from each check ID to its named boolean sub-checks, consoleErrors as a string array, and pageErrors as a string array. Replace any other marker name.",
+            "Move the pointer away from interactive controls and wait for CSS transitions to settle before measuring computed color so hover and active states cannot falsify the approved resting palette. Diagnostics must name the exact false predicate rather than reporting only a composite check.",
             "Record blocking console/page/capture errors. A deliberately exercised validation response or an absent non-contract decorative resource may be classified as non-blocking only by inspecting its exact URL and status; never discard errors solely by generic message text or status class.",
             "When a contract check deliberately submits invalid data and awaits an exact validation endpoint/status, correlate the matching console event to that awaited response (or scope capture around that exact request) so the expected rejection is not misreported as a blocking runtime error. Do not suppress unrelated requests with the same status.",
             "If all required checks are true and the only failure is a 404 created by the test's own intentional nonexistent-resource request, repair that test workflow to exercise visible client-side validation without issuing the failing request. Do not repeatedly edit layout metadata or decorative icons unless the evidence identifies that exact resource URL.",
