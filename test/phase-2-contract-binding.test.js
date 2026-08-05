@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { validateModelResponse } from "../src/work-plane/model-response-validator.js";
 
 import {
   CONTRACT_BOUND_BUNDLE_SCHEMA,
@@ -285,8 +286,22 @@ test("Phase 2 file-generation schema satisfies strict provider object rules", ()
     [...fidelity.properties.browserEvidence.required].sort(),
     Object.keys(fidelity.properties.browserEvidence.properties).sort(),
   );
-  assert.deepEqual(fidelity.properties.approvedDesignId.type, ["string", "null"]);
-  assert.deepEqual(fidelity.properties.approvedConceptVersion.type, ["integer", "null"]);
+  assert.deepEqual(
+    fidelity.properties.approvedDesignId.anyOf.map((schema) => schema.type),
+    ["string", "null"],
+  );
+  assert.deepEqual(
+    fidelity.properties.approvedConceptVersion.anyOf.map((schema) => schema.type),
+    ["integer", "null"],
+  );
+  const contract = contractFixture();
+  const strictResponse = validPlan(contract);
+  strictResponse.designFidelity.approvedDesignId = null;
+  strictResponse.designFidelity.approvedPrototypeContentHash = null;
+  strictResponse.designFidelity.approvedConceptVersion = null;
+  assert.doesNotThrow(() =>
+    validateModelResponse(strictResponse, CONTRACT_BOUND_BUNDLE_SCHEMA),
+  );
 });
 
 test("Phase 2 rejects omissions, reinterpretation, expansion, drift, and weak traces", () => {
