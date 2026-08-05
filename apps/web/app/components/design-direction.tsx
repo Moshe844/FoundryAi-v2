@@ -281,32 +281,35 @@ export function DesignDirection({
   const requested = useRef(false);
   const handledEvolution = useRef<string | null>(null);
   const [openedId, setOpenedId] = useState<string | null>(null);
-  const [requestError, setRequestError] = useState<string | null>(null);
+  const [requestError, setRequestError] = useState<{
+    message: string;
+    scope: "generate" | "shock";
+  } | null>(null);
 
   function requestConcepts() {
     requested.current = true;
     setRequestError(null);
     void post(`/missions/${missionId}/concepts/generate`).catch((failure) => {
-      setRequestError(failure instanceof Error ? failure.message : String(failure));
+      setRequestError({
+        message: failure instanceof Error ? failure.message : String(failure),
+        scope: "generate",
+      });
     });
   }
 
   function requestShockConcept() {
     setRequestError(null);
     void post(`/missions/${missionId}/concepts/shock`).catch((failure) => {
-      setRequestError(failure instanceof Error ? failure.message : String(failure));
+      setRequestError({
+        message: failure instanceof Error ? failure.message : String(failure),
+        scope: "shock",
+      });
     });
   }
 
   useEffect(() => {
     if (studio === null && !requested.current) requestConcepts();
   });
-
-  useEffect(() => {
-    if (studio?.status === "GENERATING" || studio?.status === "READY") {
-      setRequestError(null);
-    }
-  }, [studio?.status]);
 
   const admitted = useMemo(
     () => studio?.concepts.filter((concept) => concept.verificationStatus === "PASSED") ?? [],
@@ -367,9 +370,9 @@ export function DesignDirection({
           <span style={{ width: `${Math.max(12, admitted.length * 33)}%` }} />
         </div>
         <p className="t-caption ink-tertiary">{admitted.length} of 3 concepts admitted</p>
-        {requestError !== null && (
+        {studio === null && requestError?.scope === "generate" && (
           <div className="banner banner-fault" role="alert">
-            <p>{requestError}</p>
+            <p>{requestError.message}</p>
             <button type="button" className="btn-quiet" onClick={requestConcepts}>Try again</button>
           </div>
         )}
@@ -410,7 +413,7 @@ export function DesignDirection({
         </button>
       </header>
 
-      {requestError !== null && <p className="banner banner-fault" role="alert">{requestError}</p>}
+      {requestError?.scope === "shock" && <p className="banner banner-fault" role="alert">{requestError.message}</p>}
 
       {recommended !== undefined && (
         <aside className="concept-recommendation">
