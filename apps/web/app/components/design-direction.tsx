@@ -302,6 +302,12 @@ export function DesignDirection({
     if (studio === null && !requested.current) requestConcepts();
   });
 
+  useEffect(() => {
+    if (studio?.status === "GENERATING" || studio?.status === "READY") {
+      setRequestError(null);
+    }
+  }, [studio?.status]);
+
   const admitted = useMemo(
     () => studio?.concepts.filter((concept) => concept.verificationStatus === "PASSED") ?? [],
     [studio?.concepts],

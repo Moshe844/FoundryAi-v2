@@ -33,6 +33,7 @@ test("Phase 4 renders observations, meaningful directions, and recommendation co
   assert.match(design, /What changed/u);
   assert.doesNotMatch(design, /requested\.current = false/u);
   assert.match(design, /Try again/u);
+  assert.match(design, /studio\?\.status === "GENERATING" \|\| studio\?\.status === "READY"/u);
   assert.match(designContract, /approvedPrototypeContract\.selectedConceptId/u);
   assert.match(designContract, /approvedPrototypeContract\.creativeThesis/u);
   assert.match(designContract, /approvedPrototypeContract\.approvedSurfaceSequence/u);
