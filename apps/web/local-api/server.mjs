@@ -1618,7 +1618,7 @@ const server = createServer(async (request, response) => {
     const conceptRoute = routeConceptStudio(url.pathname);
     if (request.method === "POST" && conceptRoute?.kind === "generate") {
       const prior = await missionView(conceptRoute.missionId);
-      if (prior.state !== "INTAKE" || prior.profile === null) {
+      if (!["INTAKE", "CLARIFYING"].includes(prior.state) || prior.profile === null) {
         return json(response, 409, { error: "Concepts can be generated only after project understanding and before production execution." });
       }
       const ready = prototypeSessions.read(conceptRoute.missionId);

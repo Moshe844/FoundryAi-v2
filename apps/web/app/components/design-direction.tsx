@@ -287,7 +287,6 @@ export function DesignDirection({
     requested.current = true;
     setRequestError(null);
     void post(`/missions/${missionId}/concepts/generate`).catch((failure) => {
-      requested.current = false;
       setRequestError(failure instanceof Error ? failure.message : String(failure));
     });
   }
@@ -362,7 +361,12 @@ export function DesignDirection({
           <span style={{ width: `${Math.max(12, admitted.length * 33)}%` }} />
         </div>
         <p className="t-caption ink-tertiary">{admitted.length} of 3 concepts admitted</p>
-        {requestError !== null && <p className="banner banner-fault" role="alert">{requestError}</p>}
+        {requestError !== null && (
+          <div className="banner banner-fault" role="alert">
+            <p>{requestError}</p>
+            <button type="button" className="btn-quiet" onClick={requestConcepts}>Try again</button>
+          </div>
+        )}
       </section>
     );
   }

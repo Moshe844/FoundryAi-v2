@@ -31,6 +31,8 @@ test("Phase 4 renders observations, meaningful directions, and recommendation co
   assert.match(design, /Choose where each quality comes from/u);
   assert.match(design, /Use the recommended resolution/u);
   assert.match(design, /What changed/u);
+  assert.doesNotMatch(design, /requested\.current = false/u);
+  assert.match(design, /Try again/u);
   assert.match(designContract, /approvedPrototypeContract\.selectedConceptId/u);
   assert.match(designContract, /approvedPrototypeContract\.creativeThesis/u);
   assert.match(designContract, /approvedPrototypeContract\.approvedSurfaceSequence/u);
@@ -40,6 +42,7 @@ test("Phase 4 renders observations, meaningful directions, and recommendation co
   assert.match(server, /conceptEvolution\.shock/u);
   assert.match(server, /prototypeApproval\.approve/u);
   assert.match(server, /verifyStudioDifferentiation/u);
+  assert.match(server, /\["INTAKE", "CLARIFYING"\]\.includes\(prior\.state\)/u);
   assert.match(recommendations, /recommendation\.value\.value/u);
   assert.match(recommendations, /recommendation\.impact\.value/u);
   assert.match(recommendations, /aria-expanded=\{showingWhy\}/u);
