@@ -93,11 +93,19 @@ export function createPrototypeVerificationService({
     if (workspace.status !== "FINALIZED" || typeof workspace.contentHash !== "string") {
       fail("only finalized, hash-bound prototype files may be verified.");
     }
-    const sessionId = `${verificationId}-runtime`;
+    // Concept IDs and verification labels intentionally repeat across customer
+    // projects (for example alternative-1-v1-admission). Runtime authority is
+    // persistent, so both identities must include the parent mission to avoid
+    // treating another project's stopped runtime as idempotent work.
+    const runtimeIdentity = hash({
+      missionId: contract.missionId,
+      verificationId,
+    }).slice(0, 32);
+    const sessionId = `prototype-verify-${runtimeIdentity}`;
     const runtime = await runtimeService.start({
       conceptContract: contract,
       sessionId,
-      idempotencyKey: `${verificationId}-runtime-key`,
+      idempotencyKey: `prototype-verify-${runtimeIdentity}-key`,
       timeoutMs: 20_000,
       expiresAt: new Date(Date.now() + 120_000).toISOString(),
     });

@@ -13,10 +13,10 @@ import { createPrototypeRuntimeService } from "../src/work-plane/prototype-runti
 import { createPrototypeVerificationService } from "../src/work-plane/prototype-verification-service.js";
 import { createPrototypeWorkspaceService } from "../src/work-plane/prototype-workspace-service.js";
 
-function contract(conceptId) {
+function contract(conceptId, missionId = "mission-live-browser-evidence") {
   return createConceptPrototypeContract({
     conceptId,
-    missionId: "mission-live-browser-evidence",
+    missionId,
     conceptVersion: 1,
     conceptName: conceptId === "concept-cinematic" ? "Cinematic Field Notes" : "Editorial Index",
     creativeThesis: conceptId === "concept-cinematic" ? "Use immersive visual chapters." : "Use a precise assignment index.",
@@ -163,4 +163,28 @@ test("a blocking browser exception is rejected with persisted diagnostic evidenc
   assert.equal(rejected.status, "REJECTED");
   assert.match(rejected.findings.join("\n"), /browser errors|concept crash/iu);
   assert(rejected.observations.some((observation) => observation.browserErrors.length > 0));
+});
+
+test("identical concept and verification IDs remain isolated across projects", async (t) => {
+  const services = setup(t);
+  const first = contract("alternative-1", "mission-project-one");
+  const second = contract("alternative-1", "mission-project-two");
+  materialize(services.workspaceService, first, files());
+  materialize(services.workspaceService, second, files("alternate"));
+
+  const firstResult = await services.verification.verify({
+    conceptContract: first,
+    verificationId: "alternative-1-v1-admission",
+  });
+  const secondResult = await services.verification.verify({
+    conceptContract: second,
+    verificationId: "alternative-1-v1-admission",
+  });
+
+  assert.equal(firstResult.status, "PASSED");
+  assert.equal(secondResult.status, "PASSED");
+  const records = services.workspaceService.runtimeRecords();
+  assert.equal(records.length, 2);
+  assert.notEqual(records[0].sessionId, records[1].sessionId);
+  assert.notEqual(records[0].idempotencyKey, records[1].idempotencyKey);
 });
