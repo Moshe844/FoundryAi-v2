@@ -173,6 +173,11 @@ export function hasBalancedJavaScriptDelimiters(source) {
         continue;
       }
     }
+    const apostropheInRenderedText =
+      character === "'" &&
+      /[\p{L}\p{N}]/u.test(source[index - 1] ?? "") &&
+      /[\p{L}\p{N}]/u.test(next ?? "");
+    if (apostropheInRenderedText) continue;
     if (character === "'" || character === '"' || character === "`") {
       quote = character;
       continue;
