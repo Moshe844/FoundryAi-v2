@@ -53,7 +53,10 @@ export const ProductionRepairScope = Object.freeze({
 // instead of silently starting another paid model call.
 const MAX_GENERATION_CORRECTION_CALLS = 0;
 const MAX_PROCEDURE_REPAIR_CALLS = 0;
-const MAX_BROWSER_REPAIR_CALLS = 0;
+// Browser repair is reserved for evidence-backed runtime or design failures.
+// Two focused attempts are enough to correct a scoped source/style mismatch
+// without turning verification into an unbounded paid regeneration loop.
+const MAX_BROWSER_REPAIR_CALLS = 2;
 const MAX_RUNTIME_RESTARTS = 2;
 
 export function hasBalancedJavaScriptDelimiters(source) {
@@ -261,6 +264,18 @@ export function classifyProductionFailure({
     /(?:status(?:\s+of)?\s+5\d{2}\b|responded\s+with\s+a\s+status\s+of\s+5\d{2}\b|\b5\d{2}\s+\(Internal Server Error\)|\bInternal Server Error\b)/iu.test(
       text,
     );
+  const approvedPrototypeFidelityFailure =
+    stage === "browserVerification" &&
+    /(?:Production design fidelity failed against the approved live prototype|Approved live prototype fidelity could not be proven)/iu.test(
+      text,
+    );
+  if (approvedPrototypeFidelityFailure) {
+    return Object.freeze({
+      scope: ProductionRepairScope.SOURCE_CODE,
+      hypothesis:
+        "The production experience differs from immutable approved prototype evidence; repair only the implicated application source or styles and preserve working behavior.",
+    });
+  }
   if (browserObservedServerFailure) {
     return Object.freeze({
       scope: ProductionRepairScope.SOURCE_CODE,
@@ -3719,8 +3734,12 @@ export function createProductionMissionService({
           }));
         const sourceOnlyBrowserRepair =
           failureClassification.scope === ProductionRepairScope.SOURCE_CODE &&
-          /running application returned a server error/iu.test(
+          /(?:running application returned a server error|differs from immutable approved prototype evidence)/iu.test(
             failureClassification.hypothesis,
+          );
+        const designFidelityRepair =
+          /Production design fidelity failed against the approved live prototype/iu.test(
+            browserFailure,
           );
         const eligibleRepairFiles = sourceOnlyBrowserRepair
           ? repairFiles.filter(
@@ -3827,6 +3846,13 @@ export function createProductionMissionService({
             ...(sourceOnlyBrowserRepair
               ? [
                   "The persisted browser evidence proves the running application behavior failed an approved check. This repair must target application source; changing Playwright tests or configuration is not permitted for this failure.",
+                ]
+              : []),
+            ...(designFidelityRepair
+              ? [
+                  "This is a design-fidelity repair. Treat the immutable approved prototype, its exact failed aspects, and its desktop/tablet/mobile evidence as authority.",
+                  "Change only the application source or isolated styles implicated by the failed fidelity aspects. Preserve every already-working workflow, API behavior, test assertion, and accessible interaction.",
+                  "Do not solve a scoped styling or composition mismatch by replacing the application, rewriting functional logic, changing the approved contract, or weakening the comparator.",
                 ]
               : []),
             "When several downstream checks are false, diagnose shared discovery or navigation variables first; do not patch each false check independently.",

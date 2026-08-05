@@ -5,9 +5,10 @@ import test from "node:test";
 const source = (path) => readFile(new URL(path, import.meta.url), "utf8");
 
 test("Phase 4 renders observations, meaningful directions, and recommendation consequences", async () => {
-  const [discovery, design, recommendations, selectors, server] = await Promise.all([
+  const [discovery, design, designContract, recommendations, selectors, server] = await Promise.all([
     source("../app/components/project-discovery.tsx"),
     source("../app/components/design-direction.tsx"),
+    source("../experience/design-contract.ts"),
     source("../app/components/foundry-recommendations.tsx"),
     source("../experience/selectors.ts"),
     source("../local-api/server.mjs"),
@@ -30,6 +31,10 @@ test("Phase 4 renders observations, meaningful directions, and recommendation co
   assert.match(design, /Choose where each quality comes from/u);
   assert.match(design, /Use the recommended resolution/u);
   assert.match(design, /What changed/u);
+  assert.match(designContract, /approvedPrototypeContract\.selectedConceptId/u);
+  assert.match(designContract, /approvedPrototypeContract\.creativeThesis/u);
+  assert.match(designContract, /approvedPrototypeContract\.approvedSurfaceSequence/u);
+  assert.match(designContract, /approvedPrototypeContract\.responsiveBehavior/u);
   assert.match(server, /conceptEvolution\.revise/u);
   assert.match(server, /conceptEvolution\.compose/u);
   assert.match(server, /conceptEvolution\.shock/u);

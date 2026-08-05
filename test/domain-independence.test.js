@@ -611,7 +611,7 @@ test("browser verification keeps Runtime Service authoritative and forbids paid 
   // The repair budget must be a real, bounded, non-zero number: zero silently
   // disables the entire evidence-backed browser repair loop and turns every
   // first-pass check failure into an immediate mission failure.
-  assert.match(source, /MAX_BROWSER_REPAIR_CALLS = 5/u);
+  assert.match(source, /MAX_BROWSER_REPAIR_CALLS = 2/u);
   assert.match(source, /MAX_RUNTIME_RESTARTS = 2/u);
   assert.match(source, /browser-first-pass-failed/u);
   assert.match(source, /browser-repair-budget-exhausted/u);
@@ -646,6 +646,14 @@ test("browser server failures route to application source rather than test repai
       "The structured browser result did not contain exactly the required browser-check obligation IDs.",
   });
   assert.equal(protocolFailure.scope, ProductionRepairScope.BROWSER_TEST);
+
+  const fidelityFailure = classifyProductionFailure({
+    stage: "browserVerification",
+    observationFailure:
+      "Production design fidelity failed against the approved live prototype: composition, spacing.",
+  });
+  assert.equal(fidelityFailure.scope, ProductionRepairScope.SOURCE_CODE);
+  assert.match(fidelityFailure.hypothesis, /immutable approved prototype/u);
 });
 
 test("worker and local API clean failed mission runtimes without closed-channel crashes", () => {

@@ -119,14 +119,26 @@ export function buildApprovedDesignContract({
   const base = selected ?? recommended;
   const customerInstructions =
     mode === "other" ? text(customValue, "Use a custom customer direction.") : null;
+  const hasApprovedPrototype = approvedPrototypeContract !== null;
   const selectedDirectionName =
-    mode === "other"
-      ? "Customer-composed direction"
-      : text(selected?.name.value, direction.recommendedStyle.value);
-  const creativeDNA = customComposition?.creativeDNA ?? base?.creativeDNA ?? null;
-  const visualSystem = customComposition?.visualSystem ?? base?.visualSystem ?? null;
+    hasApprovedPrototype
+      ? text(
+          customValue,
+          `Live concept ${approvedPrototypeContract.selectedConceptId}`,
+        )
+      : mode === "other"
+        ? "Customer-composed direction"
+        : text(selected?.name.value, direction.recommendedStyle.value);
+  const creativeDNA = hasApprovedPrototype
+    ? null
+    : (customComposition?.creativeDNA ?? base?.creativeDNA ?? null);
+  const visualSystem = hasApprovedPrototype
+    ? null
+    : (customComposition?.visualSystem ?? base?.visualSystem ?? null);
   const personality =
-    mode === "other"
+    hasApprovedPrototype
+      ? approvedPrototypeContract.creativeThesis
+      : mode === "other"
       ? text(customComposition?.rationale, customerInstructions ?? direction.tone.value)
       : text(base?.visualPersonality.value, direction.tone.value);
   const renderContract = createDesignRenderContract({
@@ -151,9 +163,12 @@ export function buildApprovedDesignContract({
         : mode === "alternative"
           ? ("alternative" as const)
           : ("recommended" as const),
-    selectedDirectionId: selected?.id ?? null,
+    selectedDirectionId: hasApprovedPrototype
+      ? approvedPrototypeContract.selectedConceptId
+      : (selected?.id ?? null),
     selectedDirectionName,
     rationale:
+      approvedPrototypeContract?.creativeThesis ??
       selected?.whyItFits.value ??
       (mode === "other"
         ? "The customer supplied a custom design direction that must be preserved during generation."
@@ -161,38 +176,58 @@ export function buildApprovedDesignContract({
     customerInstructions,
     composition: {
       layoutApproach: text(
-        base?.layoutApproach.value,
+        hasApprovedPrototype
+          ? approvedPrototypeContract.compositionRules.join(" ")
+          : base?.layoutApproach.value,
         direction.layoutApproach.value,
       ),
       navigationApproach: text(
-        base?.navigationApproach.value,
+        hasApprovedPrototype
+          ? approvedPrototypeContract.navigation
+          : base?.navigationApproach.value,
         "Choose navigation that best supports the approved journeys.",
       ),
       informationDensity: text(
-        base?.informationDensity.value,
+        hasApprovedPrototype
+          ? approvedPrototypeContract.components
+          : base?.informationDensity.value,
         "Use information density appropriate to the audience and task frequency.",
       ),
       mobileBehavior: text(
-        base?.mobileBehavior.value,
+        hasApprovedPrototype
+          ? approvedPrototypeContract.responsiveBehavior.join(" ")
+          : base?.mobileBehavior.value,
         direction.mobilePriority.value,
       ),
     },
     visualCharacter: {
-      personality: text(base?.visualPersonality.value, direction.tone.value),
+      personality: hasApprovedPrototype
+        ? approvedPrototypeContract.creativeThesis
+        : text(base?.visualPersonality.value, direction.tone.value),
       typography: text(
-        base?.preview.typographyCharacter.value,
+        hasApprovedPrototype
+          ? Object.values(approvedPrototypeContract.typography).join(" · ")
+          : base?.preview.typographyCharacter.value,
         "Typography must express the approved personality and remain highly readable.",
       ),
       colorMood: text(
-        base?.preview.colorMood.value,
+        hasApprovedPrototype
+          ? Object.entries(approvedPrototypeContract.colorTokens)
+              .map(([token, value]) => `${token}: ${value}`)
+              .join(" · ")
+          : base?.preview.colorMood.value,
         "Choose a project-appropriate accessible color system.",
       ),
       hierarchy: text(
-        base?.preview.hierarchy.value,
+        hasApprovedPrototype
+          ? approvedPrototypeContract.compositionRules.join(" ")
+          : base?.preview.hierarchy.value,
         "Use a clear hierarchy centered on the primary customer outcome.",
       ),
       spacingDensity: text(
-        base?.preview.spacingDensity.value,
+        hasApprovedPrototype
+          ? `Base ${approvedPrototypeContract.spacingTokens.baseUnit}px; scale ${approvedPrototypeContract.spacingTokens.scale.join(", ")}`
+          : base?.preview.spacingDensity.value,
         "Use spacing that supports the approved information density.",
       ),
     },
@@ -202,16 +237,20 @@ export function buildApprovedDesignContract({
       customComposition?.creativeDNA?.compositionPrimitive ??
       base?.creativeDNA?.compositionPrimitive ??
       null,
-    surfaceSequence: [
-      ...(customComposition?.creativeDNA?.surfaceSequence ??
-        base?.creativeDNA?.surfaceSequence ??
-        []),
-    ],
-    exclusions: [...(base?.creativeDNA?.exclusions ?? [])],
+    surfaceSequence: hasApprovedPrototype
+      ? [...approvedPrototypeContract.approvedSurfaceSequence]
+      : [
+          ...(customComposition?.creativeDNA?.surfaceSequence ??
+            base?.creativeDNA?.surfaceSequence ??
+            []),
+        ],
+    exclusions: hasApprovedPrototype
+      ? [...approvedPrototypeContract.explicitExclusions]
+      : [...(base?.creativeDNA?.exclusions ?? [])],
     customComposition: customComposition ?? null,
-    accessibilityRequirements: [
-      ...direction.accessibilityConsiderations.value,
-    ],
+    accessibilityRequirements: hasApprovedPrototype
+      ? [...approvedPrototypeContract.accessibility]
+      : [...direction.accessibilityConsiderations.value],
     tradeoff: selected?.tradeoff.value ?? null,
     confidence: selected?.confidence.value ?? null,
     renderContract,
