@@ -1245,6 +1245,15 @@ export function validateCustomerContentIntegrity(files, customerContent) {
       "example.org",
     ]);
     const hasUnsupportedEmailAddress = emailAddresses.some((match) => {
+      const prefix = applicationText.slice(
+        Math.max(0, (match.index ?? 0) - 120),
+        match.index ?? 0,
+      );
+      // An input hint is not the customer's contact identity. Keep the
+      // provenance gate strict for rendered addresses and mailto links while
+      // allowing a clearly non-authoritative form placeholder such as
+      // placeholder="you@company.com".
+      if (/\bplaceholder\s*=\s*["'][^"']*$/iu.test(prefix)) return false;
       const domain = match[2].toLowerCase();
       const topLevelDomain = domain.split(".").at(-1);
       return !reservedExampleDomains.has(domain) &&
