@@ -354,6 +354,7 @@ export {
   resolveCertifiedPrototypeBrowser,
 } from "./work-plane/prototype-browser-verifier.js";
 export { createPrototypeVerificationService } from "./work-plane/prototype-verification-service.js";
+export { createPrototypeStudioSessionService } from "./work-plane/prototype-studio-session-service.js";
 export {
   CONCEPT_GENERATION_OUTPUT_SCHEMA,
   createPrototypeGenerationService,

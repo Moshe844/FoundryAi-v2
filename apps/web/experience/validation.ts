@@ -55,6 +55,20 @@ function nullableNumber(value: unknown, path: string): number | null {
   return value;
 }
 
+function number(value: unknown, path: string): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return fail(path, "a finite number");
+  }
+  return value;
+}
+
+function stringRecord(value: unknown, path: string): Record<string, string> {
+  const input = object(value, path);
+  return Object.fromEntries(
+    Object.entries(input).map(([key, entry]) => [key, text(entry, `${path}.${key}`)]),
+  );
+}
+
 function list<T>(
   value: unknown,
   path: string,
@@ -633,6 +647,78 @@ function productBlueprint(
   };
 }
 
+function liveConceptStudio(value: unknown, path: string) {
+  const input = object(value, path);
+  const generation = object(input.generation, `${path}.generation`);
+  return {
+    schemaVersion: integer(input.schemaVersion, `${path}.schemaVersion`) as 1,
+    missionId: text(input.missionId, `${path}.missionId`),
+    sourceProjectDesignVersion: integer(input.sourceProjectDesignVersion, `${path}.sourceProjectDesignVersion`),
+    status: text(input.status, `${path}.status`) as "GENERATING" | "READY" | "FAILED" | "INTERRUPTED",
+    recommendedConceptId: nullableText(input.recommendedConceptId, `${path}.recommendedConceptId`),
+    recommendationReason: nullableText(input.recommendationReason, `${path}.recommendationReason`),
+    concepts: list(input.concepts, `${path}.concepts`, (entry, itemPath) => {
+      const concept = object(entry, itemPath);
+      const contract = object(concept.contract, `${itemPath}.contract`);
+      const usage = object(concept.usage, `${itemPath}.usage`);
+      return {
+        contract: {
+          conceptId: text(contract.conceptId, `${itemPath}.contract.conceptId`),
+          missionId: text(contract.missionId, `${itemPath}.contract.missionId`),
+          conceptVersion: integer(contract.conceptVersion, `${itemPath}.contract.conceptVersion`),
+          conceptName: text(contract.conceptName, `${itemPath}.contract.conceptName`),
+          creativeThesis: text(contract.creativeThesis, `${itemPath}.contract.creativeThesis`),
+          intendedAudienceResponse: text(contract.intendedAudienceResponse, `${itemPath}.contract.intendedAudienceResponse`),
+          designRationale: text(contract.designRationale, `${itemPath}.contract.designRationale`),
+          projectSurfaces: textList(contract.projectSurfaces, `${itemPath}.contract.projectSurfaces`),
+          pageOrScreenSequence: textList(contract.pageOrScreenSequence, `${itemPath}.contract.pageOrScreenSequence`),
+          navigationModel: text(contract.navigationModel, `${itemPath}.contract.navigationModel`),
+          typographySystem: stringRecord(contract.typographySystem, `${itemPath}.contract.typographySystem`),
+          colorSystem: stringRecord(contract.colorSystem, `${itemPath}.contract.colorSystem`),
+          imageryStrategy: text(contract.imageryStrategy, `${itemPath}.contract.imageryStrategy`),
+          componentCharacter: text(contract.componentCharacter, `${itemPath}.contract.componentCharacter`),
+          interactionRules: textList(contract.interactionRules, `${itemPath}.contract.interactionRules`),
+          motionRules: textList(contract.motionRules, `${itemPath}.contract.motionRules`),
+          responsiveRules: textList(contract.responsiveRules, `${itemPath}.contract.responsiveRules`),
+          accessibilityRules: textList(contract.accessibilityRules, `${itemPath}.contract.accessibilityRules`),
+          deliberateExclusions: textList(contract.deliberateExclusions, `${itemPath}.contract.deliberateExclusions`),
+          sourceProjectDesignVersion: integer(contract.sourceProjectDesignVersion, `${itemPath}.contract.sourceProjectDesignVersion`),
+          strategy: text(contract.strategy, `${itemPath}.contract.strategy`),
+          integrityHash: text(contract.integrityHash, `${itemPath}.contract.integrityHash`),
+        },
+        recommended: bool(concept.recommended, `${itemPath}.recommended`),
+        recommendationReason: text(concept.recommendationReason, `${itemPath}.recommendationReason`),
+        keyDistinction: text(concept.keyDistinction, `${itemPath}.keyDistinction`),
+        tradeoff: text(concept.tradeoff, `${itemPath}.tradeoff`),
+        verificationId: text(concept.verificationId, `${itemPath}.verificationId`),
+        verificationStatus: text(concept.verificationStatus, `${itemPath}.verificationStatus`) as "PASSED" | "REJECTED",
+        verificationFindings: textList(concept.verificationFindings, `${itemPath}.verificationFindings`),
+        screenshotEvidenceReferences: textList(concept.screenshotEvidenceReferences, `${itemPath}.screenshotEvidenceReferences`),
+        contentHash: text(concept.contentHash, `${itemPath}.contentHash`),
+        usage: {
+          inputTokens: integer(usage.inputTokens, `${itemPath}.usage.inputTokens`),
+          outputTokens: integer(usage.outputTokens, `${itemPath}.usage.outputTokens`),
+          costUsd: number(usage.costUsd, `${itemPath}.usage.costUsd`),
+        },
+        generatedAt: text(concept.generatedAt, `${itemPath}.generatedAt`),
+        thumbnailUrl: nullableText(concept.thumbnailUrl, `${itemPath}.thumbnailUrl`),
+      };
+    }),
+    generation: {
+      startedAt: text(generation.startedAt, `${path}.generation.startedAt`),
+      completedAt: nullableText(generation.completedAt, `${path}.generation.completedAt`),
+      inputTokens: integer(generation.inputTokens, `${path}.generation.inputTokens`),
+      outputTokens: integer(generation.outputTokens, `${path}.generation.outputTokens`),
+      costUsd: number(generation.costUsd, `${path}.generation.costUsd`),
+    },
+    selectedConceptId: nullableText(input.selectedConceptId, `${path}.selectedConceptId`),
+    error: nullableText(input.error, `${path}.error`),
+    generating: bool(input.generating, `${path}.generating`),
+    createdAt: text(input.createdAt, `${path}.createdAt`),
+    updatedAt: text(input.updatedAt, `${path}.updatedAt`),
+  };
+}
+
 export function validateMission(value: unknown, path = "mission"): Mission {
   const input = object(value, path);
   const currentActivity =
@@ -654,6 +740,10 @@ export function validateMission(value: unknown, path = "mission"): Mission {
     input.productBlueprint === null || input.productBlueprint === undefined
       ? null
       : productBlueprint(input.productBlueprint, `${path}.productBlueprint`);
+  const conceptStudio =
+    input.conceptStudio === null || input.conceptStudio === undefined
+      ? null
+      : liveConceptStudio(input.conceptStudio, `${path}.conceptStudio`);
   const contract =
     input.contract === null
       ? null
@@ -1071,6 +1161,11 @@ export function validateMission(value: unknown, path = "mission"): Mission {
         if (!discoveryInputKinds.has(kind)) {
           return fail(`${itemPath}.kind`, "a supported customer-input kind");
         }
+        const status: "applied" | "pending" = message.status === undefined
+          ? "applied"
+          : message.status === "applied" || message.status === "pending"
+            ? message.status
+            : fail(`${itemPath}.status`, '"applied" or "pending"');
         return {
           messageId: text(message.messageId, `${itemPath}.messageId`),
           kind: kind as Mission["discoveryConversation"]["messages"][number]["kind"],
@@ -1083,6 +1178,7 @@ export function validateMission(value: unknown, path = "mission"): Mission {
             message.affectedSections === undefined
               ? []
               : textList(message.affectedSections, `${itemPath}.affectedSections`),
+          status,
           profileVersion: integer(
             message.profileVersion,
             `${itemPath}.profileVersion`,
@@ -1109,6 +1205,7 @@ export function validateMission(value: unknown, path = "mission"): Mission {
     profile,
     productTypeDiscovery: productDiscovery,
     productBlueprint: blueprint,
+    conceptStudio,
     proposalConfirmed: bool(
       input.proposalConfirmed,
       `${path}.proposalConfirmed`,

@@ -12,6 +12,14 @@ import {
   WEB_STACK_MANIFEST,
   createLiveAiAdapters,
   createModelLifecycleSourceService,
+  createConceptPrototypeContract,
+  createPrototypeGenerationService,
+  createPrototypeWorkspaceService,
+  createPrototypeRuntimeService,
+  createChromePrototypeBrowserVerifier,
+  createPrototypeVerificationService,
+  createPrototypeStudioSessionService,
+  ConceptStrategy,
   openMissionControl,
   projectRequirementContract,
   normalizeCustomerFollowUpAnswers,
@@ -90,6 +98,23 @@ const control = openMissionControl({
 });
 const activeJobs = new Map();
 const activeUnderstandingJobs = new Map();
+const activeConceptJobs = new Map();
+const prototypeRoot = resolve(stateRoot, "prototype-root");
+const prototypeWorkspaces = createPrototypeWorkspaceService({ prototypeRoot });
+const prototypeRuntimes = createPrototypeRuntimeService({
+  workspaceService: prototypeWorkspaces,
+  previewParentOrigins: ["http://127.0.0.1:3001", "http://localhost:3001"],
+});
+const prototypeGeneration = createPrototypeGenerationService({
+  modelGateway: control.models,
+  workspaceService: prototypeWorkspaces,
+});
+const prototypeVerification = createPrototypeVerificationService({
+  browserVerifier: createChromePrototypeBrowserVerifier({ timeoutMs: 30_000 }),
+  workspaceService: prototypeWorkspaces,
+  runtimeService: prototypeRuntimes,
+});
+const prototypeSessions = createPrototypeStudioSessionService({ prototypeRoot });
 
 // Build the persisted route index before serving requests. Subsequent reads
 // reparse only ledger files that changed, keeping project creation responsive.
@@ -142,10 +167,14 @@ function startMissionWorker(missionId) {
     {
       cwd: repositoryRoot,
       windowsHide: true,
-      stdio: ["ignore", "ignore", "ignore", "ipc"],
+      stdio: ["ignore", "ignore", "pipe", "ipc"],
     },
   );
-  const job = { child, error: null, completed: false };
+  const job = { child, error: null, completed: false, stderr: "" };
+  child.stderr.setEncoding("utf8");
+  child.stderr.on("data", (chunk) => {
+    job.stderr = `${job.stderr}${chunk}`.slice(-2_000);
+  });
   child.on("message", (message) => {
     if (message?.type === "failed") {
       job.error = String(message.error).slice(0, 500);
@@ -159,9 +188,9 @@ function startMissionWorker(missionId) {
       job.error =
         code === 0
           ? "The mission worker stopped before recording completion."
-          : `The mission worker exited with code ${String(code)}.`;
+          : `The mission worker exited with code ${String(code)}${job.stderr.trim() === "" ? "." : `: ${job.stderr.trim().slice(-500)}`}`;
     }
-    activeJobs.delete(missionId);
+    if (job.completed) activeJobs.delete(missionId);
   });
   activeJobs.set(missionId, job);
   return job;
@@ -337,6 +366,301 @@ function missionIntent(events) {
   const reason = events[0]?.transition?.reason ?? "";
   const prefix = "Customer requested: ";
   return reason.startsWith(prefix) ? reason.slice(prefix.length) : reason;
+}
+
+function uniqueText(values, fallback) {
+  const seen = new Set();
+  const result = [];
+  for (const value of values ?? []) {
+    const normalized = String(value ?? "").trim();
+    const key = normalized.toLowerCase();
+    if (normalized !== "" && !seen.has(key)) {
+      seen.add(key);
+      result.push(normalized);
+    }
+  }
+  return result.length > 0 ? result : [fallback];
+}
+
+function conceptUnderstandingFromProfile(profile) {
+  const value = (entry) => ({ value: entry });
+  return {
+    projectName: value(profile.name),
+    proposal: {
+      designDirection: {
+        accessibilityConsiderations: value(profile.designDirection.accessibilityConsiderations),
+      },
+      exclusions: value(profile.constraints.filter(
+        (constraint) => !profile.architectureDecisions.includes(constraint),
+      )),
+      alternatives: profile.designAlternatives.map((alternative, index) => ({
+        id: `alternative-${index + 1}`,
+        name: value(alternative.approach),
+        whyItFits: value(alternative.whyItFits ?? alternative.rationale),
+        layoutApproach: value(alternative.layoutApproach ?? profile.designDirection.layoutApproach),
+        visualPersonality: value(alternative.visualPersonality ?? alternative.approach),
+        informationDensity: value(alternative.informationDensity ?? alternative.rationale),
+        navigationApproach: value(alternative.navigationApproach ?? alternative.rationale),
+        mobileBehavior: value(alternative.mobileBehavior ?? profile.designDirection.mobilePriority),
+        tradeoff: value(alternative.tradeoff ?? alternative.tradeoffs?.[0] ?? alternative.rationale),
+        preview: {
+          hierarchy: value(alternative.preview?.hierarchy ?? alternative.layoutApproach ?? alternative.rationale),
+        },
+        visualSystem: alternative.visualSystem,
+        creativeDNA: alternative.creativeDNA,
+        recommended: value(alternative.recommended),
+      })),
+    },
+  };
+}
+
+function conceptContractFromAlternative({ missionId, understanding, alternative, sourceProjectDesignVersion, conceptVersion = 1 }) {
+  const dna = alternative.creativeDNA;
+  const visual = alternative.visualSystem;
+  if (dna === undefined || visual === undefined) {
+    throw new TypeError(`Design alternative "${alternative.id}" has no execution-ready creative contract.`);
+  }
+  return createConceptPrototypeContract({
+    conceptId: alternative.id,
+    missionId,
+    conceptVersion,
+    conceptName: alternative.name.value,
+    creativeThesis: dna.thesis,
+    intendedAudienceResponse: dna.audienceResponse,
+    designRationale: alternative.whyItFits.value,
+    projectSurfaces: uniqueText(dna.surfaceLabels, "Primary experience"),
+    pageOrScreenSequence: uniqueText(dna.surfaceSequence, "Primary experience"),
+    navigationModel: alternative.navigationApproach.value,
+    compositionRules: uniqueText([
+      alternative.layoutApproach.value,
+      `Use the ${dna.compositionPrimitive} composition primitive.`,
+      `Maintain ${alternative.informationDensity.value} information density.`,
+    ], "Use a project-specific composition."),
+    typographySystem: {
+      category: visual.typographyCategory,
+      voice: dna.typeVoice,
+      scale: dna.typeScale,
+      hierarchy: alternative.preview.hierarchy.value,
+    },
+    colorSystem: visual.colorRoles,
+    spacingSystem: {
+      baseUnit: 8,
+      scale: visual.density === "dense" ? [4, 8, 12, 20, 32, 48] : [8, 16, 24, 40, 64, 96],
+    },
+    imageryStrategy: `${visual.imageStrategy}. ${dna.imageryTreatment}.`,
+    componentCharacter: `${alternative.visualPersonality.value}. ${visual.surfaceTreatment}.`,
+    interactionRules: uniqueText([
+      visual.interactionModel,
+      `The primary action is ${dna.primaryAction}.`,
+      alternative.navigationApproach.value,
+    ], "Use clear local navigation and lightweight interaction."),
+    motionRules: uniqueText([
+      dna.motionStrategy,
+      "Honor prefers-reduced-motion without removing content or meaning.",
+    ], "Use restrained motion and honor reduced motion."),
+    responsiveRules: uniqueText([
+      dna.responsiveTransform,
+      alternative.mobileBehavior.value,
+    ], "Transform deliberately for mobile."),
+    accessibilityRules: uniqueText([
+      ...understanding.proposal.designDirection.accessibilityConsiderations.value,
+      "Use semantic landmarks, visible keyboard focus, and accessible contrast.",
+    ], "Use semantic, keyboard-accessible markup."),
+    deliberateExclusions: uniqueText([
+      ...dna.exclusions,
+      ...understanding.proposal.exclusions.value,
+      "No external scripts, network calls, credentials, authentication, database, payments, or production integrations.",
+    ], "No production integrations."),
+    sampleContentPolicy: `Use fictional, clearly representative content for ${understanding.projectName.value}; never claim real customers, results, credentials, or contact details.`,
+    expectedFiles: ["index.html", "styles.css", "concept.js"],
+    expectedPreviewRoutes: ["/"],
+    verificationPlan: [
+      { checkId: "runtime-load", kind: "runtime", statement: "The isolated runtime loads the complete prototype." },
+      { checkId: "responsive-browser", kind: "browser", statement: "Desktop, tablet, and mobile render without blocking errors or horizontal overflow." },
+      { checkId: "sandbox-boundary", kind: "security", statement: "The prototype has no external network, host, secret, or parent-window access." },
+      { checkId: "cross-concept-distinction", kind: "differentiation", statement: "The concept is structurally and visually distinct from the other admitted concepts." },
+    ],
+    sourceProjectDesignVersion,
+    strategy: ConceptStrategy.STANDARD,
+    parentConceptId: null,
+    sourceConceptIds: [],
+  });
+}
+
+function publicConceptStudio(missionId) {
+  const session = prototypeSessions.read(missionId);
+  if (session === null) return null;
+  const generating = activeConceptJobs.has(missionId);
+  return {
+    ...session,
+    status: generating ? "GENERATING" : session.status,
+    error: generating ? null : session.error,
+    concepts: session.concepts.map((concept) => ({
+      ...concept,
+      thumbnailUrl:
+        concept.verificationStatus === "PASSED"
+          ? `http://127.0.0.1:${port}/missions/${missionId}/concepts/${concept.contract.conceptId}/evidence/root-desktop.png`
+          : null,
+    })),
+    generating,
+  };
+}
+
+function startConceptGenerationJob({ missionId, understanding, sourceProjectDesignVersion }) {
+  if (activeConceptJobs.has(missionId)) return activeConceptJobs.get(missionId);
+  const alternatives = understanding.proposal.alternatives.slice(0, 3);
+  if (alternatives.length < 3) {
+    throw new TypeError("Live Concept Studio requires three model-authored design alternatives before generation.");
+  }
+  let session = prototypeSessions.begin({ missionId, sourceProjectDesignVersion });
+  const operation = (async () => {
+    // Yield once so the operation is registered before a restart audit that needs
+    // no provider or browser awaits can reach its cleanup path.
+    await Promise.resolve();
+    const verified = [];
+    try {
+      for (const alternative of alternatives) {
+        const existing = session.concepts.find(
+          (concept) => concept.contract.conceptId === alternative.id && concept.verificationStatus === "PASSED",
+        );
+        if (existing !== undefined) continue;
+        let admitted = false;
+        let admissionFeedback = (session.attemptFailures ?? [])
+          .filter((failure) => failure.conceptId === alternative.id)
+          .slice(-1)
+          .map((failure) => failure.error);
+        for (let attempt = 1; attempt <= 2 && !admitted; attempt += 1) {
+          const previousVersions = prototypeWorkspaces
+            .list(missionId)
+            .filter((workspace) => workspace.conceptId === alternative.id)
+            .map((workspace) => workspace.conceptVersion);
+          const conceptVersion = Math.max(0, ...previousVersions) + 1;
+          const contract = conceptContractFromAlternative({
+            missionId,
+            understanding,
+            alternative,
+            sourceProjectDesignVersion,
+            conceptVersion,
+          });
+          try {
+            const generated = await prototypeGeneration.generate({
+              conceptContract: contract,
+              admissionFeedback,
+            });
+            const verification = await prototypeVerification.verify({
+              conceptContract: contract,
+              verificationId: `${contract.conceptId}-v${contract.conceptVersion}-admission`,
+            });
+            const concept = {
+              contract,
+              recommended: alternative.recommended.value === true,
+              recommendationReason: alternative.whyItFits.value,
+              keyDistinction: `${dnaSummary(alternative)}`,
+              tradeoff: alternative.tradeoff.value,
+              verificationId: verification.verificationId,
+              verificationStatus: verification.status,
+              verificationFindings: verification.findings,
+              screenshotEvidenceReferences: verification.screenshotEvidenceReferences,
+              contentHash: generated.workspace.contentHash,
+              usage: generated.usage,
+              generatedAt: verification.completedAt,
+            };
+            session = prototypeSessions.save({
+              ...session,
+              concepts: [
+                ...session.concepts.filter((entry) => entry.contract.conceptId !== contract.conceptId),
+                concept,
+              ],
+              generation: {
+                ...session.generation,
+                inputTokens: session.generation.inputTokens + generated.usage.inputTokens,
+                outputTokens: session.generation.outputTokens + generated.usage.outputTokens,
+                costUsd: session.generation.costUsd + generated.usage.costUsd,
+              },
+            });
+            if (verification.status !== "PASSED") {
+              throw new TypeError(`Concept "${contract.conceptName}" failed browser admission: ${verification.findings.join(" ")}`);
+            }
+            verified.push(verification);
+            admitted = true;
+          } catch (error) {
+            admissionFeedback = [String(error?.message ?? error).slice(0, 1_000)];
+            session = prototypeSessions.save({
+              ...session,
+              attemptFailures: [
+                ...(session.attemptFailures ?? []),
+                {
+                  conceptId: contract.conceptId,
+                  conceptVersion: contract.conceptVersion,
+                  attempt,
+                  error: String(error?.message ?? error).slice(0, 1_000),
+                  occurredAt: new Date().toISOString(),
+                },
+              ],
+            });
+            if (attempt === 2) throw error;
+          }
+        }
+      }
+      const admitted = session.concepts.filter((concept) => concept.verificationStatus === "PASSED");
+      if (admitted.length !== 3) throw new TypeError("Three admitted concepts were not produced.");
+      const currentVerifications = new Map(verified.map((record) => [record.conceptId, record]));
+      const differentiationRecords = admitted.map((concept) => {
+        const current = currentVerifications.get(concept.contract.conceptId);
+        if (current !== undefined) return current;
+        const content = prototypeWorkspaces.readEvidenceFile(
+          concept.contract,
+          `${concept.verificationId}/verification.json`,
+        );
+        const record = JSON.parse(content.toString("utf8"));
+        if (
+          record?.conceptId !== concept.contract.conceptId ||
+          record?.conceptVersion !== concept.contract.conceptVersion ||
+          record?.contractIntegrityHash !== concept.contract.integrityHash ||
+          record?.contentHash !== concept.contentHash
+        ) {
+          throw new TypeError(`Concept "${concept.contract.conceptName}" has stale or mismatched browser evidence.`);
+        }
+        return record;
+      });
+      const differentiation = prototypeVerification.verifyDifferentiation(differentiationRecords);
+      if (differentiation.status !== "PASSED") throw new TypeError(differentiation.finding);
+      const recommended = admitted.find((concept) => concept.recommended) ?? admitted[0];
+      session = prototypeSessions.save({
+        ...session,
+        status: "READY",
+        differentiationStatus: "PASSED",
+        differentiationSignatures: differentiation.signatures,
+        recommendedConceptId: recommended.contract.conceptId,
+        recommendationReason: recommended.recommendationReason,
+        generation: { ...session.generation, completedAt: new Date().toISOString() },
+        error: null,
+      });
+      return session;
+    } catch (error) {
+      session = prototypeSessions.save({
+        ...session,
+        status: "FAILED",
+        generation: { ...session.generation, completedAt: new Date().toISOString() },
+        error: String(error?.message ?? error).slice(0, 1_000),
+      });
+      throw error;
+    } finally {
+      activeConceptJobs.delete(missionId);
+    }
+  })();
+  activeConceptJobs.set(missionId, operation);
+  operation.catch((error) => {
+    process.stderr.write(`${new Date().toISOString()} concept generation ${missionId}: ${String(error?.stack ?? error).slice(0, 4_000)}\n`);
+  });
+  return operation;
+}
+
+function dnaSummary(alternative) {
+  const dna = alternative.creativeDNA;
+  return dna === undefined
+    ? alternative.layoutApproach.value
+    : `${dna.compositionPrimitive}; ${dna.typeVoice}; ${dna.imageryTreatment}; ${dna.responsiveTransform}`;
 }
 
 function activity(record) {
@@ -729,6 +1053,7 @@ async function missionView(missionId) {
     profile,
     productTypeDiscovery,
     productBlueprint,
+    conceptStudio: publicConceptStudio(missionId),
     proposalConfirmed,
     experience,
     contract,
@@ -814,6 +1139,7 @@ function missionSummary(missionId) {
     profile,
     productTypeDiscovery,
     productBlueprint,
+    conceptStudio: publicConceptStudio(missionId),
     proposalConfirmed,
     contract: null,
     decisionHistory: decisionHistory.decisions,
@@ -968,6 +1294,16 @@ function routeMission(pathname) {
     : { missionId: match[1], action: match[2] ?? null };
 }
 
+function routeConceptStudio(pathname) {
+  const generate = /^\/missions\/([A-Za-z0-9_-]+)\/concepts\/generate$/u.exec(pathname);
+  if (generate !== null) return { kind: "generate", missionId: generate[1], conceptId: null, fileName: null };
+  const preview = /^\/missions\/([A-Za-z0-9_-]+)\/concepts\/([A-Za-z0-9._-]+)\/preview$/u.exec(pathname);
+  if (preview !== null) return { kind: "preview", missionId: preview[1], conceptId: preview[2], fileName: null };
+  const evidence = /^\/missions\/([A-Za-z0-9_-]+)\/concepts\/([A-Za-z0-9._-]+)\/evidence\/([A-Za-z0-9._-]+\.png)$/u.exec(pathname);
+  if (evidence !== null) return { kind: "evidence", missionId: evidence[1], conceptId: evidence[2], fileName: evidence[3] };
+  return null;
+}
+
 void bootstrapProviders().catch((error) => {
   process.stderr.write(
     `${new Date().toISOString()} provider bootstrap failed: ${String(
@@ -1086,6 +1422,65 @@ const server = createServer(async (request, response) => {
       });
       return;
     }
+    const conceptRoute = routeConceptStudio(url.pathname);
+    if (request.method === "POST" && conceptRoute?.kind === "generate") {
+      const prior = await missionView(conceptRoute.missionId);
+      if (prior.state !== "INTAKE" || prior.profile === null) {
+        return json(response, 409, { error: "Concepts can be generated only after project understanding and before production execution." });
+      }
+      const ready = prototypeSessions.read(conceptRoute.missionId);
+      if (ready?.status !== "READY" || ready?.differentiationStatus !== "PASSED") {
+        startConceptGenerationJob({
+          missionId: conceptRoute.missionId,
+          understanding: conceptUnderstandingFromProfile(prior.profile),
+          sourceProjectDesignVersion: prior.profile?.profileVersion ?? 1,
+        });
+      }
+      return json(response, 202, await missionView(conceptRoute.missionId));
+    }
+    if (request.method === "POST" && conceptRoute?.kind === "preview") {
+      const session = prototypeSessions.read(conceptRoute.missionId);
+      const concept = session?.concepts.find(
+        (entry) => entry.contract.conceptId === conceptRoute.conceptId && entry.verificationStatus === "PASSED",
+      );
+      if (session?.status !== "READY" || concept === undefined) {
+        return json(response, 409, { error: "This concept has not passed live browser admission." });
+      }
+      const suffix = randomUUID().slice(0, 8);
+      const runtime = await prototypeRuntimes.start({
+        conceptContract: concept.contract,
+        sessionId: `${concept.contract.conceptId}-preview-${suffix}`,
+        idempotencyKey: `${concept.contract.conceptId}-preview-key-${suffix}`,
+        timeoutMs: 20_000,
+        expiresAt: new Date(Date.now() + 20 * 60_000).toISOString(),
+      });
+      return json(response, 200, {
+        conceptId: concept.contract.conceptId,
+        conceptVersion: concept.contract.conceptVersion,
+        previewUrl: runtime.previewUrl,
+        expiresAt: runtime.expiresAt,
+      });
+    }
+    if (request.method === "GET" && conceptRoute?.kind === "evidence") {
+      const session = prototypeSessions.read(conceptRoute.missionId);
+      const concept = session?.concepts.find(
+        (entry) => entry.contract.conceptId === conceptRoute.conceptId && entry.verificationStatus === "PASSED",
+      );
+      if (concept === undefined || !concept.screenshotEvidenceReferences.some(
+        (reference) => reference.endsWith(`/${conceptRoute.fileName}`),
+      )) return json(response, 404, { error: "Concept evidence not found." });
+      const workspace = prototypeWorkspaces.get(concept.contract);
+      const image = readFileSync(resolve(workspace.evidencePath, concept.verificationId, conceptRoute.fileName));
+      response.writeHead(200, {
+        "content-type": "image/png",
+        "content-length": image.length,
+        "cache-control": "private, max-age=31536000, immutable",
+        "access-control-allow-origin": "*",
+        "x-content-type-options": "nosniff",
+      });
+      response.end(image);
+      return;
+    }
     const missionRoute = routeMission(url.pathname);
     if (
       request.method === "DELETE" &&
@@ -1148,7 +1543,10 @@ const server = createServer(async (request, response) => {
         answers.every(
           (answer) =>
             answer.selection !== undefined &&
-            answer.selection.mode !== "other" &&
+            (answer.selection.mode !== "other" ||
+              (answer.selection.kind === "design-direction" &&
+                answer.selection.designContract?.selectionMode === "custom" &&
+                answer.selection.designContract?.customComposition?.complete === true)) &&
             answer.selection.kind !== "customer-message" &&
             answer.selection.kind !== "product-subtype",
         );
@@ -1237,6 +1635,7 @@ async function shutdown() {
       job.child.send({ type: "stop" });
     } catch {}
   }
+  await prototypeRuntimes.stopAll({ reason: "local-api-shutdown" });
   server.close(() => process.exit(0));
 }
 

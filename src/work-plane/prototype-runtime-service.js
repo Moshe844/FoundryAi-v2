@@ -6,7 +6,7 @@ import { normalizeConceptPrototypeContract } from "../domain/live-concept-studio
 
 const IDENTIFIER = /^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,127})$/u;
 const MAX_RESPONSE_BYTES = 1_000_000;
-const CSP = [
+const CSP_DIRECTIVES = [
   "default-src 'none'",
   "style-src 'self'",
   "script-src 'self'",
@@ -15,9 +15,8 @@ const CSP = [
   "connect-src 'none'",
   "object-src 'none'",
   "base-uri 'none'",
-  "frame-ancestors 'self'",
   "form-action 'none'",
-].join("; ");
+];
 
 function fail(message) {
   throw new TypeError(`Prototype runtime: ${message}`);
@@ -53,11 +52,10 @@ function mimeType(path) {
   }[extname(path).toLowerCase()] ?? "application/octet-stream";
 }
 
-function headers(response, contentType = "text/plain; charset=utf-8") {
+function headers(response, contentType, contentSecurityPolicy) {
   response.setHeader("Content-Type", contentType);
-  response.setHeader("Content-Security-Policy", CSP);
+  response.setHeader("Content-Security-Policy", contentSecurityPolicy);
   response.setHeader("X-Content-Type-Options", "nosniff");
-  response.setHeader("X-Frame-Options", "SAMEORIGIN");
   response.setHeader("Referrer-Policy", "no-referrer");
   response.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=(), usb=()");
   response.setHeader("Cache-Control", "no-store");
@@ -71,10 +69,27 @@ function closeServer(server) {
   });
 }
 
-export function createPrototypeRuntimeService({ workspaceService }) {
+export function createPrototypeRuntimeService({ workspaceService, previewParentOrigins = [] }) {
   if (workspaceService === null || typeof workspaceService !== "object") {
     fail("workspaceService is required.");
   }
+  if (
+    !Array.isArray(previewParentOrigins) ||
+    previewParentOrigins.some((origin) => {
+      try {
+        const parsed = new URL(origin);
+        return !["http:", "https:"].includes(parsed.protocol) || parsed.origin !== origin;
+      } catch { return true; }
+    })
+  ) fail("previewParentOrigins must contain exact HTTP origins.");
+  const frameAncestors = previewParentOrigins.length === 0
+    ? "frame-ancestors 'self'"
+    : `frame-ancestors 'self' ${previewParentOrigins.join(" ")}`;
+  const contentSecurityPolicy = [...CSP_DIRECTIVES, frameAncestors].join("; ");
+  const secureHeaders = (response, contentType = "text/plain; charset=utf-8") => {
+    headers(response, contentType, contentSecurityPolicy);
+    if (previewParentOrigins.length === 0) response.setHeader("X-Frame-Options", "SAMEORIGIN");
+  };
   const live = new Map();
 
   function persisted(sessionId) {
@@ -144,7 +159,7 @@ export function createPrototypeRuntimeService({ workspaceService }) {
         const url = new URL(request.url ?? "/", "http://127.0.0.1");
         const decoded = decodeURIComponent(url.pathname);
         if (decoded === "/favicon.ico") {
-          headers(response, "image/x-icon");
+          secureHeaders(response, "image/x-icon");
           response.writeHead(204);
           response.end();
           return;
@@ -162,24 +177,24 @@ export function createPrototypeRuntimeService({ workspaceService }) {
           !allowedFiles.has(relativePath) ||
           relativePath.split("/").some((part) => part === "" || part === "." || part === "..")
         ) {
-          headers(response);
+          secureHeaders(response);
           response.writeHead(404);
           response.end("Not found");
           return;
         }
         const file = workspace.fileManifest.find((entry) => entry.path === relativePath);
         if (file === undefined || file.size > MAX_RESPONSE_BYTES) {
-          headers(response);
+          secureHeaders(response);
           response.writeHead(404);
           response.end("Not found");
           return;
         }
         const body = readFileSync(`${workspace.sourcePath}/${relativePath.replaceAll("/", "\\")}`);
-        headers(response, mimeType(relativePath));
+        secureHeaders(response, mimeType(relativePath));
         response.writeHead(200);
         response.end(body);
       } catch {
-        headers(response);
+        secureHeaders(response);
         response.writeHead(400);
         response.end("Invalid request");
       }

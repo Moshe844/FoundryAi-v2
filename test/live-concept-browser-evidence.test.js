@@ -108,6 +108,16 @@ test("live Chrome admits a responsive concept and persists immutable screenshots
   }
   const recordPath = join(workspace.evidencePath, "cinematic-v1-verification", "verification.json");
   assert.equal(JSON.parse(readFileSync(recordPath, "utf8")).integrityHash, result.integrityHash);
+  const recoveredRecord = JSON.parse(
+    services.workspaceService
+      .readEvidenceFile(concept, "cinematic-v1-verification/verification.json")
+      .toString("utf8"),
+  );
+  assert.equal(recoveredRecord.contentHash, workspace.contentHash);
+  assert.throws(
+    () => services.workspaceService.readEvidenceFile(concept, "../contract.json"),
+    /safe workspace-relative file/u,
+  );
   assert.throws(
     () => services.workspaceService.writeEvidenceFiles(concept, {
       "cinematic-v1-verification/verification.json": "tamper",

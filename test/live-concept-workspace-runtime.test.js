@@ -10,6 +10,7 @@ import {
 } from "../src/domain/live-concept-studio.js";
 import { createPrototypeWorkspaceService } from "../src/work-plane/prototype-workspace-service.js";
 import { createPrototypeRuntimeService } from "../src/work-plane/prototype-runtime-service.js";
+import { createPrototypeStudioSessionService } from "../src/work-plane/prototype-studio-session-service.js";
 
 function contract({ conceptId = "concept-one", missionId = "mission-one", version = 1 } = {}) {
   return createConceptPrototypeContract({
@@ -191,6 +192,42 @@ test("prototype runtime expires bounded sessions and rejects idempotency drift",
     await assert.rejects(fetch(session.previewUrl), /fetch failed|ECONNREFUSED/iu);
   } finally {
     await runtime.stopAll({ reason: "test-cleanup" });
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("concept studio sessions recover interrupted generation and preserve admitted artifacts", () => {
+  const root = mkdtempSync(join(tmpdir(), "foundry-studio-session-"));
+  try {
+    const first = createPrototypeStudioSessionService({ prototypeRoot: root });
+    const started = first.begin({
+      missionId: "mission-studio-recovery",
+      sourceProjectDesignVersion: 3,
+    });
+    first.save({
+      ...started,
+      concepts: [{ contract: { conceptId: "concept-one" }, verificationStatus: "PASSED" }],
+    });
+
+    const restarted = createPrototypeStudioSessionService({ prototypeRoot: root });
+    const interrupted = restarted.read("mission-studio-recovery");
+    assert.equal(interrupted.status, "INTERRUPTED");
+    assert.equal(interrupted.concepts[0].contract.conceptId, "concept-one");
+    const resumed = restarted.begin({
+      missionId: "mission-studio-recovery",
+      sourceProjectDesignVersion: 3,
+    });
+    assert.equal(resumed.status, "GENERATING");
+    assert.equal(resumed.concepts.length, 1);
+    restarted.save({
+      ...resumed,
+      status: "READY",
+      recommendedConceptId: "concept-one",
+    });
+    const ready = createPrototypeStudioSessionService({ prototypeRoot: root }).read("mission-studio-recovery");
+    assert.equal(ready.status, "READY");
+    assert.equal(ready.recommendedConceptId, "concept-one");
+  } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });

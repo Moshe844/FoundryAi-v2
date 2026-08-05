@@ -13,14 +13,15 @@ test("Phase 4 renders observations, meaningful directions, and recommendation co
   ]);
 
   assert.match(discovery, /<FoundryObservations observations=\{proposal\.observations\}/u);
-  assert.match(design, /alternative\.whyItFits\.value/u);
-  assert.match(design, /alternative\.tradeoff\.value/u);
-  assert.match(design, /ArtDirectionBoard/u);
+  assert.match(design, /concept\.contract\.designRationale/u);
+  assert.match(design, /concept\.tradeoff/u);
+  assert.match(design, /<iframe/u);
   assert.match(design, /Recommended/u);
-  assert.match(design, /Combine ideas/u);
-  // Boards must render from machine-readable creative DNA.
-  assert.match(design, /creativeDNA/u);
-  assert.match(design, /composeCustomDirection/u);
+  assert.match(design, /Combine with another/u);
+  assert.match(design, /Let Foundry shock me/u);
+  assert.match(design, /concept\.contract\.creativeThesis/u);
+  assert.match(design, /verificationStatus/u);
+  assert.match(design, /sandbox="allow-scripts allow-same-origin"/u);
   assert.match(recommendations, /recommendation\.value\.value/u);
   assert.match(recommendations, /recommendation\.impact\.value/u);
   assert.match(recommendations, /aria-expanded=\{showingWhy\}/u);

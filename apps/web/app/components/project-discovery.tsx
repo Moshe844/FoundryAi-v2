@@ -6,6 +6,7 @@ import type {
   ClarificationDecision,
   CustomerFollowUpAnswer,
   DiscoveryConversation,
+  LiveConceptStudio,
   ProjectUnderstanding as ProjectUnderstandingModel,
 } from "../../experience/contracts";
 import {
@@ -71,7 +72,7 @@ function buildStages(
     stages.push({
       id: "design",
       short: "Visual direction",
-      title: "How it should feel",
+      title: "Complete visual concepts",
     });
   }
 
@@ -104,7 +105,11 @@ export function ProjectDiscovery({
   conversation,
   decisions,
   missionRunning,
+  missionId,
+  conceptStudio,
   onClarify,
+  initialStage,
+  onStageChange,
   profileVersion,
   understanding,
 }: Readonly<{
@@ -112,7 +117,11 @@ export function ProjectDiscovery({
   conversation: DiscoveryConversation;
   decisions: readonly ClarificationDecision[];
   missionRunning: boolean;
+  missionId: string;
+  conceptStudio: LiveConceptStudio | null;
   onClarify: (answers: CustomerFollowUpAnswer[]) => Promise<boolean>;
+  initialStage?: string | null;
+  onStageChange?: (stage: string) => void;
   profileVersion: number;
   understanding: ProjectUnderstandingModel;
 }>) {
@@ -120,8 +129,14 @@ export function ProjectDiscovery({
     () => buildStages(understanding, decisions),
     [understanding, decisions],
   );
-  const [stageId, setStageId] = useState<StageId>("read");
-  const [furthestStageIndex, setFurthestStageIndex] = useState(0);
+  const initialStageIndex = Math.max(
+    0,
+    stages.findIndex((item) => item.id === initialStage),
+  );
+  const [requestedStageId, setStageId] = useState<StageId>(
+    stages[initialStageIndex]?.id ?? "read",
+  );
+  const [furthestStageIndex, setFurthestStageIndex] = useState(initialStageIndex);
   const [answers, setAnswers] = useState<Record<string, ClarificationAnswer>>({});
   const [selected, setSelected] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(
@@ -133,9 +148,19 @@ export function ProjectDiscovery({
   );
   const [designChoice, setDesignChoice] =
     useState<DesignDirectionChoice>({ mode: "recommended" });
+  const [designSubmissionError, setDesignSubmissionError] = useState<string | null>(null);
+  const [customerInputPending, setCustomerInputPending] = useState(false);
+  const hasPendingInstructions = conversation.messages.some(
+    (message) => message.status === "pending",
+  );
   const stageRef = useRef<HTMLDivElement>(null);
   const proposal = understanding.proposal;
   const interactionBusy = busy || missionRunning;
+  const conceptStudioReady =
+    conceptStudio?.status === "READY" &&
+    conceptStudio.concepts.filter(
+      (concept) => concept.verificationStatus === "PASSED",
+    ).length >= 3;
   const effectiveSelected = Object.fromEntries(
     proposal.recommendations.map((recommendation) => [
       recommendation.id,
@@ -149,22 +174,20 @@ export function ProjectDiscovery({
   const answeredCount = decisions.filter((decision) =>
     answerIsExplicit(answers[decision.questionId]),
   ).length;
+  const stageId = stages.some((item) => item.id === requestedStageId)
+    ? requestedStageId
+    : stages[0].id;
   const currentStageIndex = Math.max(
     0,
     stages.findIndex((item) => item.id === stageId),
   );
   const currentStage = stages[currentStageIndex];
-
-  useEffect(() => {
-    if (!stages.some((item) => item.id === stageId)) {
-      setStageId(stages[0].id);
-      setFurthestStageIndex(0);
-    }
-  }, [stageId, stages]);
+  const stage = currentStageIndex;
 
   useEffect(() => {
     stageRef.current?.focus({ preventScroll: true });
-  }, [stageId]);
+    onStageChange?.(stageId);
+  }, [onStageChange, stageId]);
 
   function moveToIndex(next: number, allowFuture = false) {
     const bounded = Math.max(0, Math.min(stages.length - 1, next));
@@ -187,7 +210,7 @@ export function ProjectDiscovery({
   }
 
   async function submitCustomerInput(answer: CustomerFollowUpAnswer) {
-    await onClarify([answer]);
+    return onClarify([answer]);
   }
 
   function designFollowUp(): StructuredCustomerFollowUpAnswer {
@@ -213,7 +236,16 @@ export function ProjectDiscovery({
       optionId: designChoice.optionId,
       customValue: designChoice.value,
       customComposition: designChoice.composition,
+      outcome: understanding.summary.value,
+      productName: understanding.projectName.value,
       sourceProfileVersion: profileVersion,
+      workflows: understanding.journeys.map((journey) => journey.description.value),
+      audiences: understanding.audiences.value,
+      capabilities: [
+        ...proposal.items.value,
+        ...proposal.includedDefaults.value,
+      ],
+      dataConcepts: proposal.items.value,
     });
 
     return {
@@ -239,10 +271,27 @@ export function ProjectDiscovery({
   }
 
   async function continueFromDesign() {
+    if (!conceptStudioReady) return;
     // A combined direction is valid once traits are selected. Typing is never
     // required, so completeness is read from the structured composition.
     if (designChoice.mode === "other" && designChoice.composition?.complete !== true) return;
-    if (await onClarify([designFollowUp()])) advance();
+    setDesignSubmissionError(null);
+    try {
+      const accepted = await onClarify([designFollowUp()]);
+      if (accepted) {
+        advance();
+      } else {
+        setDesignSubmissionError(
+          "Foundry could not save this visual direction. The concept is still selected; no design decision was lost.",
+        );
+      }
+    } catch (failure) {
+      setDesignSubmissionError(
+        failure instanceof Error
+          ? failure.message
+          : "Foundry could not prepare this visual direction for the build.",
+      );
+    }
   }
 
   async function toggleRecommendation(id: string) {
@@ -337,8 +386,7 @@ export function ProjectDiscovery({
         <div>
           <p className="t-label ink-tertiary">Working session</p>
           <p className="t-body-s ink-secondary">
-            {currentStage.title} &middot; {currentStageIndex + 1} of{" "}
-            {stages.length}
+            {currentStage.title} &middot; Step {stage + 1} of {stages.length}
           </p>
         </div>
         <nav aria-label="Discovery progress">
@@ -417,16 +465,17 @@ export function ProjectDiscovery({
           {stageId === "design" && (
             <>
               <DesignDirection
-                alternatives={proposal.alternatives}
                 choice={designChoice}
-                direction={proposal.designDirection}
+                missionId={missionId}
                 onChange={setDesignChoice}
+                studio={conceptStudio}
               />
               <div className="stage-actions">
                 <button
                   className="btn btn-primary"
                   disabled={
                     interactionBusy ||
+                    !conceptStudioReady ||
                     (designChoice.mode === "other" &&
                       designChoice.composition?.complete !== true)
                   }
@@ -434,6 +483,8 @@ export function ProjectDiscovery({
                 >
                   {interactionBusy
                     ? "Saving the design…"
+                    : !conceptStudioReady
+                      ? "Building live concepts…"
                     : designChoice.mode === "other"
                       ? "Use my custom direction"
                       : designChoice.mode === "alternative"
@@ -446,6 +497,13 @@ export function ProjectDiscovery({
                   </button>
                 )}
               </div>
+              {designSubmissionError && (
+                <div className="banner banner-fault" role="alert">
+                  <div className="banner-body">
+                    <p className="t-body-s">{designSubmissionError}</p>
+                  </div>
+                </div>
+              )}
             </>
           )}
 
@@ -560,8 +618,12 @@ export function ProjectDiscovery({
                 </details>
               )}
               <div className="stage-actions">
-                <button className="btn btn-primary" onClick={advance}>
-                  Review the plan
+                <button className="btn btn-primary" disabled={customerInputPending || hasPendingInstructions} onClick={advance}>
+                  {customerInputPending
+                    ? "Save or clear your instruction first"
+                    : hasPendingInstructions
+                      ? "Retry the pending instruction first"
+                      : "Review the plan"}
                 </button>
               </div>
             </section>
@@ -577,6 +639,7 @@ export function ProjectDiscovery({
                   <dt>Design</dt>
                   <dd>
                     {designChoice.value?.trim() ||
+                      proposal.alternatives.find((item) => item.recommended.value)?.name.value ||
                       proposal.designDirection.recommendedStyle.value}
                   </dd>
                 </div>
@@ -604,12 +667,14 @@ export function ProjectDiscovery({
               <div className="continue-row">
                 <button
                   className="btn btn-primary btn-large"
-                  disabled={interactionBusy}
+                  disabled={interactionBusy || hasPendingInstructions}
                   onClick={() => void submit()}
                 >
                   {interactionBusy
                     ? "Updating the plan…"
-                    : "Continue to the Decision Brief"}
+                    : hasPendingInstructions
+                      ? "Retry the pending instruction first"
+                      : "Continue to the Decision Brief"}
                 </button>
                 <button className="btn-quiet" onClick={inviteInput}>
                   Add another instruction
@@ -633,6 +698,7 @@ export function ProjectDiscovery({
           conversation={conversation}
           profileVersion={profileVersion}
           proposal={proposal}
+          onPendingChange={setCustomerInputPending}
           onSubmit={submitCustomerInput}
         />
       </div>

@@ -33,4 +33,5 @@ export interface PrototypeRuntimeService {
 
 export function createPrototypeRuntimeService(input: {
   workspaceService: PrototypeWorkspaceService;
+  previewParentOrigins?: readonly string[];
 }): PrototypeRuntimeService;

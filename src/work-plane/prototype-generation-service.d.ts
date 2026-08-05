@@ -16,5 +16,8 @@ export function createPrototypeGenerationService(input: {
   modelGateway: { request(input: Record<string, unknown>): Promise<Record<string, any>> };
   workspaceService: PrototypeWorkspaceService;
 }): {
-  generate(input: { conceptContract: ConceptPrototypeContract }): Promise<PrototypeGenerationResult>;
+  generate(input: {
+    conceptContract: ConceptPrototypeContract;
+    admissionFeedback?: readonly string[];
+  }): Promise<PrototypeGenerationResult>;
 };

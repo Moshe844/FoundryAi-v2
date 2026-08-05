@@ -335,6 +335,21 @@ export function createPrototypeWorkspaceService({ prototypeRoot }) {
     return deepFreeze(manifest.sort((left, right) => left.path.localeCompare(right.path)));
   }
 
+  function readEvidenceFile(contractInput, relativePath) {
+    const contract = normalizeConceptPrototypeContract(contractInput);
+    const { paths, state } = readState(contract);
+    if (state.status !== "FINALIZED") fail("evidence requires a finalized prototype workspace.");
+    const path = safeSourcePath(paths.evidencePath, relativePath);
+    if (!existsSync(path) || !statSync(path).isFile() || lstatSync(path).isSymbolicLink()) {
+      fail(`evidence file "${relativePath}" is missing or unsafe.`);
+    }
+    const content = readFileSync(path);
+    if (content.length > MAX_EVIDENCE_FILE_BYTES) {
+      fail(`evidence file "${relativePath}" exceeds the read limit.`);
+    }
+    return content;
+  }
+
   return Object.freeze({
     provision,
     writeFiles,
@@ -345,5 +360,6 @@ export function createPrototypeWorkspaceService({ prototypeRoot }) {
     runtimeRecords,
     saveRuntimeRecord,
     writeEvidenceFiles,
+    readEvidenceFile,
   });
 }

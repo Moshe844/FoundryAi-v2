@@ -18,6 +18,7 @@ import { createPrototypeWorkspaceService } from "../src/work-plane/prototype-wor
 import {
   ModelExecutionStage,
   createDeterministicLocalModelProvider,
+  rankPrototypeCandidates,
 } from "../src/work-plane/model-gateway.js";
 
 function concept(conceptId = "concept-editorial") {
@@ -143,6 +144,59 @@ test("prototype admission rejects unsafe or contract-incomplete model output bef
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("prototype safety admits ordinary CSS top positioning but rejects real parent-window access", async () => {
+  const root = mkdtempSync(join(tmpdir(), "foundry-generation-css-safety-"));
+  try {
+    const workspaceService = createPrototypeWorkspaceService({ prototypeRoot: root });
+    const safeOutput = structuredClone(generated);
+    safeOutput.files.find((file) => file.path === "index.html").content =
+      safeOutput.files.find((file) => file.path === "index.html").content.replace('href="/styles.css"', 'href="styles.css"');
+    safeOutput.files.find((file) => file.path === "styles.css").content += ".sticky{position:sticky;top:0}";
+    safeOutput.files.find((file) => file.path === "concept.js").content =
+      "// Keep this interaction local.\ndocument.body.dataset.ready='true'";
+    const safeGeneration = createPrototypeGenerationService({
+      workspaceService,
+      modelGateway: {
+        async request(input) {
+          return { requestId: input.requestId, structuredOutput: safeOutput, tokenMetadata: {}, costMetadata: {} };
+        },
+      },
+    });
+    await safeGeneration.generate({ conceptContract: concept("concept-safe-css-top") });
+
+    const unsafeContract = concept("concept-real-parent-access");
+    const unsafeGeneration = createPrototypeGenerationService({
+      workspaceService,
+      modelGateway: {
+        async request(input) {
+          const output = structuredClone(generated);
+          output.files.find((file) => file.path === "concept.js").content = "window.parent.postMessage('escape', '*')";
+          return { requestId: input.requestId, structuredOutput: output, tokenMetadata: {}, costMetadata: {} };
+        },
+      },
+    });
+    await assert.rejects(
+      unsafeGeneration.generate({ conceptContract: unsafeContract }),
+      /parent-window control/u,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("prototype routing prefers low-cost fast capable models over historical heavyweight defaults", () => {
+  const ranked = rankPrototypeCandidates([
+    { modelId: "slow-opus", totalCostPerMillionTokensUsd: 30, latencyProfile: "THOROUGH", reliability: { estimatedFailureRate: 0.1 } },
+    { modelId: "fast-low-cost", totalCostPerMillionTokensUsd: 1, latencyProfile: "FAST", reliability: { estimatedFailureRate: 0.4 } },
+    { modelId: "balanced-low-cost", totalCostPerMillionTokensUsd: 1, latencyProfile: "BALANCED", reliability: { estimatedFailureRate: 0.2 } },
+  ]);
+  assert.deepEqual(ranked.map((candidate) => candidate.modelId), [
+    "fast-low-cost",
+    "balanced-low-cost",
+    "slow-opus",
+  ]);
 });
 
 test("INTAKE concepts use the real Model Gateway while ordinary pre-execution calls remain forbidden", async (t) => {

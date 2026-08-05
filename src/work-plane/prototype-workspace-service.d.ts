@@ -29,6 +29,7 @@ export interface PrototypeWorkspaceService {
     contract: ConceptPrototypeContract,
     files: Readonly<Record<string, string | Buffer>>,
   ): readonly PrototypeFileManifestEntry[];
+  readEvidenceFile(contract: ConceptPrototypeContract, relativePath: string): Buffer;
 }
 
 export function createPrototypeWorkspaceService(input: {

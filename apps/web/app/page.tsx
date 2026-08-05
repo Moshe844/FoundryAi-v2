@@ -1110,6 +1110,7 @@ export default function Page() {
   const [loadedQuery, setLoadedQuery] = useState("");
   const [catalogueRevision, setCatalogueRevision] = useState(0);
   const [searchFocusRequest, setSearchFocusRequest] = useState(0);
+  const [projectStage, setProjectStage] = useState<string | null>(null);
   const missionQuery = effectiveMissionQuery(search);
   const searching = loadedQuery !== missionQuery;
   const [confirm, setConfirm] = useState<
@@ -1215,19 +1216,69 @@ export default function Page() {
   /* ---- shareable search state and the global search shortcut ---- */
   useEffect(() => {
     const readyTimer = window.setTimeout(() => {
-      const initial =
-        new URL(window.location.href).searchParams.get("q") ?? "";
+      const url = new URL(window.location.href);
+      const initial = url.searchParams.get("q") ?? "";
+      const projectId = url.searchParams.get("project");
+      const requestedView = url.searchParams.get("view");
       if (initial !== "") {
         setSearch(initial);
         setView("projects");
+      } else if (projectId !== null) {
+        setView("project");
+        setProjectStage(url.searchParams.get("stage"));
+        api<unknown>(`/missions/${encodeURIComponent(projectId)}`)
+          .then(validateMission)
+          .then((mission) => {
+            if (!deletedMissionIdsRef.current.has(mission.missionId)) {
+              setCurrent(mission);
+              setError(null);
+            }
+          })
+          .catch((failure) => {
+            setView("projects");
+            setError(
+              failure instanceof Error ? failure.message : String(failure),
+            );
+          });
+      } else if (requestedView === "projects" || requestedView === "providers") {
+        setView(requestedView);
       }
       urlStateReadyRef.current = true;
     }, 0);
     function onPopState() {
-      const query =
-        new URL(window.location.href).searchParams.get("q") ?? "";
+      const url = new URL(window.location.href);
+      const query = url.searchParams.get("q") ?? "";
+      const projectId = url.searchParams.get("project");
+      const requestedView = url.searchParams.get("view");
       setSearch(query);
-      if (query !== "") setView("projects");
+      if (projectId !== null) {
+        setView("project");
+        setProjectStage(url.searchParams.get("stage"));
+        api<unknown>(`/missions/${encodeURIComponent(projectId)}`)
+          .then(validateMission)
+          .then((mission) => {
+            if (!deletedMissionIdsRef.current.has(mission.missionId)) {
+              setCurrent(mission);
+              setError(null);
+            }
+          })
+          .catch((failure) => {
+            setView("projects");
+            setError(
+              failure instanceof Error ? failure.message : String(failure),
+            );
+          });
+      } else {
+        setCurrent(null);
+        setProjectStage(null);
+        setView(
+          query !== "" || requestedView === "projects"
+            ? "projects"
+            : requestedView === "providers"
+              ? "providers"
+              : "home",
+        );
+      }
     }
     function onShortcut(event: KeyboardEvent) {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
@@ -1253,8 +1304,27 @@ export default function Page() {
     } else {
       url.searchParams.delete("q");
     }
+    if (view === "project") {
+      if (currentMissionId !== null) {
+        url.searchParams.set("project", currentMissionId);
+      }
+      if (projectStage !== null) {
+        url.searchParams.set("stage", projectStage);
+      } else {
+        url.searchParams.delete("stage");
+      }
+      url.searchParams.delete("view");
+    } else {
+      url.searchParams.delete("project");
+      url.searchParams.delete("stage");
+      if (view === "projects" || view === "providers") {
+        url.searchParams.set("view", view);
+      } else {
+        url.searchParams.delete("view");
+      }
+    }
     window.history.replaceState(null, "", url);
-  }, [search, view]);
+  }, [currentMissionId, projectStage, search, view]);
 
   /* ---- polling ---- */
   useEffect(() => {
@@ -1319,6 +1389,7 @@ export default function Page() {
   const open = useCallback((mission: Mission) => {
     setStartHandoff(null);
     setCurrent(mission);
+    setProjectStage("read");
     setError(null);
     setView("project");
     scrollToSurfaceStart();
@@ -1343,6 +1414,7 @@ export default function Page() {
       );
       setCurrent(mission);
       setMissions((items) => [mission, ...items]);
+      setProjectStage("read");
       setView("project");
       scrollToSurfaceStart();
     } catch (failure) {
@@ -1402,6 +1474,7 @@ export default function Page() {
         ),
         startedAt: Date.now(),
       });
+      setProjectStage(null);
       setCurrent((mission) =>
         mission === null ? null : { ...mission, running: true, error: null },
       );
@@ -1607,8 +1680,12 @@ export default function Page() {
           decisions={experience.clarification}
           busy={busy}
           missionRunning={mission.running}
+          missionId={mission.missionId}
+          conceptStudio={mission.conceptStudio}
           onClarify={clarify}
           profileVersion={mission.profile?.profileVersion ?? 1}
+          initialStage={projectStage}
+          onStageChange={setProjectStage}
         />
       );
     }
@@ -1703,7 +1780,18 @@ export default function Page() {
           />
         )}
 
-        {view === "project" && current && renderProject(current)}
+        {view === "project" && current && (
+          <>
+            {error && (
+              <div className="banner banner-fault" role="alert">
+                <div className="banner-body">
+                  <p className="t-body-s">{error}</p>
+                </div>
+              </div>
+            )}
+            {renderProject(current)}
+          </>
+        )}
       </ApplicationShell>
 
       {confirm?.kind === "delete" && (

@@ -21,12 +21,14 @@ const endpoints = Object.freeze({
 });
 
 export function modelRequestTimeoutMs(request) {
+  if (request.executionStage === "DESIGN_PROTOTYPE") return 120_000;
   if (request.taskClass === "FILE_GENERATION") return 300_000;
   if (request.taskClass === "PROJECT_UNDERSTANDING") return 120_000;
   return 120_000;
 }
 
 function modelMaxOutputTokens(request) {
+  if (request.executionStage === "DESIGN_PROTOTYPE") return 12_000;
   if (request.taskClass === "FILE_GENERATION") return 32_000;
   if (request.taskClass === "PROJECT_UNDERSTANDING") return 6_000;
   return 16_000;

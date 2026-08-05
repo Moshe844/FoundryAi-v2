@@ -626,6 +626,7 @@ export type DiscoveryConversation = Readonly<{
     text: string;
     interpretation: string;
     affectedSections: readonly string[];
+    status: "applied" | "pending";
     profileVersion: number;
     occurredAt: string;
   }>[];
@@ -635,6 +636,67 @@ export type DiscoveryConversation = Readonly<{
   }>;
 }>;
 
+export type LiveConcept = Readonly<{
+  contract: Readonly<{
+    conceptId: string;
+    missionId: string;
+    conceptVersion: number;
+    conceptName: string;
+    creativeThesis: string;
+    intendedAudienceResponse: string;
+    designRationale: string;
+    projectSurfaces: readonly string[];
+    pageOrScreenSequence: readonly string[];
+    navigationModel: string;
+    typographySystem: Readonly<Record<string, string>>;
+    colorSystem: Readonly<Record<string, string>>;
+    imageryStrategy: string;
+    componentCharacter: string;
+    interactionRules: readonly string[];
+    motionRules: readonly string[];
+    responsiveRules: readonly string[];
+    accessibilityRules: readonly string[];
+    deliberateExclusions: readonly string[];
+    sourceProjectDesignVersion: number;
+    strategy: string;
+    integrityHash: string;
+  }>;
+  recommended: boolean;
+  recommendationReason: string;
+  keyDistinction: string;
+  tradeoff: string;
+  verificationId: string;
+  verificationStatus: "PASSED" | "REJECTED";
+  verificationFindings: readonly string[];
+  screenshotEvidenceReferences: readonly string[];
+  contentHash: string;
+  usage: Readonly<{ inputTokens: number; outputTokens: number; costUsd: number }>;
+  generatedAt: string;
+  thumbnailUrl: string | null;
+}>;
+
+export type LiveConceptStudio = Readonly<{
+  schemaVersion: 1;
+  missionId: string;
+  sourceProjectDesignVersion: number;
+  status: "GENERATING" | "READY" | "FAILED" | "INTERRUPTED";
+  recommendedConceptId: string | null;
+  recommendationReason: string | null;
+  concepts: readonly LiveConcept[];
+  generation: Readonly<{
+    startedAt: string;
+    completedAt: string | null;
+    inputTokens: number;
+    outputTokens: number;
+    costUsd: number;
+  }>;
+  selectedConceptId: string | null;
+  error: string | null;
+  generating: boolean;
+  createdAt: string;
+  updatedAt: string;
+}>;
+
 export type Mission = Readonly<{
   missionId: string;
   intent: string;
@@ -642,6 +704,7 @@ export type Mission = Readonly<{
   profile: ProjectProfile | null;
   productTypeDiscovery: ProductTypeDiscovery | null;
   productBlueprint: ProductBlueprint | null;
+  conceptStudio: LiveConceptStudio | null;
   proposalConfirmed: boolean;
   contract: Readonly<{
     contractVersion: number;

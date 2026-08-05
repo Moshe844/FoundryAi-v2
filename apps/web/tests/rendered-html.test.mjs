@@ -77,7 +77,7 @@ test("the production experience consumes replayed ProjectProfile data", async ()
     // Foundry proposes before it interrogates.
     "Here&rsquo;s what I think you need",
     "What I&rsquo;d build",
-    "Project-specific art directions, not reusable templates",
+    "These are working, responsive prototypes—not design descriptions",
     "What I&rsquo;d include automatically",
     "I&rsquo;d also recommend",
     "decisions that actually matter",

@@ -21,18 +21,23 @@ export const CONCEPT_GENERATION_OUTPUT_SCHEMA = Object.freeze({
         }),
       }),
     }),
-    generationSummary: Object.freeze({ type: "string", minLength: 1, maxLength: 1_000 }),
+    generationSummary: Object.freeze({ type: "string", minLength: 1, maxLength: 4_000 }),
   }),
 });
 
 const UNSAFE_SOURCE = Object.freeze([
   { pattern: /\b(?:fetch|WebSocket|XMLHttpRequest|EventSource|sendBeacon)\s*\(/iu, reason: "network API" },
-  { pattern: /(?:https?:)?\/\//iu, reason: "external URL" },
+  { pattern: /https?:\/\/|["'(]\s*\/\/[A-Za-z0-9]/iu, reason: "external URL" },
   { pattern: /\b(?:eval|Function)\s*\(/u, reason: "dynamic code execution" },
   { pattern: /\b(?:process\.env|import\.meta\.env|document\.cookie)\b/u, reason: "secret-bearing environment access" },
-  { pattern: /\b(?:window\.)?(?:parent|top|opener)\b/u, reason: "parent-window control" },
+  {
+    pattern: /\b(?:window|globalThis|self)\s*\.\s*(?:parent|top|opener)\b|\b(?:parent|top|opener)\s*\.\s*(?:postMessage|location|document|frames)\b/u,
+    reason: "parent-window control",
+  },
   { pattern: /<script\b[^>]*\bsrc\s*=\s*["'](?:https?:)?\/\//iu, reason: "external script" },
   { pattern: /<form\b[^>]*\baction\s*=\s*["'](?:https?:)?\/\//iu, reason: "external form action" },
+  { pattern: /<[^>]+\bstyle\s*=/iu, reason: "inline styling blocked by the prototype CSP" },
+  { pattern: /\.style(?:\.|\s*=)/u, reason: "DOM inline styling blocked by the prototype CSP" },
 ]);
 
 function fail(message) {
@@ -79,7 +84,7 @@ function validateGeneratedOutput(value, contract) {
       !/^\s*<!doctype html>/iu.test(html) ||
       !/<html\b[^>]*\blang=/iu.test(html) ||
       !/<main\b/iu.test(html) ||
-      !/<link\b[^>]*href=["']\/styles\.css["']/iu.test(html)
+      !/<link\b[^>]*href=["'](?:\/|\.\/)?styles\.css["']/iu.test(html)
     )
   ) fail("index.html must be semantic, localized, and load isolated concept CSS.");
   const css = byPath.get("styles.css");
@@ -89,11 +94,11 @@ function validateGeneratedOutput(value, contract) {
   ) fail("styles.css must contain a real responsive transformation.");
   return Object.freeze({
     files: Object.freeze(files.map((file) => Object.freeze(file))),
-    generationSummary: value.generationSummary.trim(),
+    generationSummary: value.generationSummary.trim().slice(0, 1_000),
   });
 }
 
-function prompt(contract) {
+function prompt(contract, admissionFeedback = []) {
   return [
     "Generate one real, runnable Live HTML Concept Studio prototype from the exact immutable contract below.",
     "Return only the declared structured output. Do not describe code instead of writing it.",
@@ -101,9 +106,16 @@ function prompt(contract) {
     "Implement the project-specific surfaces, sequence, navigation, hierarchy, typography, spacing, colors, imagery treatment, motion constraints, responsive behavior, accessibility rules, and deliberate exclusions.",
     "Use clearly fictional sample content under the sampleContentPolicy. Never invent customer facts.",
     "Do not use network requests, external URLs or scripts, environment variables, cookies, parent-window control, database code, authentication, payments, package dependencies, or build tooling.",
+    "Keep every style in styles.css. Do not use style attributes or JavaScript element.style mutations; interactions must toggle classes, data attributes, or accessible state because the runtime CSP blocks inline styling.",
     "Every expected file must be returned exactly once. The concept must run as a static origin-isolated HTML/CSS/ES-module application.",
     `CONCEPT_PROTOTYPE_CONTRACT ${contract.integrityHash}`,
     JSON.stringify(contract),
+    ...(admissionFeedback.length === 0
+      ? []
+      : [
+          "PRIOR_ADMISSION_FAILURES_TO_CORRECT",
+          admissionFeedback.map((entry) => String(entry).slice(0, 1_000)).join("\n"),
+        ]),
   ].join("\n\n");
 }
 
@@ -116,7 +128,7 @@ export function createPrototypeGenerationService({ modelGateway, workspaceServic
   }
   const inFlight = new Map();
 
-  async function generateOnce(contract) {
+  async function generateOnce(contract, admissionFeedback) {
     let workspace;
     try {
       workspace = workspaceService.get(contract);
@@ -139,7 +151,7 @@ export function createPrototypeGenerationService({ modelGateway, workspaceServic
       missionId: contract.missionId,
       workUnitId: `${baseId}-prototype-work`,
       idempotencyKey: `prototype-${contract.integrityHash.slice(0, 48)}`,
-      purpose: prompt(contract),
+      purpose: prompt(contract, admissionFeedback),
       taskClass: ModelTaskClass.FILE_GENERATION,
       executionStage: ModelExecutionStage.DESIGN_PROTOTYPE,
       contextReferences: [
@@ -175,11 +187,14 @@ export function createPrototypeGenerationService({ modelGateway, workspaceServic
     });
   }
 
-  function generate({ conceptContract: input }) {
+  function generate({ conceptContract: input, admissionFeedback = [] }) {
     const contract = normalizeConceptPrototypeContract(input);
+    if (!Array.isArray(admissionFeedback) || admissionFeedback.some((entry) => typeof entry !== "string")) {
+      fail("admissionFeedback must be an array of strings.");
+    }
     const key = contract.integrityHash;
     if (inFlight.has(key)) return inFlight.get(key);
-    const operation = generateOnce(contract).finally(() => inFlight.delete(key));
+    const operation = generateOnce(contract, admissionFeedback).finally(() => inFlight.delete(key));
     inFlight.set(key, operation);
     return operation;
   }

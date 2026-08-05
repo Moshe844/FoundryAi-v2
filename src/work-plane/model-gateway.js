@@ -80,6 +80,24 @@ function routeTier(taskClass, depthLevel) {
   return depthLevel === null ? taskTier[taskClass] : tierForDepth(depthLevel);
 }
 
+export function rankPrototypeCandidates(candidates) {
+  const latencyRank = { FAST: 0, BALANCED: 1, THOROUGH: 2 };
+  return [...candidates].sort((left, right) => {
+    const leftCost = Number.isFinite(left.totalCostPerMillionTokensUsd)
+      ? left.totalCostPerMillionTokensUsd
+      : Number.POSITIVE_INFINITY;
+    const rightCost = Number.isFinite(right.totalCostPerMillionTokensUsd)
+      ? right.totalCostPerMillionTokensUsd
+      : Number.POSITIVE_INFINITY;
+    return (
+      leftCost - rightCost ||
+      (latencyRank[left.latencyProfile] ?? 3) - (latencyRank[right.latencyProfile] ?? 3) ||
+      (left.reliability?.estimatedFailureRate ?? 1) - (right.reliability?.estimatedFailureRate ?? 1) ||
+      left.modelId.localeCompare(right.modelId)
+    );
+  });
+}
+
 function rankTaskRoutes(providers, modelTier) {
   const preferredLatency = preferredLatencyByTier[modelTier];
   const ranked = providers
@@ -162,6 +180,15 @@ export function classifyModelRouteFailure(errorOrMessage) {
     return Object.freeze({
       category: "PROVIDER_AUTHORIZATION",
       retryable: false,
+    });
+  }
+  if (
+    status === 408 ||
+    /\btimed? ?out\b|\btimeout\b/u.test(message)
+  ) {
+    return Object.freeze({
+      category: "TIMEOUT",
+      retryable: true,
     });
   }
   return Object.freeze({
@@ -684,6 +711,18 @@ export function createModelGateway({
             preferredLatencyProfile: preferredLatencyByTier[selectedTier],
           },
         });
+        if (designPrototypeRequest) {
+          capabilitySelection = Object.freeze({
+            ...capabilitySelection,
+            candidateModels: Object.freeze(
+              rankPrototypeCandidates(capabilitySelection.candidateModels),
+            ),
+            rationale: Object.freeze([
+              ...capabilitySelection.rationale,
+              "Prototype generation explicitly prefers the lowest-cost capable route, then fast latency, before historical tie-breaks.",
+            ]),
+          });
+        }
         const providersByRoute = new Map(
           providers.map((provider) => [
             `${provider.providerId}\u0000${providerRepairMetadata(provider).modelId}`,
@@ -742,6 +781,51 @@ export function createModelGateway({
             ),
         );
         if (survivingRoutes.length > 0) routedProviders = survivingRoutes;
+      }
+      if (designPrototypeRequest) {
+        const prototypeHistory = (routeHistory() ?? []).filter(
+          (entry) => /-prototype-generation$/u.test(entry?.requestId ?? ""),
+        );
+        const timedOutPrototypeModels = new Set(
+          prototypeHistory
+            .filter(
+              (entry) =>
+                entry?.kind === "failure" &&
+                entry.failureCategory === "TIMEOUT",
+            )
+            .map((entry) => entry.modelId),
+        );
+        const prototypeFailureCounts = new Map();
+        const successfulPrototypeModels = new Set();
+        for (const entry of prototypeHistory) {
+          if (entry.kind === "failure") {
+            prototypeFailureCounts.set(
+              entry.modelId,
+              (prototypeFailureCounts.get(entry.modelId) ?? 0) + 1,
+            );
+          }
+          if (entry.kind === "result" && entry.status === "SUCCEEDED") {
+            successfulPrototypeModels.add(entry.modelId);
+          }
+        }
+        const repeatedlyFailedPrototypeModels = new Set(
+          [...prototypeFailureCounts]
+            .filter(
+              ([modelId, count]) =>
+                count >= 2 && !successfulPrototypeModels.has(modelId),
+            )
+            .map(([modelId]) => modelId),
+        );
+        const routesOutsideCooldown = routedProviders.filter(
+          (provider) =>
+            !timedOutPrototypeModels.has(
+              providerRepairMetadata(provider).modelId,
+            ) &&
+            !repeatedlyFailedPrototypeModels.has(
+              providerRepairMetadata(provider).modelId,
+            ),
+        );
+        if (routesOutsideCooldown.length > 0) routedProviders = routesOutsideCooldown;
       }
       const historyAdjusted =
         routedProviders[0]?.providerId !==
@@ -860,6 +944,7 @@ export function createModelGateway({
                   ? input.purpose.trim()
                   : `${input.purpose.trim()}\n\nA prior eligible route returned output that failed deterministic admission: ${priorSafeOutputFailure} Return a fresh complete object that corrects this defect without omitting or weakening any requirement.`,
               taskClass: input.taskClass,
+              executionStage: input.executionStage ?? "PRODUCTION_EXECUTION",
               modelTier: selectedTier,
               depthLevel,
               routingReason: effectiveRoutingReason,
@@ -985,6 +1070,7 @@ export function createModelGateway({
                   routeAttempt,
                   failureCategory: failureDisposition.category,
                   retryable: failureDisposition.retryable,
+                  executionStage: input.executionStage ?? "PRODUCTION_EXECUTION",
                 },
               },
             });

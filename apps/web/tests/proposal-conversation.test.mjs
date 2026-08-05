@@ -33,13 +33,12 @@ test("the proposal is a progressive pre-build conversation", async () => {
   assert.match(proposal, /What I&rsquo;d build/);
   assert.match(proposal, /What I&rsquo;d include automatically/);
   assert.match(proposal, /conversation-details/);
-  assert.match(design, /Project-specific art directions, not reusable templates/);
+  assert.match(design, /These are working, responsive prototypes—not design descriptions/);
   assert.match(design, /Recommended/);
-  assert.match(design, /Combine ideas/);
-  // The board must be driven by the direction's own creative DNA, not by one
-  // shared layout with a different colour.
-  assert.match(design, /ArtDirectionBoard/);
-  assert.match(design, /creativeDNA/);
+  assert.match(design, /Combine with another/);
+  assert.match(design, /Open live concept/);
+  assert.match(design, /concept\.contract\.creativeThesis/);
+  assert.match(design, /mobile.*tablet.*desktop/su);
   assert.match(questions, /Let Foundry choose/);
   assert.doesNotMatch(questions, /Skip for now/);
   assert.match(questions, /Something else/);

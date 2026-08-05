@@ -2406,6 +2406,7 @@ export function openMissionControl({
                   routeAttempt: failed.routeAttempt,
                   failureCategory: disposition.category,
                   retryable: disposition.retryable,
+                  executionStage: failed.executionStage ?? null,
                 },
               ];
             }
