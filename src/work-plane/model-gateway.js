@@ -596,13 +596,16 @@ export function createModelGateway({
       };
       assertNoSecrets(fingerprint, input.sensitiveValues);
       const missionState = ledger.projectState(input.missionId).state;
+      const designPrototypeState =
+        missionState === MissionState.INTAKE ||
+        missionState === MissionState.CLARIFYING;
       if (
         (!designPrototypeRequest && missionState !== MissionState.EXECUTING) ||
-        (designPrototypeRequest && missionState !== MissionState.INTAKE)
+        (designPrototypeRequest && !designPrototypeState)
       ) {
         throw new ModelGatewayValidationError(
           designPrototypeRequest
-            ? "Design prototype model calls are permitted only during INTAKE, before production execution."
+            ? "Design prototype model calls are permitted only during INTAKE or CLARIFYING, before production execution."
             : "Model calls are permitted only during EXECUTING.",
         );
       }

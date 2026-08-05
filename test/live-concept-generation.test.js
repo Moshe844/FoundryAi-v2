@@ -5,6 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { ModelTaskClass } from "../src/domain/execution.js";
+import { MissionState } from "../src/domain/lifecycle.js";
 import { openMissionControl } from "../src/control-plane/mission-control.js";
 import {
   ConceptStrategy,
@@ -268,7 +269,7 @@ test("prototype routing cools down a model after consecutive admission failures 
   ]).has("recovered"), false);
 });
 
-test("INTAKE concepts use the real Model Gateway while ordinary pre-execution calls remain forbidden", async (t) => {
+test("pre-production concepts use the real Model Gateway during clarification while ordinary calls remain forbidden", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "foundry-generation-gateway-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   let providerCalls = 0;
@@ -297,6 +298,13 @@ test("INTAKE concepts use the real Model Gateway while ordinary pre-execution ca
     causationId: `${contract.missionId}-intent`,
     occurredAt: "2026-08-04T12:00:00.000Z",
     reason: "Generate approval prototypes before production execution.",
+  });
+  control.orchestrator.transition({
+    missionId: contract.missionId,
+    eventId: `${contract.missionId}-clarifying`,
+    causationId: `${contract.missionId}-created`,
+    to: MissionState.CLARIFYING,
+    reason: "A customer-visible decision remains open while design prototypes are explored.",
   });
   const workspaceService = createPrototypeWorkspaceService({
     prototypeRoot: join(root, "prototype-root"),
