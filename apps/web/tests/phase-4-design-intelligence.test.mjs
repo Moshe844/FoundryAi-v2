@@ -20,6 +20,7 @@ test("Phase 4 renders observations, meaningful directions, and recommendation co
   assert.match(design, /Recommended/u);
   assert.match(design, /Combine with another/u);
   assert.match(design, /Let Foundry shock me/u);
+  assert.match(design, /concepts\/shock/u);
   assert.match(design, /concept\.contract\.creativeThesis/u);
   assert.match(design, /verificationStatus/u);
   assert.match(design, /sandbox="allow-scripts allow-same-origin"/u);
@@ -29,6 +30,7 @@ test("Phase 4 renders observations, meaningful directions, and recommendation co
   assert.match(design, /What changed/u);
   assert.match(server, /conceptEvolution\.revise/u);
   assert.match(server, /conceptEvolution\.compose/u);
+  assert.match(server, /conceptEvolution\.shock/u);
   assert.match(server, /verifyStudioDifferentiation/u);
   assert.match(recommendations, /recommendation\.value\.value/u);
   assert.match(recommendations, /recommendation\.impact\.value/u);

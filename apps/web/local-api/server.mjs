@@ -497,6 +497,9 @@ function publicConceptStudio(missionId) {
     ...session,
     status: generating ? "GENERATING" : session.status,
     error: generating ? null : session.error,
+    evolution: generating && session.evolution !== undefined
+      ? { ...session.evolution, status: "GENERATING", error: null, completedAt: null }
+      : session.evolution,
     concepts: session.concepts.map((concept) => ({
       ...concept,
       thumbnailUrl:
@@ -729,12 +732,16 @@ function startConceptEvolutionJob({
             contract: activeContract,
             recommended: source?.recommended ?? false,
             recommendationReason: source?.recommendationReason ?? "This customer-composed direction preserves the explicitly selected qualities.",
-            keyDistinction: kind === "revision"
-              ? `Revised ${classification.scopes.join(", ")}`
-              : `Composed from ${activeContract.sourceConceptIds.join(", ")}`,
-            tradeoff: kind === "revision"
-              ? "A focused change that deliberately preserves unaffected design decisions."
-              : "Combining systems adds coordination constraints that the generated prototype must resolve.",
+        keyDistinction: kind === "revision"
+          ? `Revised ${classification.scopes.join(", ")}`
+          : kind === "shock"
+            ? "High-originality composition with the project outcome and safety constraints preserved"
+            : `Composed from ${activeContract.sourceConceptIds.join(", ")}`,
+        tradeoff: kind === "revision"
+          ? "A focused change that deliberately preserves unaffected design decisions."
+          : kind === "shock"
+            ? "More surprising and memorable, with a higher art-direction risk than the recommended concept."
+            : "Combining systems adds coordination constraints that the generated prototype must resolve.",
             verificationId: verification.verificationId,
             verificationStatus: verification.status,
             verificationFindings: verification.findings,
@@ -745,7 +752,7 @@ function startConceptEvolutionJob({
           };
           const nextConcepts = kind === "revision"
             ? [...session.concepts.filter((entry) => entry.contract.conceptId !== sourceConceptId), concept]
-            : [...session.concepts, concept];
+            : [...session.concepts.filter((entry) => entry.contract.conceptId !== activeContract.conceptId), concept];
           const differentiation = verifyStudioDifferentiation(nextConcepts, [verification]);
           if (differentiation.status !== "PASSED") throw new TypeError(differentiation.finding);
           admitted = { concept, nextConcepts, differentiation };
@@ -776,12 +783,17 @@ function startConceptEvolutionJob({
         }
       }
       if (admitted === null) throw new TypeError("The concept evolution did not produce an admitted artifact.");
+      const replacedConcept = session.concepts.find(
+        (entry) => entry.contract.conceptId === admitted.concept.contract.conceptId,
+      ) ?? null;
       session = prototypeSessions.save({
         ...session,
         concepts: admitted.nextConcepts,
         conceptHistory: kind === "revision" && source !== null
           ? [...(session.conceptHistory ?? []), source]
-          : session.conceptHistory ?? [],
+          : kind === "shock" && replacedConcept !== null
+            ? [...(session.conceptHistory ?? []), replacedConcept]
+            : session.conceptHistory ?? [],
         compositions: composition === null
           ? session.compositions ?? []
           : [...(session.compositions ?? []), composition],
@@ -794,7 +806,12 @@ function startConceptEvolutionJob({
           conceptVersion: admitted.concept.contract.conceptVersion,
           changedSummary: kind === "revision"
             ? classification.scopes.map((scope) => `${scope} changed; unaffected contract fields were preserved.`)
-            : composition.selectedTraits.map((trait) => `${trait.trait} from ${trait.conceptId}.`),
+            : kind === "shock"
+              ? [
+                  "A higher-originality composition and hierarchy were generated.",
+                  "Required workflows, accessibility, responsive behavior, and explicit exclusions were preserved.",
+                ]
+              : composition.selectedTraits.map((trait) => `${trait.trait} from ${trait.conceptId}.`),
           conflicts: composition?.conflicts ?? [],
           completedAt: new Date().toISOString(),
         },
@@ -1463,6 +1480,8 @@ function routeMission(pathname) {
 function routeConceptStudio(pathname) {
   const generate = /^\/missions\/([A-Za-z0-9_-]+)\/concepts\/generate$/u.exec(pathname);
   if (generate !== null) return { kind: "generate", missionId: generate[1], conceptId: null, fileName: null };
+  const shock = /^\/missions\/([A-Za-z0-9_-]+)\/concepts\/shock$/u.exec(pathname);
+  if (shock !== null) return { kind: "shock", missionId: shock[1], conceptId: null, fileName: null };
   const compose = /^\/missions\/([A-Za-z0-9_-]+)\/concepts\/compose$/u.exec(pathname);
   if (compose !== null) return { kind: "compose", missionId: compose[1], conceptId: null, fileName: null };
   const revise = /^\/missions\/([A-Za-z0-9_-]+)\/concepts\/([A-Za-z0-9._-]+)\/revise$/u.exec(pathname);
@@ -1643,6 +1662,44 @@ const server = createServer(async (request, response) => {
         conceptId: revision.contract.conceptId,
         conceptVersion: revision.contract.conceptVersion,
         changedScopes: revision.classification.scopes,
+      });
+    }
+    if (request.method === "POST" && conceptRoute?.kind === "shock") {
+      if (activeConceptJobs.has(conceptRoute.missionId)) {
+        return json(response, 409, { error: "Foundry is already generating or revising a concept for this project." });
+      }
+      const session = prototypeSessions.read(conceptRoute.missionId);
+      if (session?.status !== "READY") return json(response, 409, { error: "A ready concept session is required." });
+      const existingShock = session.concepts.find((entry) => entry.contract.strategy === ConceptStrategy.SHOCK);
+      if (existingShock === undefined && session.concepts.length >= 5) {
+        return json(response, 409, { error: "The Studio already contains five admitted concepts. Revise or select one before generating another." });
+      }
+      const source = session.concepts.find(
+        (entry) => entry.contract.conceptId === session.recommendedConceptId && entry.contract.strategy !== ConceptStrategy.SHOCK,
+      ) ?? session.concepts.find((entry) => entry.contract.strategy === ConceptStrategy.STANDARD);
+      if (source === undefined) return json(response, 409, { error: "A safe standard concept is required as the shock concept's project anchor." });
+      const shockConceptId = existingShock?.contract.conceptId ?? "shock-concept";
+      const priorVersions = prototypeWorkspaces
+        .list(conceptRoute.missionId)
+        .filter((workspace) => workspace.conceptId === shockConceptId)
+        .map((workspace) => workspace.conceptVersion);
+      const shock = conceptEvolution.shock({
+        sourceConcept: source.contract,
+        shockConceptId,
+        targetConceptVersion: Math.max(0, ...priorVersions) + 1,
+      });
+      startConceptEvolutionJob({
+        missionId: conceptRoute.missionId,
+        contract: shock.contract,
+        classification: shock.classification,
+        sourceConceptId: source.contract.conceptId,
+        kind: "shock",
+      });
+      return json(response, 202, {
+        accepted: true,
+        conceptId: shock.contract.conceptId,
+        conceptVersion: shock.contract.conceptVersion,
+        warning: "This option explores a more surprising direction while still preserving your project goals.",
       });
     }
     if (request.method === "POST" && conceptRoute?.kind === "compose") {

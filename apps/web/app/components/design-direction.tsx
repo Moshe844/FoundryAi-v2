@@ -292,6 +292,13 @@ export function DesignDirection({
     });
   }
 
+  function requestShockConcept() {
+    setRequestError(null);
+    void post(`/missions/${missionId}/concepts/shock`).catch((failure) => {
+      setRequestError(failure instanceof Error ? failure.message : String(failure));
+    });
+  }
+
   useEffect(() => {
     if (studio === null && !requested.current) requestConcepts();
   });
@@ -381,11 +388,19 @@ export function DesignDirection({
             These are working, responsive prototypes—not design descriptions. Open any concept to scroll, resize, and interact with it before choosing.
           </p>
         </div>
-        <button type="button" className="shock-concept-button" data-concept-action="shock">
-          <strong>Let Foundry shock me</strong>
+        <button
+          type="button"
+          className="shock-concept-button"
+          data-concept-action="shock"
+          disabled={studio.evolution?.status === "GENERATING"}
+          onClick={requestShockConcept}
+        >
+          <strong>{studio.evolution?.kind === "shock" && studio.evolution.status === "GENERATING" ? "Creating the surprising directionâ€¦" : "Let Foundry shock me"}</strong>
           <span>This explores a more surprising direction while preserving your project goals.</span>
         </button>
       </header>
+
+      {requestError !== null && <p className="banner banner-fault" role="alert">{requestError}</p>}
 
       {recommended !== undefined && (
         <aside className="concept-recommendation">

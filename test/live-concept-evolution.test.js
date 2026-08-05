@@ -86,3 +86,16 @@ test("composition reports incompatible traits plainly, then creates a real compo
   assert.match(resolved.contract.navigationModel, /overlay/iu);
   assert.equal(resolved.composition.selectedTraits.length, 4);
 });
+
+test("shock strategy changes art direction while preserving workflow, accessibility, responsiveness, and exclusions", () => {
+  const service = createConceptEvolutionService();
+  const source = contract("concept-safe");
+  const result = service.shock({ sourceConcept: source, shockConceptId: "shock-one" });
+  assert.equal(result.contract.strategy, ConceptStrategy.SHOCK);
+  assert.deepEqual(result.contract.projectSurfaces, source.projectSurfaces);
+  assert.deepEqual(result.contract.accessibilityRules, source.accessibilityRules);
+  assert(result.contract.responsiveRules.length > source.responsiveRules.length);
+  assert(result.contract.deliberateExclusions.includes("No generic SaaS shell."));
+  assert.match(result.contract.compositionRules.join(" "), /uncommon but purposeful/iu);
+  assert.deepEqual(result.contract.sourceConceptIds, [source.conceptId]);
+});

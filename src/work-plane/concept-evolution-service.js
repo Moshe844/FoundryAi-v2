@@ -218,6 +218,58 @@ function compositionContract({ missionId, compositionId, sourceConcepts: sourceI
   return Object.freeze({ status: "READY", conflicts: Object.freeze(conflicts), composition, contract: createConceptPrototypeContract(next) });
 }
 
+function shockContract({ sourceConcept: sourceInput, shockConceptId = "shock-concept", targetConceptVersion = 1 }) {
+  const source = normalizeConceptPrototypeContract(sourceInput);
+  if (!Number.isSafeInteger(targetConceptVersion) || targetConceptVersion < 1) fail("targetConceptVersion must be a positive integer.");
+  const next = copy(source);
+  delete next.schemaVersion;
+  delete next.integrityHash;
+  next.conceptId = shockConceptId;
+  next.conceptVersion = targetConceptVersion;
+  next.conceptName = `Uncommon: ${source.conceptName}`;
+  next.creativeThesis = `Pursue a surprising but purposeful alternative to the safest common pattern while preserving: ${source.creativeThesis}`;
+  next.designRationale = "Use memorable hierarchy, uncommon but usable sequencing, and strong art direction without arbitrary novelty or loss of the primary workflow.";
+  next.compositionRules = unique([
+    "Avoid the most common template composition for this product type.",
+    "Use an uncommon but purposeful composition with one memorable hierarchy move.",
+    ...source.compositionRules,
+  ]);
+  next.typographySystem = {
+    ...next.typographySystem,
+    originality: "Use distinctive, accessible typography treatment with a deliberate contrast in voice and scale.",
+  };
+  next.imageryStrategy = `${source.imageryStrategy} Use a distinctive project-appropriate treatment that changes the sequence, crop logic, or relationship to type rather than merely recoloring it.`;
+  next.componentCharacter = `${source.componentCharacter} Memorable and art-directed, with no generic SaaS shell and no arbitrary novelty.`;
+  next.interactionRules = unique([
+    "Include one unexpected but understandable interaction or content-reveal sequence.",
+    ...source.interactionRules,
+  ]);
+  next.motionRules = unique([
+    "Use motion only when it reinforces the surprising hierarchy or sequencing.",
+    ...source.motionRules,
+  ]);
+  next.responsiveRules = unique([
+    "Preserve the central creative idea on mobile instead of collapsing into a generic stack.",
+    ...source.responsiveRules,
+  ]);
+  next.accessibilityRules = [...source.accessibilityRules];
+  next.deliberateExclusions = unique([
+    ...source.deliberateExclusions,
+    "No generic SaaS shell.",
+    "No arbitrary novelty that obscures a required workflow.",
+  ]);
+  next.strategy = ConceptStrategy.SHOCK;
+  next.parentConceptId = null;
+  next.sourceConceptIds = [source.conceptId];
+  return Object.freeze({
+    contract: createConceptPrototypeContract(next),
+    classification: Object.freeze({
+      scopes: Object.freeze(["composition", "typography", "imagery", "interactions", "motion", "responsive"]),
+      referencedConceptId: source.conceptId,
+    }),
+  });
+}
+
 export function createConceptEvolutionService() {
-  return Object.freeze({ revise: revisionContract, compose: compositionContract });
+  return Object.freeze({ revise: revisionContract, compose: compositionContract, shock: shockContract });
 }

@@ -692,7 +692,7 @@ export type LiveConceptStudio = Readonly<{
   }>;
   selectedConceptId: string | null;
   evolution?: Readonly<{
-    kind: "revision" | "composition";
+    kind: "revision" | "composition" | "shock";
     status: "GENERATING" | "PASSED" | "FAILED" | "INTERRUPTED";
     conceptId: string;
     conceptVersion: number;

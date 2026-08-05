@@ -110,6 +110,12 @@ function prompt(contract, admissionFeedback = []) {
     "Keep every style in styles.css. Do not use style attributes or JavaScript element.style mutations; interactions must toggle classes, data attributes, or accessible state because the runtime CSP blocks inline styling.",
     "Forbidden literal patterns in every returned file include data:, blob:, javascript:, http://, https://, protocol-relative host URLs, style= attributes, and .style DOM access. Do not add data stylesheets, data images, preload shims, CSS imports, SVG data URIs, or placeholder network URLs; use local CSS gradients and semantic HTML instead.",
     "Before returning, scan all three files for those forbidden patterns and replace them with class-based, data-attribute-based, local behavior.",
+    ...(contract.strategy === "shock"
+      ? [
+          "HIGH_ORIGINALITY_STRATEGY: deliberately avoid the safest common pattern. Create uncommon but purposeful composition, memorable hierarchy, strong art direction, unexpected but understandable interaction or sequencing, and distinctive typography or imagery treatment.",
+          "The result must still satisfy the project outcome, primary users, required workflows, accessibility, responsive behavior, technical feasibility, and every explicit exclusion. Do not create a generic SaaS shell and do not use arbitrary novelty.",
+        ]
+      : []),
     "Every expected file must be returned exactly once. The concept must run as a static origin-isolated HTML/CSS/ES-module application.",
     `CONCEPT_PROTOTYPE_CONTRACT ${contract.integrityHash}`,
     JSON.stringify(contract),

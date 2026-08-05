@@ -655,7 +655,7 @@ function liveConceptStudio(value: unknown, path: string) {
     : (() => {
         const entry = object(input.evolution, `${path}.evolution`);
         return {
-          kind: text(entry.kind, `${path}.evolution.kind`) as "revision" | "composition",
+          kind: text(entry.kind, `${path}.evolution.kind`) as "revision" | "composition" | "shock",
           status: text(entry.status, `${path}.evolution.status`) as "GENERATING" | "PASSED" | "FAILED" | "INTERRUPTED",
           conceptId: text(entry.conceptId, `${path}.evolution.conceptId`),
           conceptVersion: integer(entry.conceptVersion, `${path}.evolution.conceptVersion`),

@@ -118,6 +118,40 @@ test("prototype generation routes the exact contract and writes real isolated fi
   }
 });
 
+test("shock concept generation receives the deliberate high-originality strategy without relaxing constraints", async () => {
+  const root = mkdtempSync(join(tmpdir(), "foundry-generation-shock-"));
+  let purpose = "";
+  try {
+    const workspaceService = createPrototypeWorkspaceService({ prototypeRoot: root });
+    const base = structuredClone(concept("concept-base"));
+    delete base.schemaVersion;
+    delete base.integrityHash;
+    const shock = createConceptPrototypeContract({
+      ...base,
+      conceptId: "shock-concept",
+      strategy: ConceptStrategy.SHOCK,
+      sourceConceptIds: ["concept-base"],
+    });
+    const generation = createPrototypeGenerationService({
+      workspaceService,
+      modelGateway: {
+        async request(input) {
+          purpose = input.purpose;
+          return { requestId: input.requestId, structuredOutput: structuredClone(generated), tokenMetadata: {}, costMetadata: {} };
+        },
+      },
+    });
+    await generation.generate({ conceptContract: shock });
+    assert.match(purpose, /HIGH_ORIGINALITY_STRATEGY/u);
+    assert.match(purpose, /uncommon but purposeful composition/u);
+    assert.match(purpose, /still satisfy the project outcome/u);
+    assert.match(purpose, /Do not create a generic SaaS shell/u);
+    assert.match(purpose, /Forbidden literal patterns/u);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("prototype admission rejects unsafe or contract-incomplete model output before writes", async () => {
   const root = mkdtempSync(join(tmpdir(), "foundry-generation-reject-"));
   const unsafeGateway = {

@@ -25,6 +25,14 @@ export interface ConceptEvolutionService {
     composition: ConceptComposition | null;
     contract: ConceptPrototypeContract | null;
   }>;
+  shock(input: {
+    sourceConcept: ConceptPrototypeContract;
+    shockConceptId?: string;
+    targetConceptVersion?: number;
+  }): Readonly<{
+    contract: ConceptPrototypeContract;
+    classification: Readonly<{ scopes: readonly string[]; referencedConceptId: string }>;
+  }>;
 }
 
 export function createConceptEvolutionService(): ConceptEvolutionService;

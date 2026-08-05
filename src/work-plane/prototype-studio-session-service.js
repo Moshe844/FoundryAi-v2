@@ -60,7 +60,7 @@ export function createPrototypeStudioSessionService({ prototypeRoot }) {
         evolution: {
           ...record.evolution,
           status: "INTERRUPTED",
-          error: "Concept revision or composition was interrupted. Retry starts from the last immutable admitted version.",
+          error: "Concept revision, composition, or shock generation was interrupted. Retry starts from the last immutable admitted version.",
           completedAt: new Date().toISOString(),
         },
       };
