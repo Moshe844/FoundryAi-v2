@@ -25,6 +25,10 @@ import { RoutingPriority } from "./model-routing-foundation.js";
 
 export { rankRoutesByPersistedTaskHistory } from "./model-route-reliability.js";
 
+export const ModelExecutionStage = Object.freeze({
+  DESIGN_PROTOTYPE: "DESIGN_PROTOTYPE",
+});
+
 const taskTier = Object.freeze({
   [ModelTaskClass.FILE_GENERATION]: ModelTier.STANDARD_ENGINEERING,
   [ModelTaskClass.STRUCTURED_TRANSFORMATION]: ModelTier.MECHANICAL,
@@ -444,6 +448,7 @@ export function createModelGateway({
         "structuredOutputValidator",
         "depthLevel",
         "routingReason",
+        "executionStage",
       ];
       const repairRequest = repairTaskClasses.has(input.taskClass);
       const requiredKeys = repairRequest
@@ -518,6 +523,27 @@ export function createModelGateway({
       const contextReferences = normalizeContextReferences(
         input.contextReferences,
       );
+      const designPrototypeRequest =
+        input.executionStage === ModelExecutionStage.DESIGN_PROTOTYPE;
+      if (
+        input.executionStage !== undefined &&
+        !designPrototypeRequest
+      ) {
+        throw new ModelGatewayValidationError(
+          "Model executionStage is invalid.",
+        );
+      }
+      if (
+        designPrototypeRequest &&
+        (input.taskClass !== ModelTaskClass.FILE_GENERATION ||
+          !contextReferences.some(
+            (reference) => reference.kind === "concept-prototype-contract",
+          ))
+      ) {
+        throw new ModelGatewayValidationError(
+          "DESIGN_PROTOTYPE is restricted to contract-bound FILE_GENERATION.",
+        );
+      }
       const schema = validateSchema(input.expectedStructuredOutputSchema);
       const fingerprint = {
         requestId: input.requestId,
@@ -532,11 +558,15 @@ export function createModelGateway({
           routingReason === null ? null : routingReason.trim(),
       };
       assertNoSecrets(fingerprint, input.sensitiveValues);
+      const missionState = ledger.projectState(input.missionId).state;
       if (
-        ledger.projectState(input.missionId).state !== MissionState.EXECUTING
+        (!designPrototypeRequest && missionState !== MissionState.EXECUTING) ||
+        (designPrototypeRequest && missionState !== MissionState.INTAKE)
       ) {
         throw new ModelGatewayValidationError(
-          "Model calls are permitted only during EXECUTING.",
+          designPrototypeRequest
+            ? "Design prototype model calls are permitted only during INTAKE, before production execution."
+            : "Model calls are permitted only during EXECUTING.",
         );
       }
       const calls = callHistory(input.missionId);
@@ -597,7 +627,12 @@ export function createModelGateway({
       }
 
       const startTimestamp = clock();
-      const workspace = workspaces.getWorkspace(input.missionId);
+      // A concept is generated before a production workspace exists. Its
+      // isolated workspace is controlled by PrototypeWorkspaceService, while
+      // all normal production calls remain checkpoint-bound here.
+      const workspace = designPrototypeRequest
+        ? Object.freeze({ currentCheckpointId: null })
+        : workspaces.getWorkspace(input.missionId);
       const priorRouteAttemptCount = evidence
         .findByMission(input.missionId)
         .filter(
@@ -784,6 +819,7 @@ export function createModelGateway({
             modelId: selectedModelId,
             providerFamily: selectedProviderFamily,
             taskClass: input.taskClass,
+            executionStage: input.executionStage ?? "PRODUCTION_EXECUTION",
             depthLevel,
             routingReason: effectiveRoutingReason,
             routeAttempt,
@@ -919,6 +955,7 @@ export function createModelGateway({
                 modelId: selectedModelId,
                 providerFamily: selectedProviderFamily,
                 taskClass: input.taskClass,
+                executionStage: input.executionStage ?? "PRODUCTION_EXECUTION",
                 routeAttempt,
                 failureCategory: failureDisposition.category,
                 retryable: failureDisposition.retryable,
@@ -1039,6 +1076,7 @@ export function createModelGateway({
           depthLevel: record.depthLevel,
           routingReason: record.routingReason,
           taskClass: record.taskClass,
+          executionStage: input.executionStage ?? "PRODUCTION_EXECUTION",
           tokenMetadata: record.tokenMetadata,
           costMetadata: record.costMetadata,
         },

@@ -249,6 +249,7 @@ export {
   createDeterministicLocalModelProvider,
   diversifyProviderRoutes,
   excludePermanentlyRejectedRoutes,
+  ModelExecutionStage,
   validateStructuredModelOutput,
 } from "./work-plane/model-gateway.js";
 export {
@@ -348,6 +349,10 @@ export {
 } from "./domain/live-concept-studio.js";
 export { createPrototypeWorkspaceService } from "./work-plane/prototype-workspace-service.js";
 export { createPrototypeRuntimeService } from "./work-plane/prototype-runtime-service.js";
+export {
+  CONCEPT_GENERATION_OUTPUT_SCHEMA,
+  createPrototypeGenerationService,
+} from "./work-plane/prototype-generation-service.js";
 export {
   PROJECT_UNDERSTANDING_SOURCE,
   cumulativeCustomerFollowUpAnswers,
