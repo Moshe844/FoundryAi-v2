@@ -2852,17 +2852,11 @@ export function createProductionMissionService({
                 },
               ],
               expectedStructuredOutputSchema: generationSchema,
-              structuredOutputValidator:
-                approvedContract === null
-                  ? undefined
-                  : (output) =>
-                      validateContractBoundMissionPlan(
-                        bindMissingApprovedRequirementTraces(
-                          output,
-                          approvedContract,
-                        ),
-                        approvedContract,
-                      ),
+              // Contract semantics are admitted inside the bounded generation
+              // loop below. Validating them inside Model Gateway would turn a
+              // repairable design-fidelity mismatch into an immediate terminal
+              // provider-call failure before that loop can classify it.
+              structuredOutputValidator: undefined,
               idempotencyKey: `${generationRequestId}-key`,
               sensitiveValues: [],
             })
@@ -2941,17 +2935,9 @@ export function createProductionMissionService({
               },
             ],
             expectedStructuredOutputSchema: generationSchema,
-            structuredOutputValidator:
-              approvedContract === null
-                ? undefined
-                : (output) =>
-                    validateContractBoundMissionPlan(
-                      bindMissingApprovedRequirementTraces(
-                        output,
-                        approvedContract,
-                      ),
-                      approvedContract,
-                    ),
+            // Keep semantic admission in this loop so the same immutable
+            // contract is applied to every bounded correction attempt.
+            structuredOutputValidator: undefined,
             idempotencyKey: `${requestId}-key`,
             sensitiveValues: [],
           });

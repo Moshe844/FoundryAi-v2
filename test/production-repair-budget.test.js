@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
@@ -21,6 +22,26 @@ test("production repair budgets allow bounded evidence-backed recovery", () => {
     designFidelityRepairCalls: 2,
     runtimeRestarts: 2,
   });
+});
+
+test("approved-design semantic admission stays inside the bounded correction loop", async () => {
+  const source = await readFile(
+    new URL("../src/work-plane/production-mission-service.js", import.meta.url),
+    "utf8",
+  );
+  const generationSection = source.slice(
+    source.indexOf("const generationRequestId"),
+    source.indexOf("const bundle ="),
+  );
+
+  assert.match(
+    generationSection,
+    /for \(;;\) \{[\s\S]*validateContractBoundMissionPlan\([\s\S]*catch \(error\)/u,
+  );
+  assert.doesNotMatch(
+    generationSection,
+    /structuredOutputValidator:\s*approvedContract/u,
+  );
 });
 
 test("browser observation and design fidelity repairs have independent budgets", () => {
