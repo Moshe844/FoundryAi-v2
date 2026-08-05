@@ -204,7 +204,11 @@ export function hasBalancedJsxTags(source) {
     let position = start + 1;
     const closing = source[position] === "/";
     if (closing) position += 1;
-    if (!closing && /[A-Za-z0-9_$.)\]]/u.test(source[start - 1] ?? "")) {
+    if (
+      !closing &&
+      stack.length === 0 &&
+      /[A-Za-z0-9_$.)\]]/u.test(source[start - 1] ?? "")
+    ) {
       cursor = start + 1;
       continue;
     }
