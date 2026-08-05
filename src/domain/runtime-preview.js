@@ -249,6 +249,11 @@ export function parseBrowserResult(stdout, { allowEmptyChecks = false } = {}) {
   }
   const checkNames = Object.keys(parsed.checks);
   const diagnostics = hasDiagnostics ? parsed.diagnostics : {};
+  const isDiagnosticValue = (value) =>
+    typeof value === "boolean" ||
+    typeof value === "string" ||
+    (typeof value === "number" && Number.isFinite(value)) ||
+    value === null;
   const diagnosticsAreValid =
     diagnostics !== null &&
     typeof diagnostics === "object" &&
@@ -262,7 +267,7 @@ export function parseBrowserResult(stdout, { allowEmptyChecks = false } = {}) {
         !Array.isArray(subchecks) &&
         Object.getPrototypeOf(subchecks) === Object.prototype &&
         Object.entries(subchecks).every(
-          ([name, passed]) => IDENTIFIER.test(name) && typeof passed === "boolean",
+          ([name, value]) => IDENTIFIER.test(name) && isDiagnosticValue(value),
         ),
     );
   if (
