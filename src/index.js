@@ -356,6 +356,8 @@ export {
 export { createPrototypeVerificationService } from "./work-plane/prototype-verification-service.js";
 export { createPrototypeStudioSessionService } from "./work-plane/prototype-studio-session-service.js";
 export { createPrototypeApprovalService } from "./work-plane/prototype-approval-service.js";
+export { evaluatePrototypeFidelity, PrototypeFidelityAspect } from "./domain/prototype-fidelity.js";
+export { createPrototypeFidelityService } from "./work-plane/prototype-fidelity-service.js";
 export { createConceptEvolutionService } from "./work-plane/concept-evolution-service.js";
 export {
   CONCEPT_GENERATION_OUTPUT_SCHEMA,
@@ -369,6 +371,7 @@ export {
 } from "./understanding-plane/project-understanding-service.js";
 export {
   PRODUCTION_MISSION_SOURCE,
+  bindApprovedPrototypeFidelityIdentity,
   bindMissingApprovedRequirementTraces,
   createProductionMissionService,
 } from "./work-plane/production-mission-service.js";

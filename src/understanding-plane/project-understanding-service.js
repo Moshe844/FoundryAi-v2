@@ -30,6 +30,7 @@ import {
   createApprovedProjectContract,
   validateApprovedProjectContractConsistency,
 } from "../domain/approved-project-contract.js";
+import { normalizeApprovedDesignContract } from "../domain/live-concept-studio.js";
 import {
   CERTIFIED_STACK_ID,
   CERTIFIED_STACK_VERSION,
@@ -1652,7 +1653,7 @@ export function cumulativeCustomerFollowUpAnswers(
   return Object.freeze(accumulated);
 }
 
-function validateStructuredSelectionsAgainstCurrent(
+export function validateStructuredSelectionsAgainstCurrent(
   answers,
   currentProfile,
   currentDesign,
@@ -1703,6 +1704,22 @@ function validateStructuredSelectionsAgainstCurrent(
         throw new TypeError("The design choice has an invalid subject.");
       }
       if (selection.mode === "other") continue;
+      const liveApproval = selection.designContract?.approvedPrototypeContract;
+      if (liveApproval !== undefined && liveApproval !== null) {
+        const approved = normalizeApprovedDesignContract(liveApproval);
+        if (
+          approved.missionId !== currentProfile.missionId ||
+          approved.selectedConceptId !== selection.optionId ||
+          approved.prototypeFileManifest.length < 1 ||
+          approved.screenshotEvidenceReferences.length < 3 ||
+          approved.browserEvidenceReferences.length < 1
+        ) {
+          throw new TypeError(
+            "The live design choice does not match its immutable approval evidence.",
+          );
+        }
+        continue;
+      }
       const selected = directions.find(
         (direction) => direction.id === selection.optionId,
       );

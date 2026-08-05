@@ -54,6 +54,7 @@ const control = openMissionControl({
   evidenceDirectory: resolve(stateRoot, "evidence"),
   workspaceDirectory: resolve(stateRoot, "workspaces"),
   registryDirectory: resolve(stateRoot, "registry"),
+  prototypeRoot: resolve(stateRoot, "prototype-root"),
   environmentVariables: configuredEnvironment,
   aiDiscoveryAdapters: liveAdapters.discoveryAdapters,
   modelProviders: liveAdapters.executionAdapters,
@@ -96,6 +97,7 @@ try {
   process.send?.({ type: "completed", missionId });
 } catch (error) {
   const failureMessage = String(error?.message ?? error).slice(0, 500);
+  process.stderr.write(`Mission worker failed: ${failureMessage}\n`);
   try {
     await control.production.stop(missionId);
   } catch {}

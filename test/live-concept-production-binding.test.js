@@ -3,11 +3,13 @@ import test from "node:test";
 
 import { contractBoundModelPrompt } from "../src/domain/contract-bound-execution.js";
 import { designExecutionBrief, validateGeneratedDesignFidelity } from "../src/domain/design-fidelity.js";
+import { bindApprovedPrototypeFidelityIdentity } from "../src/work-plane/production-mission-service.js";
 import {
   ConceptStrategy,
   createApprovedDesignContract,
   createConceptPrototypeContract,
 } from "../src/domain/live-concept-studio.js";
+import { validateStructuredSelectionsAgainstCurrent } from "../src/understanding-plane/project-understanding-service.js";
 
 function fixture() {
   const concept = createConceptPrototypeContract({
@@ -143,4 +145,53 @@ test("production admission rejects a bundle that changes the approved prototype 
     () => validateGeneratedDesignFidelity(tampered, contract, fail),
     /content hash/u,
   );
+});
+
+test("a browser-approved revised or shock concept is a valid structured design choice", () => {
+  const { approved } = fixture();
+  const selection = {
+    kind: "design-direction",
+    subjectId: "design-direction",
+    mode: "select-option",
+    optionId: approved.selectedConceptId,
+    value: "Cinematic Commission",
+    reason: "The customer selected the real live concept.",
+    classification: "design preference",
+    sourceProfileVersion: 2,
+    designContract: { approvedPrototypeContract: approved },
+  };
+  const profile = { missionId: approved.missionId, profileVersion: 2 };
+  const design = { designAlternatives: [], recommendations: [], decisions: [] };
+
+  assert.doesNotThrow(() => validateStructuredSelectionsAgainstCurrent(
+    [{ questionId: "customer-design-direction", answer: "Use it.", selection }],
+    profile,
+    design,
+  ));
+  assert.throws(() => validateStructuredSelectionsAgainstCurrent(
+    [{ questionId: "customer-design-direction", answer: "Use it.", selection: { ...selection, optionId: "another-concept" } }],
+    profile,
+    design,
+  ), /immutable approval evidence/u);
+});
+
+test("production binds immutable approval bookkeeping locally before semantic admission", () => {
+  const { approved } = fixture();
+  const plan = {
+    designFidelity: {
+      approvedDesignId: "model-typo",
+      approvedPrototypeContentHash: "e".repeat(64),
+      approvedConceptVersion: 1,
+    },
+  };
+  const bound = bindApprovedPrototypeFidelityIdentity(plan, {
+    productBlueprint: {
+      designSpecification: { approvedDesignContract: approved },
+    },
+  });
+
+  assert.equal(bound.designFidelity.approvedDesignId, approved.approvedDesignId);
+  assert.equal(bound.designFidelity.approvedPrototypeContentHash, approved.prototypeContentHash);
+  assert.equal(bound.designFidelity.approvedConceptVersion, approved.selectedConceptVersion);
+  assert.notEqual(bound, plan);
 });

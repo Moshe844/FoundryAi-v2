@@ -78,6 +78,9 @@ import {
 import { createModelResponseValidator } from "../work-plane/model-response-validator.js";
 import { createRuntimePreviewService } from "../work-plane/runtime-preview-service.js";
 import { createProductionMissionService } from "../work-plane/production-mission-service.js";
+import { createPrototypeWorkspaceService } from "../work-plane/prototype-workspace-service.js";
+import { createChromePrototypeBrowserVerifier } from "../work-plane/prototype-browser-verifier.js";
+import { createPrototypeFidelityService } from "../work-plane/prototype-fidelity-service.js";
 import { createDiagnosisRepairStrategist } from "../recovery-plane/diagnosis-repair-strategist.js";
 import {
   EXECUTION_ENGINE_SOURCE,
@@ -2032,6 +2035,7 @@ export function openMissionControl({
   evidenceDirectory,
   workspaceDirectory,
   registryDirectory,
+  prototypeRoot = null,
   toolProbe,
   allowDeterministicCertificationFixtures = false,
   modelProviders = [],
@@ -2513,6 +2517,13 @@ export function openMissionControl({
     runtime,
     evidence,
     verification,
+    prototypeFidelity:
+      prototypeRoot === null
+        ? null
+        : createPrototypeFidelityService({
+            workspaceService: createPrototypeWorkspaceService({ prototypeRoot }),
+            browserVerifier: createChromePrototypeBrowserVerifier(),
+          }),
     allowLegacyCertificationExecution:
       allowDeterministicCertificationFixtures,
   });

@@ -48,23 +48,12 @@ export const ProductionRepairScope = Object.freeze({
   VERIFICATION_ONLY: "VERIFICATION_ONLY_RETRY",
 });
 
-// A certified production run must succeed from the original generation.
-// Model-backed corrections remain deliberately disabled: they are not a
-// substitute for a sound generation contract and deterministic scaffold.
-// Bounded paid-correction budgets. Zero disables the corresponding repair
-// loop entirely and turns every first-pass failure into a terminal mission —
-// which is why finished-looking builds used to die at the last step. Each
-// loop below is already evidence-backed, checkpoint-restored, and bounded.
-const MAX_GENERATION_CORRECTION_CALLS = 2;
-const MAX_PROCEDURE_REPAIR_CALLS = 6;
-// Browser verification is the last gate, and a generated UI failing its first
-// real browser pass is the single most common recoverable event in the whole
-// pipeline. These budgets enable the evidence-backed repair loop below (which
-// restores the pre-work checkpoint, requests one narrowly scoped correction,
-// rebuilds, and reruns verification). Five paid corrections fit inside the
-// outer rerun bound of seven browser attempts; a zero budget turns every
-// first-pass check failure into an immediate mission failure.
-const MAX_BROWSER_REPAIR_CALLS = 5;
+// A production run gets one paid generation. Stack normalization and every
+// later check are local and deterministic; failures preserve exact evidence
+// instead of silently starting another paid model call.
+const MAX_GENERATION_CORRECTION_CALLS = 0;
+const MAX_PROCEDURE_REPAIR_CALLS = 0;
+const MAX_BROWSER_REPAIR_CALLS = 0;
 const MAX_RUNTIME_RESTARTS = 2;
 
 export function hasBalancedJavaScriptDelimiters(source) {
@@ -679,7 +668,11 @@ export function validateProjectBundleForStack(
   );
 }
 
-export function ensureCertifiedStackScaffold(files, contractRequirementIds = []) {
+export function ensureCertifiedStackScaffold(
+  files,
+  contractRequirementIds = [],
+  { responsiveCheckIds = [], accessibilityCheckIds = [] } = {},
+) {
   const generatedHealthRoute = files.find((file) =>
     /^(?:src\/)?app\/api\/health\/route\.(?:js|ts)$/u.test(file.path),
   );
@@ -714,7 +707,47 @@ export function ensureCertifiedStackScaffold(files, contractRequirementIds = [])
       ),
     });
   }
-  const generatedFiles = protectedApiFiles.filter(
+  const certifiedPackageFiles = protectedApiFiles.map((file) => {
+    if (file.path !== "package.json") return file;
+    let packageDefinition;
+    try {
+      packageDefinition = JSON.parse(file.content);
+    } catch {
+      return file;
+    }
+    const dependencies = {
+      ...(packageDefinition.dependencies ?? {}),
+    };
+    const devDependencies = {
+      ...(packageDefinition.devDependencies ?? {}),
+    };
+    const runtimePackages = new Set([
+      "better-sqlite3",
+      "next",
+      "react",
+      "react-dom",
+    ]);
+    for (const [packageName, certifiedVersion] of Object.entries(
+      CERTIFIED_PROJECT_PACKAGE_VERSIONS,
+    )) {
+      if (runtimePackages.has(packageName)) {
+        dependencies[packageName] = certifiedVersion;
+        delete devDependencies[packageName];
+      } else {
+        devDependencies[packageName] = certifiedVersion;
+        delete dependencies[packageName];
+      }
+    }
+    return {
+      ...file,
+      content: `${JSON.stringify({
+        ...packageDefinition,
+        dependencies,
+        devDependencies,
+      }, null, 2)}\n`,
+    };
+  });
+  const generatedFiles = certifiedPackageFiles.filter(
     (file) =>
       !/^(?:src\/)?app\/(?:favicon|icon)\.[^/]+(?:\/.*)?$/u.test(
         file.path,
@@ -856,6 +889,14 @@ export function ensureCertifiedStackScaffold(files, contractRequirementIds = [])
       return stackNormalizedFile;
     }
     let readinessNormalizedContent = stackNormalizedFile.content
+      .replaceAll(
+        "Record<string, Record<string, boolean>>",
+        "Record<string, Record<string, unknown>>",
+      )
+      .replace(
+        /\blet\s+checks(\s*:\s*[^=;]+)?\s*=/u,
+        "const checks$1 =",
+      )
       .replace(
         /waitUntil\s*:\s*(["'])networkidle\1/gu,
         'waitUntil: "domcontentloaded"',
@@ -927,6 +968,130 @@ export function ensureCertifiedStackScaffold(files, contractRequirementIds = [])
         "try {\n    await page.setViewportSize({ width: 375, height: 667 });",
       );
     }
+    if (
+      responsiveCheckIds.length > 0 &&
+      !readinessNormalizedContent.includes("__foundryResponsiveEvidence")
+    ) {
+      const responsiveProbe = [
+        "await page.setViewportSize({ width: 390, height: 844 });",
+        "const __foundryPhoneLayout = await page.evaluate(() => ({",
+        "  scrollWidth: document.documentElement.scrollWidth,",
+        "  clientWidth: document.documentElement.clientWidth,",
+        "  scrollHeight: document.documentElement.scrollHeight,",
+        "  clientHeight: window.innerHeight,",
+        "  interactionCount: document.querySelectorAll('button, a, input, select, textarea').length,",
+        "}));",
+        "const __foundryResponsiveEvidence =",
+        "  __foundryPhoneLayout.scrollWidth <= __foundryPhoneLayout.clientWidth &&",
+        "  __foundryPhoneLayout.scrollHeight > 0 &&",
+        "  __foundryPhoneLayout.scrollHeight <= __foundryPhoneLayout.clientHeight * 30 &&",
+        "  __foundryPhoneLayout.interactionCount > 0 &&",
+        "  __foundryPhoneLayout.interactionCount <= 100;",
+      ].map((line) => `    ${line}`).join("\n");
+      const navigation = /(\bawait\s+page\.goto\([^;]+;)/u;
+      readinessNormalizedContent = navigation.test(readinessNormalizedContent)
+        ? readinessNormalizedContent.replace(
+            navigation,
+            `$1\n\n${responsiveProbe}`,
+          )
+        : readinessNormalizedContent.replace(
+            /(\btry\s*\{)/u,
+            `$1\n${responsiveProbe}`,
+          );
+      for (const checkId of responsiveCheckIds) {
+        const escapedCheckId = checkId.replace(
+          /[.*+?^${}()|[\]\\]/gu,
+          "\\$&",
+        );
+        const assignment = new RegExp(
+          `(checks\\s*\\[\\s*["']${escapedCheckId}["']\\s*\\]\\s*=\\s*)([^;]+)`,
+          "u",
+        );
+        readinessNormalizedContent = readinessNormalizedContent.replace(
+          assignment,
+          (_match, prefix, expression) =>
+            `${prefix}(${expression.trim()}) && __foundryResponsiveEvidence`,
+        );
+      }
+    }
+    if (
+      accessibilityCheckIds.length > 0 &&
+      !readinessNormalizedContent.includes("__foundryAccessibilityEvidence")
+    ) {
+      const accessibilityProbe = [
+        "await page.keyboard.press('Tab');",
+        "const __foundryAccessibleFocus = await page.evaluate(() => {",
+        "  const active = document.activeElement;",
+        "  return active instanceof HTMLElement &&",
+        "    !['BODY', 'HTML'].includes(active.tagName) &&",
+        "    active.matches(':focus-visible');",
+        "});",
+        "const __foundryAccessibleLabelCount = await page.locator('a[aria-label], button[aria-label], input[aria-label], textarea[aria-label], select[aria-label], label').count();",
+        "const __foundryAccessibilityEvidence =",
+        "  __foundryAccessibleFocus && __foundryAccessibleLabelCount > 0;",
+      ].map((line) => `    ${line}`).join("\n");
+      const navigation = /(\bawait\s+page\.goto\([^;]+;)/u;
+      readinessNormalizedContent = navigation.test(readinessNormalizedContent)
+        ? readinessNormalizedContent.replace(
+            navigation,
+            `$1\n\n${accessibilityProbe}`,
+          )
+        : readinessNormalizedContent.replace(
+            /(\btry\s*\{)/u,
+            `$1\n${accessibilityProbe}`,
+          );
+      for (const checkId of accessibilityCheckIds) {
+        const escapedCheckId = checkId.replace(
+          /[.*+?^${}()|[\]\\]/gu,
+          "\\$&",
+        );
+        const assignment = new RegExp(
+          `(checks\\s*\\[\\s*["']${escapedCheckId}["']\\s*\\]\\s*=\\s*)([^;]+)`,
+          "u",
+        );
+        readinessNormalizedContent = readinessNormalizedContent.replace(
+          assignment,
+          (_match, prefix, expression) =>
+            `${prefix}(${expression.trim()}) && __foundryAccessibilityEvidence`,
+        );
+      }
+    }
+    const collectionReads = [
+      ...readinessNormalizedContent.matchAll(
+        /^(?<indent>\s*)(?<statement>const\s+(?<name>[A-Za-z_$][\w$]*)\s*=\s*await\s+page\.\$\$\(\s*(?<quote>["'])(?<selector>[^"']+)\k<quote>\s*\)\s*;)/gmu,
+      ),
+    ];
+    for (const collectionRead of collectionReads) {
+      const { indent, statement, name, selector } = collectionRead.groups;
+      const tail = readinessNormalizedContent.slice(
+        collectionRead.index,
+        collectionRead.index + 500,
+      );
+      if (!new RegExp(`\\b${name}\\.length\\s*>\\s*0`, "u").test(tail)) {
+        continue;
+      }
+      const preceding = readinessNormalizedContent.slice(
+        Math.max(0, collectionRead.index - 500),
+        collectionRead.index,
+      );
+      if (preceding.includes(selector) && /waitFor(?:Selector)?\s*\(/u.test(preceding)) {
+        continue;
+      }
+      readinessNormalizedContent = readinessNormalizedContent.replace(
+        statement,
+        `await page.locator(${JSON.stringify(selector)}).first().waitFor({ state: "visible" });\n${indent}${statement}`,
+      );
+    }
+    if (
+      /FOUNDRY_BROWSER_RESULT/u.test(readinessNormalizedContent) &&
+      /\bchecks\b/u.test(readinessNormalizedContent) &&
+      !readinessNormalizedContent.includes("__foundryFailedChecks")
+    ) {
+      readinessNormalizedContent = readinessNormalizedContent.replace(
+        /(console\.log\(\s*["']FOUNDRY_BROWSER_RESULT:\s*["']\s*\+\s*result\s*\)\s*;?)/u,
+        `$1\n    const __foundryFailedChecks = Object.entries(checks).filter(([, passed]) => passed !== true).map(([checkId]) => checkId);\n    if (captureProbeErrors.length > 0 || __foundryFailedChecks.length > 0) {\n      throw new Error(\`Foundry browser verification failed: \${[...captureProbeErrors, ...__foundryFailedChecks].join(", ")}\`);\n    }`,
+      );
+    }
     const lintNormalizedContent = readinessNormalizedContent.replace(
       /catch\s*\(\s*([A-Za-z_$][\w$]*)\s*:\s*any\s*\)\s*\{\s*captureProbeErrors\.push\(\s*\1\.message\s*\|\|\s*String\(\s*\1\s*\)\s*\)\s*;?\s*\}/gu,
       (_match, errorName) =>
@@ -954,7 +1119,7 @@ export function ensureCertifiedStackScaffold(files, contractRequirementIds = [])
         if (withDiagnosticResult !== diagnosticNormalizedContent) {
           diagnosticNormalizedContent = withDiagnosticResult;
           const declaration = /\.(?:ts|tsx)$/u.test(stackNormalizedFile.path)
-            ? "const diagnostics: Record<string, Record<string, boolean>> = {};\n"
+            ? "const diagnostics: Record<string, Record<string, unknown>> = {};\n"
             : "const diagnostics = {};\n";
           const imports = /^(\s*(?:import[^\r\n]*\r?\n)+)/u.exec(
             diagnosticNormalizedContent,
@@ -1784,6 +1949,7 @@ export function bindMissingApprovedRequirementTraces(plan, approvedContract) {
   ) {
     return plan;
   }
+  const identityBoundPlan = bindApprovedPrototypeFidelityIdentity(plan, approvedContract);
   const catalogue = approvedContractRequirementCatalogue(approvedContract);
   const requirements = new Map(
     catalogue.implementationRequirements.map((item) => [
@@ -1875,7 +2041,7 @@ export function bindMissingApprovedRequirementTraces(plan, approvedContract) {
     traced.add(requirementId);
   }
   return {
-    ...plan,
+    ...identityBoundPlan,
     requirementClaims: [...claims].map(
       ([requirementId, implementationSummary]) => ({
         requirementId,
@@ -1883,6 +2049,26 @@ export function bindMissingApprovedRequirementTraces(plan, approvedContract) {
       }),
     ),
     files,
+  };
+}
+
+export function bindApprovedPrototypeFidelityIdentity(plan, approvedContract) {
+  const approved = approvedContract?.productBlueprint?.designSpecification?.approvedDesignContract ?? null;
+  if (
+    approved === null ||
+    plan?.designFidelity === null ||
+    typeof plan?.designFidelity !== "object"
+  ) {
+    return plan;
+  }
+  return {
+    ...plan,
+    designFidelity: {
+      ...plan.designFidelity,
+      approvedDesignId: approved.approvedDesignId,
+      approvedPrototypeContentHash: approved.prototypeContentHash,
+      approvedConceptVersion: approved.selectedConceptVersion,
+    },
   };
 }
 
@@ -1978,6 +2164,7 @@ export function createProductionMissionService({
   runtime,
   evidence,
   verification,
+  prototypeFidelity = null,
   allowLegacyCertificationExecution = false,
 }) {
   function workFactory(missionId, workspaceId) {
@@ -2433,8 +2620,19 @@ export function createProductionMissionService({
       ) {
         certifiedScaffoldTraceIds.push("customer-intent-1");
       }
+      const approvedObligationIds = approvedContract === null
+        ? null
+        : new Set(
+            approvedContract.acceptanceObligations.map(
+              (obligation) => obligation.obligationId,
+            ),
+          );
       const requiredBrowserCheckIds = Object.entries(bindings)
-        .filter(([, binding]) => binding === "browser-check")
+        .filter(
+          ([obligationId, binding]) =>
+            binding === "browser-check" &&
+            (approvedObligationIds === null || approvedObligationIds.has(obligationId)),
+        )
         .map(([obligationId]) => obligationId)
         .sort((left, right) => left.localeCompare(right));
       const responsiveBrowserCheckIds = contract.obligations
@@ -2535,6 +2733,10 @@ export function createProductionMissionService({
             ensureCertifiedStackScaffold(
               generation.structuredOutput.files,
               certifiedScaffoldTraceIds,
+              {
+                responsiveCheckIds: responsiveBrowserCheckIds,
+                accessibilityCheckIds: accessibilityBrowserCheckIds,
+              },
             ),
             requiredBrowserCheckIds,
             profile.customerContent,
@@ -3291,6 +3493,8 @@ export function createProductionMissionService({
         .filter(([, binding]) => binding === "browser-check")
         .map(([obligationId]) => obligationId)
         .sort((left, right) => left.localeCompare(right));
+      const approvedPrototypeContract =
+        approvedContract?.productBlueprint?.designSpecification?.approvedDesignContract ?? null;
       let browser;
       for (let attempt = 0; attempt < 7; attempt += 1) {
         browser = await work(
@@ -3375,6 +3579,71 @@ export function createProductionMissionService({
                 "The browser observation recorded blocking errors.",
                 JSON.stringify(blockingErrors),
               ].join("\n"));
+            }
+            if (
+              observationFailures.length === 0 &&
+              approvedPrototypeContract !== null
+            ) {
+              if (typeof prototypeFidelity?.verify !== "function") {
+                observationFailures.push(
+                  "Approved live prototype fidelity authority is unavailable; completion cannot be proven.",
+                );
+              } else {
+                try {
+                  const fidelity = await prototypeFidelity.verify({
+                    approvedDesignContract: approvedPrototypeContract,
+                    productionPreviewUrl: session.previewUrl,
+                  });
+                  const fidelityEvidenceId = `${browser.workUnitId}-prototype-fidelity`;
+                  const existingFidelityEvidence = evidence
+                    .findByWorkUnit(browser.workUnitId)
+                    .find((record) => record.evidenceId === fidelityEvidenceId);
+                  const fidelityEvidenceInput = {
+                    evidenceId: fidelityEvidenceId,
+                    missionId,
+                    kind: ObservationKind.BROWSER_INTERACTION_RESULT,
+                    captureMethod: "same-browser-same-viewport-prototype-comparison",
+                    producingSubsystem: PRODUCTION_MISSION_SOURCE,
+                    timestamp: new Date().toISOString(),
+                    payload: {
+                      checks: Object.fromEntries(
+                        fidelity.verdicts.map((item) => [item.aspect, item.verdict === "PASS"]),
+                      ),
+                    },
+                    metadata: {
+                      approvedDesignId: fidelity.approvedDesignId,
+                      approvedPrototypeContentHash: fidelity.approvedPrototypeContentHash,
+                      comparedViewports: fidelity.comparedViewports,
+                      missingViewports: fidelity.missingViewports,
+                      failedAspects: fidelity.failedAspects,
+                      verdicts: fidelity.verdicts,
+                      integrityHash: fidelity.integrityHash,
+                      productionScreenshotManifest: fidelity.productionScreenshotManifest,
+                      prototypeScreenshotReferences: fidelity.prototypeScreenshotReferences,
+                    },
+                    workspaceCheckpointReference: browser.postWorkCheckpointId,
+                    obligationReference: null,
+                    verificationRequestReference: `${missionId}-verification`,
+                    commandReference: browser.workUnitId,
+                    workUnitReference: browser.workUnitId,
+                    sensitiveValues: [],
+                  };
+                  if (existingFidelityEvidence === undefined) {
+                    evidence.capture(fidelityEvidenceInput);
+                  } else if (existingFidelityEvidence.metadata?.integrityHash !== fidelity.integrityHash) {
+                    throw new Error("Persisted prototype fidelity evidence does not match the replayed comparison.");
+                  }
+                  if (!fidelity.passed) {
+                    observationFailures.push(
+                      `Production design fidelity failed against the approved live prototype: ${fidelity.failedAspects.join(", ")}.`,
+                    );
+                  }
+                } catch (error) {
+                  observationFailures.push(
+                    `Approved live prototype fidelity could not be proven: ${String(error?.message ?? error)}`,
+                  );
+                }
+              }
             }
           } catch (error) {
             observationFailures.push(
