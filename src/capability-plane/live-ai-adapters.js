@@ -21,7 +21,10 @@ const endpoints = Object.freeze({
 });
 
 export function modelRequestTimeoutMs(request) {
-  if (request.executionStage === "DESIGN_PROTOTYPE") return 120_000;
+  // A complete responsive HTML/CSS/interaction prototype routinely approaches
+  // the same structured-output size as production file generation. Cutting it
+  // off at two minutes caused healthy providers to fail after doing the work.
+  if (request.executionStage === "DESIGN_PROTOTYPE") return 300_000;
   if (request.taskClass === "FILE_GENERATION") return 300_000;
   if (request.taskClass === "PROJECT_UNDERSTANDING") return 120_000;
   return 120_000;
