@@ -57,7 +57,25 @@ const MAX_PROCEDURE_REPAIR_CALLS = 0;
 // Two focused attempts are enough to correct a scoped source/style mismatch
 // without turning verification into an unbounded paid regeneration loop.
 const MAX_BROWSER_REPAIR_CALLS = 2;
+const MAX_DESIGN_FIDELITY_REPAIR_CALLS = 2;
 const MAX_RUNTIME_RESTARTS = 2;
+
+export function productionBrowserRepairPolicy(observationFailure) {
+  const designFidelity =
+    typeof observationFailure === "string" &&
+    /Production design fidelity failed against the approved live prototype/iu.test(
+      observationFailure,
+    );
+  return Object.freeze({
+    designFidelity,
+    requestSegment: designFidelity
+      ? "design-fidelity-repair"
+      : "browser-repair",
+    maxCalls: designFidelity
+      ? MAX_DESIGN_FIDELITY_REPAIR_CALLS
+      : MAX_BROWSER_REPAIR_CALLS,
+  });
+}
 
 export function hasBalancedJavaScriptDelimiters(source) {
   const pairs = { ")": "(", "]": "[", "}": "{" };
@@ -3696,6 +3714,8 @@ export function createProductionMissionService({
           stderr: failureEvidence.payload.stderr,
           observationFailure: browserFailure,
         });
+        const repairPolicy = productionBrowserRepairPolicy(browserFailure);
+        const repairPrefix = `${contractRequestNamespace}-${repairPolicy.requestSegment}-`;
         await runtime.stop({
           missionId,
           sessionId: session.sessionId,
@@ -3722,7 +3742,7 @@ export function createProductionMissionService({
           .listCalls(missionId)
           .filter(
             (call) =>
-              call.requestId.startsWith(`${contractRequestNamespace}-browser-repair-`) &&
+              call.requestId.startsWith(repairPrefix) &&
               call.status === "SUCCEEDED",
           )
           .reverse();
@@ -3746,10 +3766,7 @@ export function createProductionMissionService({
           /(?:running application returned a server error|differs from immutable approved prototype evidence)/iu.test(
             failureClassification.hypothesis,
           );
-        const designFidelityRepair =
-          /Production design fidelity failed against the approved live prototype/iu.test(
-            browserFailure,
-          );
+        const designFidelityRepair = repairPolicy.designFidelity;
         const eligibleRepairFiles = sourceOnlyBrowserRepair
           ? repairFiles.filter(
               (file) =>
@@ -3772,8 +3789,7 @@ export function createProductionMissionService({
             path: file.path,
             content: file.content,
           }));
-        const repairPrefix = `${contractRequestNamespace}-browser-repair-`;
-        if (priorRepairCalls.length >= MAX_BROWSER_REPAIR_CALLS) {
+        if (priorRepairCalls.length >= repairPolicy.maxCalls) {
           // Two distinct honest outcomes share this gate. A zero budget means
           // the first pass failed with no correction attempted (FAILED); a
           // spent budget means every safe correction was tried (EXHAUSTED).
@@ -3781,19 +3797,21 @@ export function createProductionMissionService({
           orchestrator.transition({
             missionId,
             eventId: repairsWereAttempted
-              ? `${missionId}-browser-repair-budget-exhausted`
+              ? designFidelityRepair
+                ? `${missionId}-design-fidelity-repair-budget-exhausted`
+                : `${missionId}-browser-repair-budget-exhausted`
               : `${missionId}-browser-first-pass-failed`,
             causationId: browser.workUnitId,
             to: repairsWereAttempted
               ? MissionState.EXHAUSTED
               : MissionState.FAILED,
             reason: repairsWereAttempted
-              ? `Browser verification still failed after ${priorRepairCalls.length} evidence-backed corrections; the safe repair budget is exhausted and every attempt is preserved.`
+              ? `${designFidelityRepair ? "Design fidelity" : "Browser verification"} still failed after ${priorRepairCalls.length} evidence-backed corrections; the safe repair budget is exhausted and every attempt is preserved.`
               : "The original generated project failed browser verification; no paid correction or browser rerun was attempted.",
           });
           throw new Error(
             repairsWereAttempted
-              ? `Browser verification still failed after ${priorRepairCalls.length} evidence-backed corrections; the repair budget is exhausted and its exact evidence is persisted.`
+              ? `${designFidelityRepair ? "Design fidelity" : "Browser verification"} still failed after ${priorRepairCalls.length} evidence-backed corrections; the repair budget is exhausted and its exact evidence is persisted.`
               : "Browser verification failed on the first pass; its exact evidence is persisted and no paid repair was attempted.",
           );
         }
