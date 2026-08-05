@@ -801,7 +801,44 @@ export function ensureCertifiedStackScaffold(
       }, null, 2)}\n`,
     };
   });
-  const generatedFiles = certifiedPackageFiles.filter(
+  const usesRootAlias = certifiedPackageFiles.some(
+    (file) =>
+      /\.(?:js|jsx|mjs|ts|tsx)$/u.test(file.path) &&
+      /(?:from\s*|import\s*\(\s*|require\s*\(\s*)["']@\//u.test(file.content),
+  );
+  const sourceRoot = certifiedPackageFiles.some((file) =>
+    /^src\/app\/.*\.(?:js|jsx|ts|tsx)$/u.test(file.path),
+  )
+    ? "./src/*"
+    : "./*";
+  const certifiedConfigurationFiles = certifiedPackageFiles.map((file) => {
+    if (file.path !== "tsconfig.json" || !usesRootAlias) return file;
+    let configuration;
+    try {
+      configuration = JSON.parse(file.content);
+    } catch {
+      return file;
+    }
+    const compilerOptions = {
+      ...(configuration.compilerOptions ?? {}),
+    };
+    const paths = {
+      ...(compilerOptions.paths ?? {}),
+      "@/*": [sourceRoot],
+    };
+    return {
+      ...file,
+      content: `${JSON.stringify({
+        ...configuration,
+        compilerOptions: {
+          ...compilerOptions,
+          baseUrl: ".",
+          paths,
+        },
+      }, null, 2)}\n`,
+    };
+  });
+  const generatedFiles = certifiedConfigurationFiles.filter(
     (file) =>
       !/^(?:src\/)?app\/(?:favicon|icon)\.[^/]+(?:\/.*)?$/u.test(
         file.path,
@@ -1058,7 +1095,7 @@ export function ensureCertifiedStackScaffold(
           "\\$&",
         );
         const assignment = new RegExp(
-          `(checks\\s*\\[\\s*["']${escapedCheckId}["']\\s*\\]\\s*=\\s*)([^;]+)`,
+          `(checks\\s*\\[\\s*["']${escapedCheckId}["']\\s*\\]\\s*=\\s*)([^;\\r\\n]+)`,
           "u",
         );
         readinessNormalizedContent = readinessNormalizedContent.replace(
@@ -1100,7 +1137,7 @@ export function ensureCertifiedStackScaffold(
           "\\$&",
         );
         const assignment = new RegExp(
-          `(checks\\s*\\[\\s*["']${escapedCheckId}["']\\s*\\]\\s*=\\s*)([^;]+)`,
+          `(checks\\s*\\[\\s*["']${escapedCheckId}["']\\s*\\]\\s*=\\s*)([^;\\r\\n]+)`,
           "u",
         );
         readinessNormalizedContent = readinessNormalizedContent.replace(
@@ -2017,6 +2054,10 @@ export function bindMissingApprovedRequirementTraces(plan, approvedContract) {
     identityBoundPlan,
     approvedContract,
   );
+  const sourceGuardedPlan = bindApprovedPrototypeSourceGuardrails(
+    evidenceBoundPlan,
+    approvedContract,
+  );
   const catalogue = approvedContractRequirementCatalogue(approvedContract);
   const requirements = new Map(
     catalogue.implementationRequirements.map((item) => [
@@ -2025,7 +2066,7 @@ export function bindMissingApprovedRequirementTraces(plan, approvedContract) {
     ]),
   );
   const claims = new Map();
-  for (const claim of evidenceBoundPlan.requirementClaims) {
+  for (const claim of sourceGuardedPlan.requirementClaims) {
     if (
       claim !== null &&
       typeof claim === "object" &&
@@ -2036,7 +2077,7 @@ export function bindMissingApprovedRequirementTraces(plan, approvedContract) {
     }
   }
   const filesByPath = new Map();
-  for (const file of evidenceBoundPlan.files) {
+  for (const file of sourceGuardedPlan.files) {
     const approvedTraceIds = Array.isArray(file.contractRequirementIds)
       ? [...new Set(file.contractRequirementIds.filter((id) => requirements.has(id)))]
       : [];
@@ -2108,7 +2149,7 @@ export function bindMissingApprovedRequirementTraces(plan, approvedContract) {
     traced.add(requirementId);
   }
   return {
-    ...identityBoundPlan,
+    ...sourceGuardedPlan,
     requirementClaims: [...claims].map(
       ([requirementId, implementationSummary]) => ({
         requirementId,
@@ -2228,6 +2269,80 @@ test("captures deterministic approved-design fidelity evidence", async ({ page }
       ...plan.files,
       { path, content, contractRequirementIds: [...new Set(traceIds)] },
     ],
+  };
+}
+
+export function bindApprovedPrototypeSourceGuardrails(plan, approvedContract) {
+  const approved = approvedContract?.productBlueprint?.designSpecification?.approvedDesignContract ?? null;
+  if (
+    approved === null ||
+    !Array.isArray(plan?.files) ||
+    plan.files.length === 0
+  ) {
+    return plan;
+  }
+
+  const declaredSourceFiles = Array.isArray(plan.designFidelity?.sourceFiles)
+    ? plan.designFidelity.sourceFiles
+    : [];
+  const stylesheet =
+    plan.files.find(
+      (file) =>
+        declaredSourceFiles.includes(file.path) &&
+        /\.(?:css|scss)$/u.test(file.path),
+    ) ??
+    plan.files.find((file) => /(?:^|\/)globals\.css$/u.test(file.path)) ??
+    plan.files.find((file) => /\.(?:css|scss)$/u.test(file.path));
+  if (stylesheet === undefined) return plan;
+
+  const source = String(stylesheet.content);
+  const additions = [];
+  const approvedColors = Object.entries(approved.colorTokens ?? {})
+    .filter(([, value]) => /^#[a-f0-9]{3,8}$/iu.test(String(value)));
+  const missingColors = approvedColors.filter(
+    ([, value]) => !source.toLowerCase().includes(String(value).toLowerCase()),
+  );
+  if (missingColors.length > 0) {
+    additions.push([
+      ":root {",
+      ...missingColors.map(
+        ([role, value]) =>
+          `  --foundry-approved-${String(role).replace(/[^a-z0-9-]/giu, "-").toLowerCase()}: ${value};`,
+      ),
+      "}",
+    ].join("\n"));
+  }
+
+  const motionRequiresFallback =
+    Array.isArray(approved.motion) &&
+    approved.motion.some((rule) => !/\b(?:none|static|no motion)\b/iu.test(String(rule)));
+  if (motionRequiresFallback && !/prefers-reduced-motion/iu.test(source)) {
+    additions.push(`@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}`);
+  }
+  if (additions.length === 0) return plan;
+
+  const guardedContent = `${source.trimEnd()}\n\n/* Foundry-owned approved-design guardrails. */\n${additions.join("\n\n")}\n`;
+  return {
+    ...plan,
+    designFidelity:
+      plan.designFidelity === null || typeof plan.designFidelity !== "object"
+        ? plan.designFidelity
+        : {
+            ...plan.designFidelity,
+            sourceFiles: [...new Set([...declaredSourceFiles, stylesheet.path])],
+          },
+    files: plan.files.map((file) =>
+      file.path === stylesheet.path
+        ? { ...file, content: guardedContent }
+        : file,
+    ),
   };
 }
 
