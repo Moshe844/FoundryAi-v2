@@ -275,6 +275,20 @@ test("Phase 2 gives every model call a complete binding task contract", () => {
   assert(prompt.includes(contract.contentHash));
 });
 
+test("Phase 2 file-generation schema satisfies strict provider object rules", () => {
+  const fidelity = CONTRACT_BOUND_BUNDLE_SCHEMA.properties.designFidelity;
+  assert.deepEqual(
+    [...fidelity.required].sort(),
+    Object.keys(fidelity.properties).sort(),
+  );
+  assert.deepEqual(
+    [...fidelity.properties.browserEvidence.required].sort(),
+    Object.keys(fidelity.properties.browserEvidence.properties).sort(),
+  );
+  assert.deepEqual(fidelity.properties.approvedDesignId.type, ["string", "null"]);
+  assert.deepEqual(fidelity.properties.approvedConceptVersion.type, ["integer", "null"]);
+});
+
 test("Phase 2 rejects omissions, reinterpretation, expansion, drift, and weak traces", () => {
   const contract = contractFixture();
   const plan = validPlan(contract);

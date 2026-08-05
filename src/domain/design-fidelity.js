@@ -168,6 +168,9 @@ export const DESIGN_FIDELITY_SCHEMA = Object.freeze({
   type: "object",
   additionalProperties: false,
   required: [
+    "approvedDesignId",
+    "approvedPrototypeContentHash",
+    "approvedConceptVersion",
     "compositionImplementation",
     "typographyImplementation",
     "colorImplementation",
@@ -177,9 +180,15 @@ export const DESIGN_FIDELITY_SCHEMA = Object.freeze({
     "browserEvidence",
   ],
   properties: {
-    approvedDesignId: { type: "string", minLength: 1 },
-    approvedPrototypeContentHash: { type: "string", pattern: "^[a-f0-9]{64}$" },
-    approvedConceptVersion: { type: "integer", minimum: 1 },
+    // Strict structured-output providers require every declared property to be
+    // present. Legacy (pre-live-prototype) jobs use null; live jobs are rebound
+    // locally to the immutable approval identity before semantic admission.
+    approvedDesignId: { type: ["string", "null"], minLength: 1 },
+    approvedPrototypeContentHash: {
+      type: ["string", "null"],
+      pattern: "^[a-f0-9]{64}$",
+    },
+    approvedConceptVersion: { type: ["integer", "null"], minimum: 1 },
     compositionImplementation: { type: "string", minLength: 24 },
     typographyImplementation: { type: "string", minLength: 16 },
     colorImplementation: { type: "string", minLength: 16 },
