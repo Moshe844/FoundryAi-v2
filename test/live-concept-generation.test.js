@@ -18,6 +18,7 @@ import { createPrototypeWorkspaceService } from "../src/work-plane/prototype-wor
 import {
   ModelExecutionStage,
   createDeterministicLocalModelProvider,
+  prototypeModelsInCooldown,
   rankPrototypeCandidates,
 } from "../src/work-plane/model-gateway.js";
 
@@ -181,6 +182,24 @@ test("prototype safety admits ordinary CSS top positioning but rejects real pare
       unsafeGeneration.generate({ conceptContract: unsafeContract }),
       /parent-window control/u,
     );
+
+    const embeddedUrlContract = concept("concept-data-url");
+    const embeddedUrlGeneration = createPrototypeGenerationService({
+      workspaceService,
+      modelGateway: {
+        async request(input) {
+          const output = structuredClone(generated);
+          output.files.find((file) => file.path === "index.html").content = output.files
+            .find((file) => file.path === "index.html")
+            .content.replace("</head>", '<link rel="stylesheet" href="data:text/css,"></head>');
+          return { requestId: input.requestId, structuredOutput: output, tokenMetadata: {}, costMetadata: {} };
+        },
+      },
+    });
+    await assert.rejects(
+      embeddedUrlGeneration.generate({ conceptContract: embeddedUrlContract }),
+      /unsafe embedded or executable URL/u,
+    );
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -197,6 +216,22 @@ test("prototype routing prefers low-cost fast capable models over historical hea
     "balanced-low-cost",
     "slow-opus",
   ]);
+});
+
+test("prototype routing cools down a model after consecutive admission failures even when it succeeded historically", () => {
+  const cooldowns = prototypeModelsInCooldown([
+    { kind: "result", status: "SUCCEEDED", modelId: "historically-good" },
+    { kind: "failure", modelId: "historically-good" },
+    { kind: "failure", modelId: "historically-good" },
+    { kind: "failure", modelId: "one-miss" },
+  ]);
+  assert.equal(cooldowns.has("historically-good"), true);
+  assert.equal(cooldowns.has("one-miss"), false);
+  assert.equal(prototypeModelsInCooldown([
+    { kind: "failure", modelId: "recovered" },
+    { kind: "failure", modelId: "recovered" },
+    { kind: "result", status: "SUCCEEDED", modelId: "recovered" },
+  ]).has("recovered"), false);
 });
 
 test("INTAKE concepts use the real Model Gateway while ordinary pre-execution calls remain forbidden", async (t) => {

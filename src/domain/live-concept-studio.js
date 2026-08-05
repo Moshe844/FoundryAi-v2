@@ -174,8 +174,11 @@ function prototypePayload(input) {
   if (strategy === ConceptStrategy.COMPOSITION && sourceConceptIds.length < 2) {
     fail("composition concepts require at least two sourceConceptIds.");
   }
-  if (sourceConceptIds.includes(conceptId) || parentConceptId === conceptId) {
-    fail("a concept cannot reference itself as a source.");
+  if (sourceConceptIds.includes(conceptId)) {
+    fail("a concept cannot reference itself as a composition source.");
+  }
+  if (parentConceptId === conceptId && (strategy !== ConceptStrategy.REVISION || input.conceptVersion < 2)) {
+    fail("only a later revision version may reference its own stable concept ID as parent.");
   }
   return {
     schemaVersion: CONCEPT_PROTOTYPE_SCHEMA_VERSION,

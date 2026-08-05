@@ -691,6 +691,22 @@ export type LiveConceptStudio = Readonly<{
     costUsd: number;
   }>;
   selectedConceptId: string | null;
+  evolution?: Readonly<{
+    kind: "revision" | "composition";
+    status: "GENERATING" | "PASSED" | "FAILED" | "INTERRUPTED";
+    conceptId: string;
+    conceptVersion: number;
+    changedScopes: readonly string[];
+    changedSummary: readonly string[];
+    conflicts: readonly Readonly<{
+      trait: string;
+      conceptIds: readonly string[];
+      reason: string;
+    }>[];
+    error: string | null;
+    startedAt: string;
+    completedAt: string | null;
+  }>;
   error: string | null;
   generating: boolean;
   createdAt: string;

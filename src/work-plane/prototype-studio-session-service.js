@@ -46,14 +46,26 @@ export function createPrototypeStudioSessionService({ prototypeRoot }) {
     if (!existsSync(path)) return null;
     const record = JSON.parse(readFileSync(path, "utf8"));
     if (record.schemaVersion !== 1 || record.missionId !== missionId) fail("persisted session is corrupt.");
+    let recovered = record;
     if (record.status === "GENERATING") {
-      return freeze({
+      recovered = {
         ...record,
         status: "INTERRUPTED",
         error: "Concept generation was interrupted. Retry resumes from immutable completed artifacts.",
-      });
+      };
     }
-    return freeze(record);
+    if (record.evolution?.status === "GENERATING") {
+      recovered = {
+        ...recovered,
+        evolution: {
+          ...record.evolution,
+          status: "INTERRUPTED",
+          error: "Concept revision or composition was interrupted. Retry starts from the last immutable admitted version.",
+          completedAt: new Date().toISOString(),
+        },
+      };
+    }
+    return freeze(recovered);
   }
 
   function save(record) {
@@ -84,6 +96,9 @@ export function createPrototypeStudioSessionService({ prototypeRoot }) {
       },
       selectedConceptId: existing?.selectedConceptId ?? null,
       attemptFailures: existing?.attemptFailures ?? [],
+      conceptHistory: existing?.conceptHistory ?? [],
+      compositions: existing?.compositions ?? [],
+      evolution: existing?.evolution,
       error: null,
       createdAt: existing?.createdAt ?? new Date().toISOString(),
     });

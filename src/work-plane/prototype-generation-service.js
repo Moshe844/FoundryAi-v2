@@ -28,6 +28,7 @@ export const CONCEPT_GENERATION_OUTPUT_SCHEMA = Object.freeze({
 const UNSAFE_SOURCE = Object.freeze([
   { pattern: /\b(?:fetch|WebSocket|XMLHttpRequest|EventSource|sendBeacon)\s*\(/iu, reason: "network API" },
   { pattern: /https?:\/\/|["'(]\s*\/\/[A-Za-z0-9]/iu, reason: "external URL" },
+  { pattern: /\b(?:data|blob|javascript):/iu, reason: "unsafe embedded or executable URL" },
   { pattern: /\b(?:eval|Function)\s*\(/u, reason: "dynamic code execution" },
   { pattern: /\b(?:process\.env|import\.meta\.env|document\.cookie)\b/u, reason: "secret-bearing environment access" },
   {
@@ -107,6 +108,8 @@ function prompt(contract, admissionFeedback = []) {
     "Use clearly fictional sample content under the sampleContentPolicy. Never invent customer facts.",
     "Do not use network requests, external URLs or scripts, environment variables, cookies, parent-window control, database code, authentication, payments, package dependencies, or build tooling.",
     "Keep every style in styles.css. Do not use style attributes or JavaScript element.style mutations; interactions must toggle classes, data attributes, or accessible state because the runtime CSP blocks inline styling.",
+    "Forbidden literal patterns in every returned file include data:, blob:, javascript:, http://, https://, protocol-relative host URLs, style= attributes, and .style DOM access. Do not add data stylesheets, data images, preload shims, CSS imports, SVG data URIs, or placeholder network URLs; use local CSS gradients and semantic HTML instead.",
+    "Before returning, scan all three files for those forbidden patterns and replace them with class-based, data-attribute-based, local behavior.",
     "Every expected file must be returned exactly once. The concept must run as a static origin-isolated HTML/CSS/ES-module application.",
     `CONCEPT_PROTOTYPE_CONTRACT ${contract.integrityHash}`,
     JSON.stringify(contract),

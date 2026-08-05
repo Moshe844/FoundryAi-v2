@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { LiveConcept, LiveConceptStudio } from "../../experience/contracts";
 import type { CustomDesignComposition } from "../../experience/custom-direction";
@@ -22,40 +22,110 @@ const DEVICE_WIDTH: Readonly<Record<Device, number | null>> = {
   mobile: 390,
 };
 
-async function post(path: string) {
+class ConceptApiError extends Error {
+  payload: Record<string, unknown>;
+
+  constructor(message: string, payload: Record<string, unknown>) {
+    super(message);
+    this.payload = payload;
+  }
+}
+
+async function post(path: string, value: Record<string, unknown> = {}) {
   const response = await fetch(`${API}${path}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: "{}",
+    body: JSON.stringify(value),
     signal: AbortSignal.timeout(30_000),
   });
-  const payload = await response.json();
-  if (!response.ok) throw new Error(payload.error ?? `Foundry returned HTTP ${response.status}.`);
+  const payload = await response.json() as Record<string, unknown>;
+  if (!response.ok) throw new ConceptApiError(String(payload.error ?? `Foundry returned HTTP ${response.status}.`), payload);
   return payload;
 }
 
-function ConceptPreview({ concept, missionId, onBack, onSelect, selected }: Readonly<{
+const COMPOSITION_TRAITS = ["composition", "navigation", "typography", "imagery", "responsive"] as const;
+
+function ConceptPreview({ concept, concepts, missionId, onBack, onSelect, selected, studio }: Readonly<{
   concept: LiveConcept;
+  concepts: readonly LiveConcept[];
   missionId: string;
   onBack: () => void;
   onSelect: () => void;
   selected: boolean;
+  studio: LiveConceptStudio;
 }>) {
   const [device, setDevice] = useState<Device>("desktop");
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [editor, setEditor] = useState<"revision" | "composition" | null>(null);
+  const [instruction, setInstruction] = useState("");
+  const otherConcepts = concepts.filter((entry) => entry.contract.conceptId !== concept.contract.conceptId);
+  const [otherId, setOtherId] = useState(otherConcepts[0]?.contract.conceptId ?? "");
+  const [traitSources, setTraitSources] = useState<Record<string, string>>({
+    composition: concept.contract.conceptId,
+    navigation: otherConcepts[0]?.contract.conceptId ?? concept.contract.conceptId,
+    typography: otherConcepts[0]?.contract.conceptId ?? concept.contract.conceptId,
+    imagery: concept.contract.conceptId,
+    responsive: concept.contract.conceptId,
+  });
+  const [operationError, setOperationError] = useState<string | null>(null);
+  const [conflictPayload, setConflictPayload] = useState<Record<string, unknown> | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     let disposed = false;
     post(`/missions/${missionId}/concepts/${concept.contract.conceptId}/preview`)
       .then((payload) => {
-        if (!disposed) setPreviewUrl(payload.previewUrl);
+        if (!disposed) setPreviewUrl(String(payload.previewUrl));
       })
       .catch((failure) => {
         if (!disposed) setError(failure instanceof Error ? failure.message : String(failure));
       });
     return () => { disposed = true; };
-  }, [concept.contract.conceptId, missionId]);
+  }, [concept.contract.conceptId, concept.contract.conceptVersion, missionId]);
+
+  async function submitRevision() {
+    setSubmitting(true);
+    setOperationError(null);
+    try {
+      await post(`/missions/${missionId}/concepts/${concept.contract.conceptId}/revise`, { instruction });
+      setEditor(null);
+    } catch (failure) {
+      setOperationError(failure instanceof Error ? failure.message : String(failure));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function submitComposition(resolutions: readonly Readonly<{ trait: string; resolution: string }>[] = []) {
+    const selectedTraits = COMPOSITION_TRAITS.map((trait) => ({ trait, conceptId: traitSources[trait] }));
+    const sourceConceptIds = [...new Set(selectedTraits.map((entry) => entry.conceptId))];
+    if (sourceConceptIds.length < 2) {
+      setOperationError("Choose qualities from at least two concepts.");
+      return;
+    }
+    setSubmitting(true);
+    setOperationError(null);
+    try {
+      await post(`/missions/${missionId}/concepts/compose`, {
+        compositionId: conflictPayload?.compositionId,
+        sourceConceptIds,
+        selectedTraits,
+        customerNotes: instruction.trim() === "" ? [] : [instruction.trim()],
+        conflictResolution: resolutions,
+      });
+      setConflictPayload(null);
+      setEditor(null);
+    } catch (failure) {
+      if (failure instanceof ConceptApiError && Array.isArray(failure.payload.conflicts)) {
+        setConflictPayload(failure.payload);
+      } else {
+        setOperationError(failure instanceof Error ? failure.message : String(failure));
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  }
 
   const width = DEVICE_WIDTH[device];
   return (
@@ -110,10 +180,79 @@ function ConceptPreview({ concept, missionId, onBack, onSelect, selected }: Read
           <button type="button" className="btn btn-primary" onClick={onSelect}>
             {selected ? "Selected concept" : "Select this concept"}
           </button>
-          <button type="button" className="btn btn-secondary" data-concept-action="revise">Revise this concept</button>
-          <button type="button" className="btn-quiet" data-concept-action="combine">Combine with another</button>
+          <button type="button" className="btn btn-secondary" data-concept-action="revise" onClick={() => setEditor("revision")}>Revise this concept</button>
+          <button type="button" className="btn-quiet" data-concept-action="combine" onClick={() => setEditor("composition")}>Combine with another</button>
         </div>
       </div>
+
+      {editor === "revision" && (
+        <section className="concept-evolution-panel" aria-label="Revise this concept">
+          <div>
+            <p className="t-label">Tell Foundry what to change</p>
+            <p className="t-body-s ink-secondary">Only affected design scopes regenerate. Everything else stays bound to this version.</p>
+          </div>
+          <textarea value={instruction} onChange={(event) => setInstruction(event.target.value)} placeholder="Make the images much larger and reduce the animation." />
+          <div className="concept-evolution-actions">
+            <button type="button" className="btn btn-primary" disabled={submitting || instruction.trim().length < 2} onClick={() => void submitRevision()}>{submitting ? "Revisingâ€¦" : "Generate revision"}</button>
+            <button type="button" className="btn-quiet" onClick={() => setEditor(null)}>Cancel</button>
+          </div>
+        </section>
+      )}
+
+      {editor === "composition" && (
+        <section className="concept-evolution-panel" aria-label="Combine concepts">
+          <div>
+            <p className="t-label">Choose where each quality comes from</p>
+            <p className="t-body-s ink-secondary">Foundry checks the combination for conflicts before generating new HTML.</p>
+          </div>
+          <label className="concept-source-anchor">Combine with
+            <select value={otherId} onChange={(event) => {
+              const nextId = event.target.value;
+              setOtherId(nextId);
+              setTraitSources((current) => ({ ...current, navigation: nextId, typography: nextId }));
+            }}>
+              {otherConcepts.map((entry) => <option value={entry.contract.conceptId} key={entry.contract.conceptId}>{entry.contract.conceptName}</option>)}
+            </select>
+          </label>
+          <div className="concept-trait-grid">
+            {COMPOSITION_TRAITS.map((trait) => (
+              <label key={trait}>{trait[0].toUpperCase() + trait.slice(1)}
+                <select value={traitSources[trait]} onChange={(event) => setTraitSources((current) => ({ ...current, [trait]: event.target.value }))}>
+                  {[concept, ...otherConcepts].map((entry) => <option value={entry.contract.conceptId} key={entry.contract.conceptId}>{entry.contract.conceptName}</option>)}
+                </select>
+              </label>
+            ))}
+          </div>
+          <textarea value={instruction} onChange={(event) => setInstruction(event.target.value)} placeholder="Optional note: keep the opening especially spacious." />
+          {conflictPayload !== null && Array.isArray(conflictPayload.conflicts) && (
+            <div className="concept-conflict" role="alert">
+              <p className="t-label">This combination needs one resolution</p>
+              {(conflictPayload.conflicts as { trait: string; reason: string; recommendation: string }[]).map((conflict) => (
+                <div key={conflict.trait}>
+                  <p>{conflict.reason}</p>
+                  <p className="ink-secondary">Foundry recommends: {conflict.recommendation}</p>
+                </div>
+              ))}
+              <button type="button" className="btn btn-primary" disabled={submitting} onClick={() => void submitComposition((conflictPayload.conflicts as { trait: string; recommendation: string }[]).map((entry) => ({ trait: entry.trait, resolution: entry.recommendation })))}>Use the recommended resolution</button>
+            </div>
+          )}
+          <div className="concept-evolution-actions">
+            <button type="button" className="btn btn-primary" disabled={submitting || otherId === ""} onClick={() => void submitComposition()}>{submitting ? "Combiningâ€¦" : "Generate combined concept"}</button>
+            <button type="button" className="btn-quiet" onClick={() => setEditor(null)}>Cancel</button>
+          </div>
+        </section>
+      )}
+
+      {operationError !== null && <p className="banner banner-fault" role="alert">{operationError}</p>}
+      {studio.evolution?.conceptId === concept.contract.conceptId && studio.evolution.status === "GENERATING" && (
+        <p className="banner" aria-live="polite">Foundry is generating and browser-checking the new concept versionâ€¦</p>
+      )}
+      {studio.evolution?.conceptId === concept.contract.conceptId && studio.evolution.status === "PASSED" && studio.evolution.changedSummary.length > 0 && (
+        <aside className="concept-change-summary"><p className="t-label">What changed</p><ul>{studio.evolution.changedSummary.map((item) => <li key={item}>{item}</li>)}</ul></aside>
+      )}
+      {studio.evolution?.conceptId === concept.contract.conceptId && ["FAILED", "INTERRUPTED"].includes(studio.evolution.status) && (
+        <p className="banner banner-fault" role="alert">{studio.evolution.error ?? "The concept change stopped before admission. The prior safe version is still available."}</p>
+      )}
 
       <details className="concept-advanced-evidence">
         <summary>Advanced evidence</summary>
@@ -140,6 +279,7 @@ export function DesignDirection({
   studio: LiveConceptStudio | null;
 }>) {
   const requested = useRef(false);
+  const handledEvolution = useRef<string | null>(null);
   const [openedId, setOpenedId] = useState<string | null>(null);
   const [requestError, setRequestError] = useState<string | null>(null);
 
@@ -156,9 +296,29 @@ export function DesignDirection({
     if (studio === null && !requested.current) requestConcepts();
   });
 
-  const admitted = studio?.concepts.filter((concept) => concept.verificationStatus === "PASSED") ?? [];
+  const admitted = useMemo(
+    () => studio?.concepts.filter((concept) => concept.verificationStatus === "PASSED") ?? [],
+    [studio?.concepts],
+  );
   const recommended = admitted.find((concept) => concept.contract.conceptId === studio?.recommendedConceptId) ?? admitted[0];
   const opened = admitted.find((concept) => concept.contract.conceptId === openedId) ?? null;
+
+  useEffect(() => {
+    const evolution = studio?.evolution;
+    if (evolution?.status !== "PASSED" || evolution.completedAt === null || handledEvolution.current === evolution.completedAt) return;
+    const evolved = admitted.find((concept) => concept.contract.conceptId === evolution.conceptId);
+    if (evolved === undefined) return;
+    handledEvolution.current = evolution.completedAt;
+    const timer = window.setTimeout(() => {
+      setOpenedId(evolved.contract.conceptId);
+      onChange({
+        mode: "alternative",
+        optionId: evolved.contract.conceptId,
+        value: evolved.contract.conceptName,
+      });
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [admitted, onChange, studio?.evolution]);
 
   function select(concept: LiveConcept) {
     onChange({
@@ -168,14 +328,17 @@ export function DesignDirection({
     });
   }
 
-  if (opened !== null) {
+  if (opened !== null && studio !== null) {
     return (
       <ConceptPreview
+        key={`${opened.contract.conceptId}:v${opened.contract.conceptVersion}`}
         concept={opened}
+        concepts={admitted}
         missionId={missionId}
         onBack={() => setOpenedId(null)}
         onSelect={() => select(opened)}
         selected={choice.optionId === opened.contract.conceptId}
+        studio={studio}
       />
     );
   }

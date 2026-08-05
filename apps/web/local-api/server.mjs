@@ -19,6 +19,7 @@ import {
   createChromePrototypeBrowserVerifier,
   createPrototypeVerificationService,
   createPrototypeStudioSessionService,
+  createConceptEvolutionService,
   ConceptStrategy,
   openMissionControl,
   projectRequirementContract,
@@ -115,6 +116,7 @@ const prototypeVerification = createPrototypeVerificationService({
   runtimeService: prototypeRuntimes,
 });
 const prototypeSessions = createPrototypeStudioSessionService({ prototypeRoot });
+const conceptEvolution = createConceptEvolutionService();
 
 // Build the persisted route index before serving requests. Subsequent reads
 // reparse only ledger files that changed, keeping project creation responsive.
@@ -506,6 +508,34 @@ function publicConceptStudio(missionId) {
   };
 }
 
+function persistedConceptVerification(concept) {
+  const content = prototypeWorkspaces.readEvidenceFile(
+    concept.contract,
+    `${concept.verificationId}/verification.json`,
+  );
+  const record = JSON.parse(content.toString("utf8"));
+  if (
+    record?.conceptId !== concept.contract.conceptId ||
+    record?.conceptVersion !== concept.contract.conceptVersion ||
+    record?.contractIntegrityHash !== concept.contract.integrityHash ||
+    record?.contentHash !== concept.contentHash
+  ) {
+    throw new TypeError(`Concept "${concept.contract.conceptName}" has stale or mismatched browser evidence.`);
+  }
+  return record;
+}
+
+function verifyStudioDifferentiation(concepts, currentRecords = []) {
+  const current = new Map(currentRecords.map((record) => [
+    `${record.conceptId}:v${record.conceptVersion}`,
+    record,
+  ]));
+  const records = concepts.map((concept) =>
+    current.get(`${concept.contract.conceptId}:v${concept.contract.conceptVersion}`) ?? persistedConceptVerification(concept),
+  );
+  return prototypeVerification.verifyDifferentiation(records);
+}
+
 function startConceptGenerationJob({ missionId, understanding, sourceProjectDesignVersion }) {
   if (activeConceptJobs.has(missionId)) return activeConceptJobs.get(missionId);
   const alternatives = understanding.proposal.alternatives.slice(0, 3);
@@ -604,26 +634,7 @@ function startConceptGenerationJob({ missionId, understanding, sourceProjectDesi
       }
       const admitted = session.concepts.filter((concept) => concept.verificationStatus === "PASSED");
       if (admitted.length !== 3) throw new TypeError("Three admitted concepts were not produced.");
-      const currentVerifications = new Map(verified.map((record) => [record.conceptId, record]));
-      const differentiationRecords = admitted.map((concept) => {
-        const current = currentVerifications.get(concept.contract.conceptId);
-        if (current !== undefined) return current;
-        const content = prototypeWorkspaces.readEvidenceFile(
-          concept.contract,
-          `${concept.verificationId}/verification.json`,
-        );
-        const record = JSON.parse(content.toString("utf8"));
-        if (
-          record?.conceptId !== concept.contract.conceptId ||
-          record?.conceptVersion !== concept.contract.conceptVersion ||
-          record?.contractIntegrityHash !== concept.contract.integrityHash ||
-          record?.contentHash !== concept.contentHash
-        ) {
-          throw new TypeError(`Concept "${concept.contract.conceptName}" has stale or mismatched browser evidence.`);
-        }
-        return record;
-      });
-      const differentiation = prototypeVerification.verifyDifferentiation(differentiationRecords);
+      const differentiation = verifyStudioDifferentiation(admitted, verified);
       if (differentiation.status !== "PASSED") throw new TypeError(differentiation.finding);
       const recommended = admitted.find((concept) => concept.recommended) ?? admitted[0];
       session = prototypeSessions.save({
@@ -652,6 +663,161 @@ function startConceptGenerationJob({ missionId, understanding, sourceProjectDesi
   activeConceptJobs.set(missionId, operation);
   operation.catch((error) => {
     process.stderr.write(`${new Date().toISOString()} concept generation ${missionId}: ${String(error?.stack ?? error).slice(0, 4_000)}\n`);
+  });
+  return operation;
+}
+
+function startConceptEvolutionJob({
+  missionId,
+  contract,
+  classification,
+  composition = null,
+  sourceConceptId = null,
+  kind,
+}) {
+  if (activeConceptJobs.has(missionId)) return activeConceptJobs.get(missionId);
+  let session = prototypeSessions.read(missionId);
+  if (session?.status !== "READY") throw new TypeError("A ready concept session is required.");
+  session = prototypeSessions.save({
+    ...session,
+    evolution: {
+      kind,
+      status: "GENERATING",
+      conceptId: contract.conceptId,
+      conceptVersion: contract.conceptVersion,
+      changedScopes: classification?.scopes ?? [],
+      changedSummary: [],
+      conflicts: [],
+      error: null,
+      startedAt: new Date().toISOString(),
+      completedAt: null,
+    },
+  });
+  const operation = (async () => {
+    await Promise.resolve();
+    try {
+      const source = sourceConceptId === null
+        ? null
+        : session.concepts.find((entry) => entry.contract.conceptId === sourceConceptId) ?? null;
+      let activeContract = contract;
+      let admitted = null;
+      let admissionFeedback = [];
+      for (let attempt = 1; attempt <= 2 && admitted === null; attempt += 1) {
+        let generated = null;
+        try {
+          generated = await prototypeGeneration.generate({
+            conceptContract: activeContract,
+            admissionFeedback,
+          });
+          session = prototypeSessions.save({
+            ...session,
+            generation: {
+              ...session.generation,
+              inputTokens: session.generation.inputTokens + generated.usage.inputTokens,
+              outputTokens: session.generation.outputTokens + generated.usage.outputTokens,
+              costUsd: session.generation.costUsd + generated.usage.costUsd,
+            },
+          });
+          const verification = await prototypeVerification.verify({
+            conceptContract: activeContract,
+            verificationId: `${activeContract.conceptId}-v${activeContract.conceptVersion}-admission`,
+          });
+          if (verification.status !== "PASSED") {
+            throw new TypeError(`Concept "${activeContract.conceptName}" failed browser admission: ${verification.findings.join(" ")}`);
+          }
+          const concept = {
+            contract: activeContract,
+            recommended: source?.recommended ?? false,
+            recommendationReason: source?.recommendationReason ?? "This customer-composed direction preserves the explicitly selected qualities.",
+            keyDistinction: kind === "revision"
+              ? `Revised ${classification.scopes.join(", ")}`
+              : `Composed from ${activeContract.sourceConceptIds.join(", ")}`,
+            tradeoff: kind === "revision"
+              ? "A focused change that deliberately preserves unaffected design decisions."
+              : "Combining systems adds coordination constraints that the generated prototype must resolve.",
+            verificationId: verification.verificationId,
+            verificationStatus: verification.status,
+            verificationFindings: verification.findings,
+            screenshotEvidenceReferences: verification.screenshotEvidenceReferences,
+            contentHash: generated.workspace.contentHash,
+            usage: generated.usage,
+            generatedAt: verification.completedAt,
+          };
+          const nextConcepts = kind === "revision"
+            ? [...session.concepts.filter((entry) => entry.contract.conceptId !== sourceConceptId), concept]
+            : [...session.concepts, concept];
+          const differentiation = verifyStudioDifferentiation(nextConcepts, [verification]);
+          if (differentiation.status !== "PASSED") throw new TypeError(differentiation.finding);
+          admitted = { concept, nextConcepts, differentiation };
+        } catch (error) {
+          const failure = String(error?.message ?? error).slice(0, 1_000);
+          admissionFeedback = [failure];
+          session = prototypeSessions.save({
+            ...session,
+            evolution: {
+              ...session.evolution,
+              conceptVersion: activeContract.conceptVersion,
+              attemptFailures: [
+                ...(session.evolution?.attemptFailures ?? []),
+                { attempt, conceptVersion: activeContract.conceptVersion, error: failure, occurredAt: new Date().toISOString() },
+              ],
+            },
+          });
+          if (attempt === 2) throw error;
+          const next = structuredClone(activeContract);
+          delete next.schemaVersion;
+          delete next.integrityHash;
+          next.conceptVersion += 1;
+          activeContract = createConceptPrototypeContract(next);
+          session = prototypeSessions.save({
+            ...session,
+            evolution: { ...session.evolution, conceptVersion: activeContract.conceptVersion },
+          });
+        }
+      }
+      if (admitted === null) throw new TypeError("The concept evolution did not produce an admitted artifact.");
+      session = prototypeSessions.save({
+        ...session,
+        concepts: admitted.nextConcepts,
+        conceptHistory: kind === "revision" && source !== null
+          ? [...(session.conceptHistory ?? []), source]
+          : session.conceptHistory ?? [],
+        compositions: composition === null
+          ? session.compositions ?? []
+          : [...(session.compositions ?? []), composition],
+        selectedConceptId: admitted.concept.contract.conceptId,
+        differentiationStatus: "PASSED",
+        differentiationSignatures: admitted.differentiation.signatures,
+        evolution: {
+          ...session.evolution,
+          status: "PASSED",
+          conceptVersion: admitted.concept.contract.conceptVersion,
+          changedSummary: kind === "revision"
+            ? classification.scopes.map((scope) => `${scope} changed; unaffected contract fields were preserved.`)
+            : composition.selectedTraits.map((trait) => `${trait.trait} from ${trait.conceptId}.`),
+          conflicts: composition?.conflicts ?? [],
+          completedAt: new Date().toISOString(),
+        },
+      });
+      return session;
+    } catch (error) {
+      session = prototypeSessions.save({
+        ...session,
+        evolution: {
+          ...session.evolution,
+          status: "FAILED",
+          error: String(error?.message ?? error).slice(0, 1_000),
+          completedAt: new Date().toISOString(),
+        },
+      });
+      throw error;
+    } finally {
+      activeConceptJobs.delete(missionId);
+    }
+  })();
+  activeConceptJobs.set(missionId, operation);
+  operation.catch((error) => {
+    process.stderr.write(`${new Date().toISOString()} concept evolution ${missionId}: ${String(error?.stack ?? error).slice(0, 4_000)}\n`);
   });
   return operation;
 }
@@ -1297,6 +1463,10 @@ function routeMission(pathname) {
 function routeConceptStudio(pathname) {
   const generate = /^\/missions\/([A-Za-z0-9_-]+)\/concepts\/generate$/u.exec(pathname);
   if (generate !== null) return { kind: "generate", missionId: generate[1], conceptId: null, fileName: null };
+  const compose = /^\/missions\/([A-Za-z0-9_-]+)\/concepts\/compose$/u.exec(pathname);
+  if (compose !== null) return { kind: "compose", missionId: compose[1], conceptId: null, fileName: null };
+  const revise = /^\/missions\/([A-Za-z0-9_-]+)\/concepts\/([A-Za-z0-9._-]+)\/revise$/u.exec(pathname);
+  if (revise !== null) return { kind: "revise", missionId: revise[1], conceptId: revise[2], fileName: null };
   const preview = /^\/missions\/([A-Za-z0-9_-]+)\/concepts\/([A-Za-z0-9._-]+)\/preview$/u.exec(pathname);
   if (preview !== null) return { kind: "preview", missionId: preview[1], conceptId: preview[2], fileName: null };
   const evidence = /^\/missions\/([A-Za-z0-9_-]+)\/concepts\/([A-Za-z0-9._-]+)\/evidence\/([A-Za-z0-9._-]+\.png)$/u.exec(pathname);
@@ -1437,6 +1607,94 @@ const server = createServer(async (request, response) => {
         });
       }
       return json(response, 202, await missionView(conceptRoute.missionId));
+    }
+    if (request.method === "POST" && conceptRoute?.kind === "revise") {
+      if (activeConceptJobs.has(conceptRoute.missionId)) {
+        return json(response, 409, { error: "Foundry is already generating or revising a concept for this project." });
+      }
+      const session = prototypeSessions.read(conceptRoute.missionId);
+      const source = session?.concepts.find((entry) => entry.contract.conceptId === conceptRoute.conceptId);
+      if (session?.status !== "READY" || source?.verificationStatus !== "PASSED") {
+        return json(response, 409, { error: "Only an admitted concept can be revised." });
+      }
+      const input = await body(request);
+      const priorVersions = prototypeWorkspaces
+        .list(conceptRoute.missionId)
+        .filter((workspace) => workspace.conceptId === source.contract.conceptId)
+        .map((workspace) => workspace.conceptVersion);
+      const revision = conceptEvolution.revise({
+        sourceConcept: source.contract,
+        instruction: input.instruction,
+        availableConcepts: [
+          ...session.concepts.map((concept) => concept.contract),
+          ...(session.conceptHistory ?? []).map((concept) => concept.contract),
+        ],
+        targetConceptVersion: Math.max(source.contract.conceptVersion, ...priorVersions) + 1,
+      });
+      startConceptEvolutionJob({
+        missionId: conceptRoute.missionId,
+        contract: revision.contract,
+        classification: revision.classification,
+        sourceConceptId: source.contract.conceptId,
+        kind: "revision",
+      });
+      return json(response, 202, {
+        accepted: true,
+        conceptId: revision.contract.conceptId,
+        conceptVersion: revision.contract.conceptVersion,
+        changedScopes: revision.classification.scopes,
+      });
+    }
+    if (request.method === "POST" && conceptRoute?.kind === "compose") {
+      if (activeConceptJobs.has(conceptRoute.missionId)) {
+        return json(response, 409, { error: "Foundry is already generating or revising a concept for this project." });
+      }
+      const session = prototypeSessions.read(conceptRoute.missionId);
+      if (session?.status !== "READY") return json(response, 409, { error: "A ready concept session is required." });
+      const input = await body(request);
+      const sourceIds = Array.isArray(input.sourceConceptIds) ? input.sourceConceptIds : [];
+      const sourceConcepts = sourceIds.map((conceptId) =>
+        session.concepts.find((entry) => entry.contract.conceptId === conceptId)?.contract,
+      );
+      if (sourceConcepts.length < 2 || sourceConcepts.some((contract) => contract === undefined)) {
+        return json(response, 400, { error: "Choose at least two admitted source concepts." });
+      }
+      const compositionId = typeof input.compositionId === "string" && input.compositionId !== ""
+        ? input.compositionId
+        : `composition-${randomUUID().slice(0, 8)}`;
+      const priorCompositionVersions = prototypeWorkspaces
+        .list(conceptRoute.missionId)
+        .filter((workspace) => workspace.conceptId === compositionId)
+        .map((workspace) => workspace.conceptVersion);
+      const result = conceptEvolution.compose({
+        missionId: conceptRoute.missionId,
+        compositionId,
+        sourceConcepts,
+        selectedTraits: input.selectedTraits,
+        customerNotes: Array.isArray(input.customerNotes) ? input.customerNotes : [],
+        conflictResolution: Array.isArray(input.conflictResolution) ? input.conflictResolution : [],
+        targetConceptVersion: Math.max(0, ...priorCompositionVersions) + 1,
+      });
+      if (result.status === "CONFLICT") {
+        return json(response, 409, {
+          error: "Some selected concept qualities need a design resolution before they can be combined.",
+          compositionId,
+          conflicts: result.conflicts,
+        });
+      }
+      startConceptEvolutionJob({
+        missionId: conceptRoute.missionId,
+        contract: result.contract,
+        classification: { scopes: result.composition.selectedTraits.map((entry) => entry.trait) },
+        composition: result.composition,
+        kind: "composition",
+      });
+      return json(response, 202, {
+        accepted: true,
+        conceptId: result.contract.conceptId,
+        conceptVersion: result.contract.conceptVersion,
+        composition: result.composition,
+      });
     }
     if (request.method === "POST" && conceptRoute?.kind === "preview") {
       const session = prototypeSessions.read(conceptRoute.missionId);

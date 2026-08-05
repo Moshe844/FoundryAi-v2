@@ -231,3 +231,34 @@ test("concept studio sessions recover interrupted generation and preserve admitt
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("concept studio sessions recover interrupted evolution without losing history or composition authority", () => {
+  const root = mkdtempSync(join(tmpdir(), "foundry-studio-evolution-recovery-"));
+  try {
+    const service = createPrototypeStudioSessionService({ prototypeRoot: root });
+    service.save({
+      missionId: "mission-evolution-recovery",
+      sourceProjectDesignVersion: 2,
+      status: "READY",
+      concepts: [{ contract: { conceptId: "concept-current" }, verificationStatus: "PASSED" }],
+      conceptHistory: [{ contract: { conceptId: "concept-current", conceptVersion: 1 } }],
+      compositions: [{ compositionId: "composition-one" }],
+      evolution: {
+        kind: "revision",
+        status: "GENERATING",
+        conceptId: "concept-current",
+        conceptVersion: 2,
+        error: null,
+        completedAt: null,
+      },
+    });
+    const recovered = createPrototypeStudioSessionService({ prototypeRoot: root }).read("mission-evolution-recovery");
+    assert.equal(recovered.status, "READY");
+    assert.equal(recovered.evolution.status, "INTERRUPTED");
+    assert.match(recovered.evolution.error, /last immutable admitted version/u);
+    assert.equal(recovered.conceptHistory.length, 1);
+    assert.equal(recovered.compositions[0].compositionId, "composition-one");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

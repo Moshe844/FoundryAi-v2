@@ -98,6 +98,16 @@ export function rankPrototypeCandidates(candidates) {
   });
 }
 
+export function prototypeModelsInCooldown(history, failureLimit = 2) {
+  const streaks = new Map();
+  for (const entry of history ?? []) {
+    if (typeof entry?.modelId !== "string") continue;
+    if (entry.kind === "failure") streaks.set(entry.modelId, (streaks.get(entry.modelId) ?? 0) + 1);
+    if (entry.kind === "result" && entry.status === "SUCCEEDED") streaks.set(entry.modelId, 0);
+  }
+  return new Set([...streaks].filter(([, count]) => count >= failureLimit).map(([modelId]) => modelId));
+}
+
 function rankTaskRoutes(providers, modelTier) {
   const preferredLatency = preferredLatencyByTier[modelTier];
   const ranked = providers
@@ -795,27 +805,7 @@ export function createModelGateway({
             )
             .map((entry) => entry.modelId),
         );
-        const prototypeFailureCounts = new Map();
-        const successfulPrototypeModels = new Set();
-        for (const entry of prototypeHistory) {
-          if (entry.kind === "failure") {
-            prototypeFailureCounts.set(
-              entry.modelId,
-              (prototypeFailureCounts.get(entry.modelId) ?? 0) + 1,
-            );
-          }
-          if (entry.kind === "result" && entry.status === "SUCCEEDED") {
-            successfulPrototypeModels.add(entry.modelId);
-          }
-        }
-        const repeatedlyFailedPrototypeModels = new Set(
-          [...prototypeFailureCounts]
-            .filter(
-              ([modelId, count]) =>
-                count >= 2 && !successfulPrototypeModels.has(modelId),
-            )
-            .map(([modelId]) => modelId),
-        );
+        const repeatedlyFailedPrototypeModels = prototypeModelsInCooldown(prototypeHistory);
         const routesOutsideCooldown = routedProviders.filter(
           (provider) =>
             !timedOutPrototypeModels.has(

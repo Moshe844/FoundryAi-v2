@@ -650,6 +650,30 @@ function productBlueprint(
 function liveConceptStudio(value: unknown, path: string) {
   const input = object(value, path);
   const generation = object(input.generation, `${path}.generation`);
+  const evolution = input.evolution === undefined
+    ? undefined
+    : (() => {
+        const entry = object(input.evolution, `${path}.evolution`);
+        return {
+          kind: text(entry.kind, `${path}.evolution.kind`) as "revision" | "composition",
+          status: text(entry.status, `${path}.evolution.status`) as "GENERATING" | "PASSED" | "FAILED" | "INTERRUPTED",
+          conceptId: text(entry.conceptId, `${path}.evolution.conceptId`),
+          conceptVersion: integer(entry.conceptVersion, `${path}.evolution.conceptVersion`),
+          changedScopes: textList(entry.changedScopes, `${path}.evolution.changedScopes`),
+          changedSummary: textList(entry.changedSummary, `${path}.evolution.changedSummary`),
+          conflicts: list(entry.conflicts, `${path}.evolution.conflicts`, (conflictValue, conflictPath) => {
+            const conflict = object(conflictValue, conflictPath);
+            return {
+              trait: text(conflict.trait, `${conflictPath}.trait`),
+              conceptIds: textList(conflict.conceptIds, `${conflictPath}.conceptIds`),
+              reason: text(conflict.reason, `${conflictPath}.reason`),
+            };
+          }),
+          error: nullableText(entry.error, `${path}.evolution.error`),
+          startedAt: text(entry.startedAt, `${path}.evolution.startedAt`),
+          completedAt: nullableText(entry.completedAt, `${path}.evolution.completedAt`),
+        };
+      })();
   return {
     schemaVersion: integer(input.schemaVersion, `${path}.schemaVersion`) as 1,
     missionId: text(input.missionId, `${path}.missionId`),
@@ -712,6 +736,7 @@ function liveConceptStudio(value: unknown, path: string) {
       costUsd: number(generation.costUsd, `${path}.generation.costUsd`),
     },
     selectedConceptId: nullableText(input.selectedConceptId, `${path}.selectedConceptId`),
+    evolution,
     error: nullableText(input.error, `${path}.error`),
     generating: bool(input.generating, `${path}.generating`),
     createdAt: text(input.createdAt, `${path}.createdAt`),
