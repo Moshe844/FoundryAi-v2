@@ -101,6 +101,72 @@ test("certified stack scaffold deterministically owns readiness, icon, and brows
   assert.doesNotMatch(playwright.content, /webServer/u);
 });
 
+test("certified stack scaffold pins packages and shares measured quality probes without paid corrections", () => {
+  const files = ensureCertifiedStackScaffold(
+    [
+      {
+        path: "package.json",
+        content: JSON.stringify({
+          scripts: {
+            build: "next build",
+            start: "next start",
+            typecheck: "tsc --noEmit",
+            lint: "eslint .",
+            test: "playwright test",
+          },
+          dependencies: {
+            next: "15.4.4",
+            react: "19.1.0",
+            "react-dom": "19.1.0",
+            "better-sqlite3": "13.0.1",
+          },
+          devDependencies: {
+            "@playwright/test": "1.54.2",
+            "@types/react-dom": "19.1.0",
+            typescript: "5.8.3",
+          },
+        }),
+      },
+      {
+        path: "tests/live.spec.ts",
+        content: [
+          "const captureProbeErrors: string[] = []; const consoleErrors: string[] = []; const pageErrors: string[] = [];",
+          "let checks: Record<string, boolean> = { 'check-phone': false, 'check-access': false };",
+          "try {",
+          "  await page.goto('/');",
+          "  const productVisible = (await page.locator('main').count()) > 0;",
+          "  checks['check-phone'] = productVisible;",
+          "  checks['check-access'] = productVisible;",
+          "} finally { console.log('FOUNDRY_BROWSER_RESULT:' + JSON.stringify({captureProbeErrors, checks, consoleErrors, pageErrors})); }",
+        ].join("\n"),
+      },
+    ],
+    [],
+    {
+      responsiveCheckIds: ["check-phone"],
+      accessibilityCheckIds: ["check-access"],
+    },
+  );
+  const packageDefinition = JSON.parse(
+    files.find((file) => file.path === "package.json").content,
+  );
+  assert.equal(packageDefinition.devDependencies["@types/react-dom"], "19.1.2");
+  const browserTest = files.find((file) => file.path === "tests/live.spec.ts").content;
+  assert.match(browserTest, /__foundryResponsiveEvidence/u);
+  assert.match(browserTest, /__foundryAccessibilityEvidence/u);
+  assert.match(browserTest, /const checks: Record<string, boolean>/u);
+  assert.doesNotThrow(() =>
+    validateBrowserObservationTestSource(
+      browserTest,
+      ["check-phone", "check-access"],
+      {
+        responsiveCheckIds: ["check-phone"],
+        accessibilityCheckIds: ["check-access"],
+      },
+    ),
+  );
+});
+
 test("certified stack scaffold does not mistake an unlinked public favicon for Next metadata", () => {
   const files = ensureCertifiedStackScaffold([
     { path: "app/page.tsx", content: "export default function Page() { return null; }" },
@@ -254,6 +320,32 @@ test("certified stack scaffold waits for asynchronously loaded semantic slots", 
     browserTest.content,
     /await slotButtons\.first\(\)\.waitFor\(\{ state: 'visible' \}\);/u,
   );
+});
+
+test("certified stack scaffold waits for required collections and fails false evidence", () => {
+  const files = ensureCertifiedStackScaffold([
+    {
+      path: "tests/app.spec.ts",
+      content: `import { test } from '@playwright/test';
+test('flow', async ({ page }) => {
+  const captureProbeErrors: string[] = [];
+  const checks: Record<string, boolean> = { booking: false };
+  const diagnostics: Record<string, Record<string, unknown>> = {};
+  try {
+    const bookingCards = await page.$$('.booking-card');
+    const hasBookings = bookingCards.length > 0;
+    checks.booking = hasBookings;
+  } finally {
+    const result = JSON.stringify({ captureProbeErrors, checks, diagnostics });
+    console.log('FOUNDRY_BROWSER_RESULT: ' + result);
+  }
+});`,
+    },
+  ]);
+  const browserTest = files.find((file) => file.path === "tests/app.spec.ts");
+  assert.match(browserTest.content, /locator\("\.booking-card"\)\.first\(\)\.waitFor/u);
+  assert.match(browserTest.content, /__foundryFailedChecks/u);
+  assert.match(browserTest.content, /throw new Error/u);
 });
 
 test("certified stack scaffold excludes Next's hidden route announcer from alert evidence", () => {
@@ -579,7 +671,7 @@ test("source repair proposals reject unchanged and repeated work before executio
   );
 });
 
-test("browser verification keeps Runtime Service authoritative and forbids paid reruns", () => {
+test("browser verification keeps Runtime Service authoritative and forbids automatic paid reruns", () => {
   const source = readFileSync(
     resolve(
       import.meta.dirname,
@@ -608,10 +700,15 @@ test("browser verification keeps Runtime Service authoritative and forbids paid 
     /rehydrationBeforeCommands\.endTimestamp\s*<\s*restoreBeforeCommands\.occurredAt/u,
   );
   assert.match(source, /rehydratedBeforeCommands/u);
-  // The repair budget must be a real, bounded, non-zero number: zero silently
-  // disables the entire evidence-backed browser repair loop and turns every
-  // first-pass check failure into an immediate mission failure.
-  assert.match(source, /MAX_BROWSER_REPAIR_CALLS = 2/u);
+  // Admission failures must never trigger an automatic paid correction chain.
+  assert.match(source, /MAX_GENERATION_CORRECTION_CALLS = 0/u);
+  assert.match(source, /MAX_PROCEDURE_REPAIR_CALLS = 0/u);
+  // Browser repair is bounded but larger than the others: its failures were
+  // observed converging (8, then 5, then 3 across attempts) once every check
+  // carried diagnostics, so the old limit of two truncated a descent that was
+  // still making progress. It stays a small fixed number, never unbounded.
+  assert.match(source, /MAX_BROWSER_REPAIR_CALLS = 4/u);
+  assert.match(source, /MAX_DESIGN_FIDELITY_REPAIR_CALLS = 4/u);
   assert.match(source, /MAX_RUNTIME_RESTARTS = 2/u);
   assert.match(source, /browser-first-pass-failed/u);
   assert.match(source, /browser-repair-budget-exhausted/u);

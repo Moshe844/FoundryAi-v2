@@ -416,6 +416,25 @@ test("Phase 2 normalizes mechanical generation bookkeeping before semantic admis
   );
 });
 
+test("Phase 2 binds contract identity the model cannot know instead of failing admission", () => {
+  const contract = contractFixture();
+  const plan = validPlan(contract);
+  // A real generator is never shown the approved contract hash, its version, or
+  // the design-direction hash, so it cannot echo them back. Requiring it to do
+  // so failed every approved-design run before any build was attempted.
+  plan.contractHash = "0".repeat(64);
+  plan.contractVersion = 99;
+  plan.supportedPlatform = "unsupported-platform";
+  plan.designDirectionHash = "f".repeat(64);
+
+  const bound = bindMissingApprovedRequirementTraces(plan, contract);
+  assert.equal(bound.contractHash, contract.contentHash);
+  assert.equal(bound.contractVersion, contract.contractVersion);
+  assert.equal(bound.supportedPlatform, contract.supportedPlatform);
+  assert.equal(bound.designDirectionHash, approvedDesignDirectionHash(contract));
+  assert.doesNotThrow(() => validateContractBoundMissionPlan(bound, contract));
+});
+
 test("Phase 2 admits intrinsic responsive sizing and still rejects no responsive strategy", () => {
   const contract = contractFixture();
   const intrinsic = validPlan(contract);

@@ -419,9 +419,11 @@ function proposal(mission: Mission): FoundryProposal {
       "mission.profile.architectureDecisions",
     ),
     exclusions: sourced(
-      profile.constraints,
+      profile.constraints.filter(
+        (constraint) => !profile.architectureDecisions.includes(constraint),
+      ),
       "project-understanding",
-      "mission.profile.constraints",
+      "mission.profile.constraints excluding mission.profile.architectureDecisions",
     ),
     observations: Object.freeze(
       profile.observations.map((observation, index) =>

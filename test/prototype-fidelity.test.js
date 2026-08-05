@@ -112,3 +112,146 @@ test("prototype evidence cannot be swapped after approval", () => {
     productionBrowserResult: { results: VIEWPORTS },
   }), /content hash/u);
 });
+
+test("an equivalent implementation with different markup is not a composition failure", () => {
+  // The production build expresses the same regions with different element
+  // names and slightly different nesting, exactly as a React implementation of
+  // a hand-written prototype does. Geometry is materially the same.
+  const reimplemented = VIEWPORTS.map((entry) => {
+    const copy = structuredClone(entry);
+    const swap = { header: "banner", nav: "navigation", main: "main", section: "region", footer: "contentinfo" };
+    copy.measurement.manifest = copy.measurement.manifest.map((surface) => ({
+      ...surface,
+      tag: "div",
+      role: swap[surface.tag],
+      x: surface.x + 1,
+      y: surface.y + 1,
+    }));
+    return copy;
+  });
+  const result = evaluatePrototypeFidelity({
+    approvedDesignContract: APPROVED,
+    prototypeVerification: evidence(VIEWPORTS),
+    productionBrowserResult: { results: reimplemented },
+  });
+
+  assert.ok(!result.failedAspects.includes("composition"), JSON.stringify(result.failedAspects));
+  assert.ok(!result.failedAspects.includes("surface-order"), JSON.stringify(result.failedAspects));
+  assert.ok(!result.failedAspects.includes("spacing"), JSON.stringify(result.failedAspects));
+});
+
+test("a resolved generic font family is not a typography replacement", () => {
+  // ui-monospace and the SF Mono the browser resolves it to are one decision.
+  const monoPrototype = VIEWPORTS.map((entry) => {
+    const copy = structuredClone(entry);
+    copy.measurement.manifest = copy.measurement.manifest.map((surface) => ({ ...surface, fontFamily: "ui-monospace, monospace" }));
+    return copy;
+  });
+  const monoProduction = VIEWPORTS.map((entry) => {
+    const copy = structuredClone(entry);
+    copy.measurement.manifest = copy.measurement.manifest.map((surface) => ({ ...surface, fontFamily: '"SF Mono", monospace' }));
+    return copy;
+  });
+  const resolved = evaluatePrototypeFidelity({
+    approvedDesignContract: APPROVED,
+    prototypeVerification: evidence(monoPrototype),
+    productionBrowserResult: { results: monoProduction },
+  });
+  assert.ok(!resolved.failedAspects.includes("typography"), JSON.stringify(resolved.failedAspects));
+
+  // A genuine face swap must still fail.
+  const swapped = VIEWPORTS.map((entry) => {
+    const copy = structuredClone(entry);
+    copy.measurement.manifest = copy.measurement.manifest.map((surface) => ({ ...surface, fontFamily: "Fraunces, serif" }));
+    return copy;
+  });
+  const replaced = evaluatePrototypeFidelity({
+    approvedDesignContract: APPROVED,
+    prototypeVerification: evidence(monoPrototype),
+    productionBrowserResult: { results: swapped },
+  });
+  assert.ok(replaced.failedAspects.includes("typography"), JSON.stringify(replaced.failedAspects));
+});
+
+test("a genuinely relocated composition still fails on geometry", () => {
+  // Same roles, same markup, but the regions are moved and resized materially.
+  const moved = VIEWPORTS.map((entry) => {
+    const copy = structuredClone(entry);
+    copy.measurement.manifest = copy.measurement.manifest.map((surface) => ({
+      ...surface,
+      x: surface.x + entry.viewport.width * 0.45,
+      width: Math.max(10, surface.width * 0.4),
+    }));
+    return copy;
+  });
+  const result = evaluatePrototypeFidelity({
+    approvedDesignContract: APPROVED,
+    prototypeVerification: evidence(VIEWPORTS),
+    productionBrowserResult: { results: moved },
+  });
+
+  assert.equal(result.passed, false);
+  assert.ok(result.failedAspects.includes("composition"), JSON.stringify(result.failedAspects));
+});
+
+test("a failed spacing verdict carries the measurements a repair needs", () => {
+  // y normalizes against scrollHeight (1104), so the shift has to exceed the
+  // 0.75 tolerance in normalized units to be a real spacing failure.
+  const moved = VIEWPORTS.map((entry) => {
+    const copy = structuredClone(entry);
+    copy.measurement.manifest = copy.measurement.manifest.map((surface) => ({ ...surface, y: surface.y + 1000 }));
+    return copy;
+  });
+  const result = evaluatePrototypeFidelity({
+    approvedDesignContract: APPROVED,
+    prototypeVerification: evidence(VIEWPORTS),
+    productionBrowserResult: { results: moved },
+  });
+  const spacing = result.verdicts.find((entry) => entry.aspect === "spacing");
+
+  assert.equal(spacing.verdict, "FAIL");
+  assert.ok(Array.isArray(spacing.detail.comparisons));
+  assert.ok(spacing.detail.comparisons.every((entry) => typeof entry.meanDistance === "number"));
+  assert.ok(spacing.detail.comparisons.some((entry) => Array.isArray(entry.pairs) && entry.pairs.length > 0));
+});
+
+test("every failing aspect carries diagnostics a first repair attempt can act on", () => {
+  // A repair should not need a second attempt to discover what went wrong.
+  // Break composition, navigation, hierarchy, imagery, interactions, and
+  // accessibility at once, then require that no failed verdict is empty.
+  const degraded = VIEWPORTS.map((entry) => {
+    const copy = structuredClone(entry);
+    copy.measurement.manifest = copy.measurement.manifest
+      .filter((surface) => surface.tag !== "nav")
+      .map((surface) => ({ ...surface, x: surface.x + entry.viewport.width * 0.5, width: Math.max(8, surface.width * 0.3) }));
+    copy.measurement.headingCount = 0;
+    copy.measurement.imageCount = 0;
+    copy.measurement.focusableCount = 0;
+    copy.measurement.navigationPresent = false;
+    copy.measurement.activeElement = "BODY";
+    copy.measurement.missingImageAltCount = 3;
+    return copy;
+  });
+  const result = evaluatePrototypeFidelity({
+    approvedDesignContract: APPROVED,
+    prototypeVerification: evidence(VIEWPORTS),
+    productionBrowserResult: { results: degraded },
+  });
+
+  assert.equal(result.passed, false);
+  const failed = result.verdicts.filter((entry) => entry.verdict === "FAIL");
+  assert.ok(failed.length >= 5, `expected several failures, got ${failed.length}`);
+  for (const entry of failed) {
+    assert.ok(
+      Object.keys(entry.detail).length > 0,
+      `${entry.aspect} failed with no diagnostics a repair could use`,
+    );
+  }
+
+  // Navigation in particular must say which side has the landmark.
+  const navigation = failed.find((entry) => entry.aspect === "navigation");
+  assert.ok(navigation, "navigation should fail when the landmark is removed");
+  assert.equal(navigation.detail.comparisons[0].prototypeHasNavigationLandmark, true);
+  assert.equal(navigation.detail.comparisons[0].productionHasNavigationLandmark, false);
+  assert.match(navigation.detail.remedy, /<nav> landmark/u);
+});

@@ -385,6 +385,15 @@ function approvedPayload(input) {
       "customerModifications",
       { allowEmpty: true },
     ),
+    // A deferred shock is design intent the customer armed without generating a
+    // prototype for it. The build deliberately departs from the approved
+    // prototype, so these directives also mark the design as not
+    // prototype-comparable.
+    shockDirectives: stringList(
+      input.shockDirectives ?? [],
+      "shockDirectives",
+      { allowEmpty: true },
+    ),
     explicitExclusions: [...selected.deliberateExclusions],
     prototypeFileManifest: manifest,
     screenshotEvidenceReferences: stringList(

@@ -10,7 +10,7 @@ function fail(message) {
 export function createPrototypeApprovalService({ workspaceService }) {
   if (typeof workspaceService?.get !== "function") fail("workspaceService is required.");
 
-  function approve({ conceptRecord, customerModifications = [], approvalTimestamp = new Date().toISOString() }) {
+  function approve({ conceptRecord, customerModifications = [], shockDirectives = [], approvalTimestamp = new Date().toISOString() }) {
     if (conceptRecord === null || typeof conceptRecord !== "object") fail("conceptRecord is required.");
     const selectedConcept = normalizeConceptPrototypeContract(conceptRecord.contract);
     if (conceptRecord.verificationStatus !== "PASSED") fail("only a browser-admitted concept can be approved.");
@@ -33,6 +33,7 @@ export function createPrototypeApprovalService({ workspaceService }) {
       missionId: selectedConcept.missionId,
       selectedConcept,
       customerModifications,
+      shockDirectives,
       prototypeFileManifest: workspace.fileManifest,
       screenshotEvidenceReferences: conceptRecord.screenshotEvidenceReferences,
       browserEvidenceReferences: [browserEvidenceReference],

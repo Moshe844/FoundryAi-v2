@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { createHash, randomUUID } from "node:crypto";
 
 import {
+  CERTIFIED_PROJECT_PACKAGE_VERSIONS,
   ProviderHealth,
   ProviderId,
   MODEL_GOVERNANCE_POLICY,
@@ -541,6 +542,30 @@ function verifyStudioDifferentiation(concepts, currentRecords = []) {
   return prototypeVerification.verifyDifferentiation(records);
 }
 
+// A deferred shock never becomes a prototype, so its intent has to survive as
+// text the production generator can act on. Pull the transformed fields out of
+// the deterministically derived shock contract and state them as strongly as
+// the customer asked: this is meant to be genuinely surprising, not a restyle.
+function shockDirectivesFromContract(shockContract, sourceContract) {
+  const added = (next, previous) =>
+    (next ?? []).filter((rule) => !(previous ?? []).includes(rule));
+  return [
+    "Foundry is deliberately departing from the approved prototype for this build. Do not reproduce it.",
+    "Design something genuinely surprising: a memorable, art-directed experience the customer would not have thought to ask for and would never get from a template.",
+    "Reject the most common composition for this product type outright. If the result reads as a familiar dashboard, card grid, or generic SaaS shell, it has failed its purpose.",
+    "Commit to one bold structural idea and carry it through every surface — hierarchy, sequencing, scale contrast, and negative space — rather than decorating a conventional layout.",
+    ...added(shockContract.compositionRules, sourceContract.compositionRules),
+    ...added(shockContract.interactionRules, sourceContract.interactionRules),
+    ...added(shockContract.motionRules, sourceContract.motionRules),
+    ...added(shockContract.responsiveRules, sourceContract.responsiveRules),
+    shockContract.imageryStrategy,
+    shockContract.componentCharacter,
+    shockContract.typographySystem?.originality,
+    ...added(shockContract.deliberateExclusions, sourceContract.deliberateExclusions),
+    "Every approved workflow, requirement, and accessibility rule must still work exactly as promised. Surprise through composition, hierarchy, typography, imagery, and sequencing — never by dropping, hiding, or obscuring anything the customer asked for.",
+  ].filter((entry) => typeof entry === "string" && entry.trim() !== "");
+}
+
 function startConceptGenerationJob({ missionId, understanding, sourceProjectDesignVersion }) {
   if (activeConceptJobs.has(missionId)) return activeConceptJobs.get(missionId);
   const alternatives = understanding.proposal.alternatives.slice(0, 3);
@@ -554,17 +579,40 @@ function startConceptGenerationJob({ missionId, understanding, sourceProjectDesi
     await Promise.resolve();
     const verified = [];
     try {
-      for (const alternative of alternatives) {
-        const existing = session.concepts.find(
-          (concept) => concept.contract.conceptId === alternative.id && concept.verificationStatus === "PASSED",
-        );
-        if (existing !== undefined) continue;
-        let admitted = false;
-        let admissionFeedback = (session.attemptFailures ?? [])
-          .filter((failure) => failure.conceptId === alternative.id)
-          .slice(-1)
-          .map((failure) => failure.error);
-        for (let attempt = 1; attempt <= 2 && !admitted; attempt += 1) {
+      // The three concepts are independent: each owns its own conceptId, its own
+      // prototype workspace, and its own Chrome process with a private profile
+      // and debugging pipe. Generating them one after another simply added their
+      // provider and browser latency together. Run the expensive work
+      // concurrently and keep every session write on this single task, because
+      // prototypeSessions.save is a read-modify-write over shared session state
+      // that concurrent writers would clobber.
+      const pending = alternatives.filter(
+        (alternative) =>
+          !session.concepts.some(
+            (concept) =>
+              concept.contract.conceptId === alternative.id &&
+              concept.verificationStatus === "PASSED",
+          ),
+      );
+      const priorFeedback = new Map(
+        pending.map((alternative) => [
+          alternative.id,
+          (session.attemptFailures ?? [])
+            .filter((failure) => failure.conceptId === alternative.id)
+            .slice(-1)
+            .map((failure) => failure.error),
+        ]),
+      );
+
+      async function produceConcept(alternative) {
+        const failures = [];
+        // Every paid generate call counts, including an attempt whose prototype
+        // later failed browser admission.
+        const usages = [];
+        let admissionFeedback = priorFeedback.get(alternative.id) ?? [];
+        for (let attempt = 1; attempt <= 2; attempt += 1) {
+          // Versions are filtered by conceptId, so concurrent alternatives never
+          // contend for the same number.
           const previousVersions = prototypeWorkspaces
             .list(missionId)
             .filter((workspace) => workspace.conceptId === alternative.id)
@@ -582,6 +630,7 @@ function startConceptGenerationJob({ missionId, understanding, sourceProjectDesi
               conceptContract: contract,
               admissionFeedback,
             });
+            usages.push(generated.usage);
             const verification = await prototypeVerification.verify({
               conceptContract: contract,
               verificationId: `${contract.conceptId}-v${contract.conceptVersion}-admission`,
@@ -600,43 +649,85 @@ function startConceptGenerationJob({ missionId, understanding, sourceProjectDesi
               usage: generated.usage,
               generatedAt: verification.completedAt,
             };
-            session = prototypeSessions.save({
-              ...session,
-              concepts: [
-                ...session.concepts.filter((entry) => entry.contract.conceptId !== contract.conceptId),
-                concept,
-              ],
-              generation: {
-                ...session.generation,
-                inputTokens: session.generation.inputTokens + generated.usage.inputTokens,
-                outputTokens: session.generation.outputTokens + generated.usage.outputTokens,
-                costUsd: session.generation.costUsd + generated.usage.costUsd,
-              },
-            });
             if (verification.status !== "PASSED") {
-              throw new TypeError(`Concept "${contract.conceptName}" failed browser admission: ${verification.findings.join(" ")}`);
+              // Persist the concept exactly as the sequential path did, then
+              // report the admission failure for this attempt.
+              failures.push({
+                conceptId: contract.conceptId,
+                conceptVersion: contract.conceptVersion,
+                attempt,
+                error: `Concept "${contract.conceptName}" failed browser admission: ${verification.findings.join(" ")}`,
+                occurredAt: new Date().toISOString(),
+              });
+              admissionFeedback = [failures.at(-1).error.slice(0, 1_000)];
+              if (attempt === 2) {
+                return { concept, usages, failures, error: new TypeError(failures.at(-1).error) };
+              }
+              continue;
             }
-            verified.push(verification);
-            admitted = true;
+            return { concept, usages, verification, failures, error: null };
           } catch (error) {
-            admissionFeedback = [String(error?.message ?? error).slice(0, 1_000)];
-            session = prototypeSessions.save({
-              ...session,
-              attemptFailures: [
-                ...(session.attemptFailures ?? []),
-                {
-                  conceptId: contract.conceptId,
-                  conceptVersion: contract.conceptVersion,
-                  attempt,
-                  error: String(error?.message ?? error).slice(0, 1_000),
-                  occurredAt: new Date().toISOString(),
-                },
-              ],
+            const message = String(error?.message ?? error).slice(0, 1_000);
+            failures.push({
+              conceptId: contract.conceptId,
+              conceptVersion: contract.conceptVersion,
+              attempt,
+              error: message,
+              occurredAt: new Date().toISOString(),
             });
-            if (attempt === 2) throw error;
+            admissionFeedback = [message];
+            if (attempt === 2) return { concept: null, usages, failures, error };
           }
         }
+        return { concept: null, usages, failures, error: new TypeError("Concept generation produced no result.") };
       }
+
+      // allSettled, not all: a synchronous throw while deriving a contract must
+      // not abandon two in-flight concepts with live Chrome children still
+      // writing their workspaces.
+      const outcomes = (await Promise.allSettled(pending.map(produceConcept))).map(
+        (settled) =>
+          settled.status === "fulfilled"
+            ? settled.value
+            : { concept: null, usages: [], failures: [], error: settled.reason },
+      );
+
+      // Merge in the fixed alternatives order so session state, token
+      // accounting, and persisted failures stay deterministic.
+      let concepts = session.concepts;
+      let attemptFailures = [...(session.attemptFailures ?? [])];
+      let generation = { ...session.generation };
+      let firstError = null;
+      for (const outcome of outcomes) {
+        attemptFailures = [...attemptFailures, ...outcome.failures];
+        for (const usage of outcome.usages) {
+          generation = {
+            ...generation,
+            inputTokens: generation.inputTokens + usage.inputTokens,
+            outputTokens: generation.outputTokens + usage.outputTokens,
+            costUsd: generation.costUsd + usage.costUsd,
+          };
+        }
+        if (outcome.concept !== null) {
+          concepts = [
+            ...concepts.filter(
+              (entry) => entry.contract.conceptId !== outcome.concept.contract.conceptId,
+            ),
+            outcome.concept,
+          ];
+        }
+        if (outcome.verification !== undefined && outcome.verification !== null) {
+          verified.push(outcome.verification);
+        }
+        if (outcome.error !== null && firstError === null) firstError = outcome.error;
+      }
+      session = prototypeSessions.save({
+        ...session,
+        concepts,
+        attemptFailures,
+        generation,
+      });
+      if (firstError !== null) throw firstError;
       const admitted = session.concepts.filter((concept) => concept.verificationStatus === "PASSED");
       if (admitted.length !== 3) throw new TypeError("Three admitted concepts were not produced.");
       const differentiation = verifyStudioDifferentiation(admitted, verified);
@@ -1682,28 +1773,32 @@ const server = createServer(async (request, response) => {
         (entry) => entry.contract.conceptId === session.recommendedConceptId && entry.contract.strategy !== ConceptStrategy.SHOCK,
       ) ?? session.concepts.find((entry) => entry.contract.strategy === ConceptStrategy.STANDARD);
       if (source === undefined) return json(response, 409, { error: "A safe standard concept is required as the shock concept's project anchor." });
+      // A deferred shock spends no provider or browser time here. The shock
+      // contract is a deterministic transformation of the anchor concept, so
+      // its directives are recorded now and applied when the project is built.
+      // Nothing is shown in the Studio: the surprise lands in the built product.
       const shockConceptId = existingShock?.contract.conceptId ?? "shock-concept";
-      const priorVersions = prototypeWorkspaces
-        .list(conceptRoute.missionId)
-        .filter((workspace) => workspace.conceptId === shockConceptId)
-        .map((workspace) => workspace.conceptVersion);
       const shock = conceptEvolution.shock({
         sourceConcept: source.contract,
         shockConceptId,
-        targetConceptVersion: Math.max(0, ...priorVersions) + 1,
+        targetConceptVersion: 1,
       });
-      startConceptEvolutionJob({
-        missionId: conceptRoute.missionId,
-        contract: shock.contract,
-        classification: shock.classification,
-        sourceConceptId: source.contract.conceptId,
-        kind: "shock",
+      const directives = shockDirectivesFromContract(shock.contract, source.contract);
+      prototypeSessions.save({
+        ...session,
+        deferredShock: {
+          status: "ARMED",
+          sourceConceptId: source.contract.conceptId,
+          directives,
+          armedAt: new Date().toISOString(),
+        },
       });
       return json(response, 202, {
         accepted: true,
-        conceptId: shock.contract.conceptId,
-        conceptVersion: shock.contract.conceptVersion,
-        warning: "This option explores a more surprising direction while still preserving your project goals.",
+        deferred: true,
+        sourceConceptId: source.contract.conceptId,
+        directiveCount: directives.length,
+        warning: "Foundry will push this project somewhere genuinely unexpected when it builds. Because there is no prototype to compare against, this build is not checked for visual fidelity.",
       });
     }
     if (request.method === "POST" && conceptRoute?.kind === "compose") {
@@ -1788,6 +1883,10 @@ const server = createServer(async (request, response) => {
       const approvedDesignContract = prototypeApproval.approve({
         conceptRecord: concept,
         customerModifications,
+        shockDirectives:
+          session.deferredShock?.status === "ARMED"
+            ? session.deferredShock.directives ?? []
+            : [],
       });
       session = prototypeSessions.save({
         ...session,
@@ -1989,8 +2088,49 @@ const server = createServer(async (request, response) => {
   }
 });
 
+// Every generated project installs the same certified package set at fixed
+// versions, and that install sits on the critical path of every build. The
+// versions are known before any project exists, so warm the npm cache once at
+// boot. This touches no mission workspace, records no evidence, and mutates no
+// checkpoint: a cold cache just means the first install pays full price, as it
+// does today. Failures are ignored on purpose — this is an optimisation, never
+// a precondition for building.
+function warmCertifiedPackageCache() {
+  try {
+    // Only shell-safe specifiers may be passed, because Windows needs
+    // shell: true to launch npm.cmd at all.
+    const specifiers = Object.entries(CERTIFIED_PROJECT_PACKAGE_VERSIONS)
+      .map(([packageName, version]) => `${packageName}@${version}`)
+      .filter((specifier) => /^@?[a-z0-9._/-]+@[a-z0-9.+-]+$/iu.test(specifier));
+    if (specifiers.length === 0) return;
+    const child = spawn(
+      process.platform === "win32" ? "npm.cmd" : "npm",
+      ["cache", "add", ...specifiers],
+      {
+        cwd: repositoryRoot,
+        stdio: "ignore",
+        windowsHide: true,
+        shell: process.platform === "win32",
+      },
+    );
+    child.once("error", () => {});
+    child.once("exit", (code) => {
+      if (code === 0) {
+        process.stdout.write(
+          `Certified package cache warmed (${specifiers.length} packages).\n`,
+        );
+      }
+    });
+    child.unref?.();
+  } catch {
+    // spawn throws synchronously on Windows for some executables, and a cache
+    // warm must never be able to take the server down with it.
+  }
+}
+
 server.listen(port, "127.0.0.1", () => {
   process.stdout.write(`Foundry local API ready at http://127.0.0.1:${port}\n`);
+  warmCertifiedPackageCache();
 });
 
 async function shutdown() {

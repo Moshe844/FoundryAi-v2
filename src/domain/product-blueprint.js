@@ -1,5 +1,9 @@
 import { createHash } from "node:crypto";
 import { createDesignRenderContract } from "./design-concept-renderer.js";
+import {
+  detectEngineeringSignals,
+  engineeringFloorVerificationEntries,
+} from "./engineering-floor.js";
 
 export const PRODUCT_BLUEPRINT_SCHEMA_VERSION = 1;
 
@@ -498,9 +502,15 @@ export function createProductBlueprint({
       })
     : structuredClone(submittedRenderContract);
   const designVerification = designVerificationEntries(profile.name, designSpecification);
+  // Foundry owns these regardless of what the model proposed. Without them a
+  // contract that never mentioned security still passed every gate.
+  const engineeringFloor = engineeringFloorVerificationEntries(
+    profile.name,
+    detectEngineeringSignals(profile, projectDesign),
+  );
   const verificationPlan = [
     ...structuredClone(projectDesign.verificationPlan),
-    ...designVerification.filter(
+    ...[...designVerification, ...engineeringFloor].filter(
       (candidate) =>
         !projectDesign.verificationPlan.some(
           (existing) => existing.sourceRequirement === candidate.sourceRequirement,

@@ -109,7 +109,7 @@ function designFor({ audience, subject, style }) {
       specificValue: `Shows ${audience} what changed in ${subject} since the prior visit.`,
       whyThisProjectNeedsIt: `${audience} repeat this review and need the new action, not another undifferentiated record list.`,
       impact: "Adds focused comparison scope without a new external integration.",
-      selectedByDefault: true,
+      selectedByDefault: false,
       confidence: { score: 0.9, rationale: "The repeated review workflow directly benefits from comparison." },
       requiredDependencies: ["A last-updated value for each source record"],
     }, {

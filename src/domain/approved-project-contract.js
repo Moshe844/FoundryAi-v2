@@ -108,7 +108,7 @@ function normalizeDecisionSelections(value) {
   ]);
   return value.map((entry, index) => {
     const label = `decisionSelections[${index}]`;
-    exact(entry, [
+    const baseKeys = [
       "classification",
       "kind",
       "mode",
@@ -117,7 +117,14 @@ function normalizeDecisionSelections(value) {
       "sourceProfileVersion",
       "subjectId",
       "value",
-    ], label);
+    ];
+    const actualKeys = Object.keys(entry).sort().join(",");
+    const baseKeyList = [...baseKeys].sort().join(",");
+    const designKeyList = [...baseKeys, "designContract"].sort().join(",");
+    if (
+      (actualKeys !== baseKeyList && actualKeys !== designKeyList) ||
+      (entry.designContract !== undefined && entry.kind !== "design-direction")
+    ) fail(`${label} contains unsupported fields.`);
     if (!kinds.has(entry.kind)) fail(`${label}.kind is invalid.`);
     if (!modes.has(entry.mode)) fail(`${label}.mode is invalid.`);
     if (
@@ -137,6 +144,9 @@ function normalizeDecisionSelections(value) {
           ? null
           : text(entry.classification, `${label}.classification`),
       sourceProfileVersion: entry.sourceProfileVersion,
+      ...(entry.designContract === undefined
+        ? {}
+        : { designContract: normalizeSelection(entry.designContract, `${label}.designContract`) }),
     };
   });
 }

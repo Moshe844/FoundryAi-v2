@@ -27,13 +27,22 @@ import {
 import {
   CONTRACT_BOUND_BUNDLE_SCHEMA,
   approvedContractRequirementCatalogue,
+  approvedDesignDirectionHash,
   contractBoundModelPrompt,
   createModelTaskContract,
   deriveContractRoutingRequirements,
   validateContractBoundMissionPlan,
   validateContractRequirementTrace,
 } from "../domain/contract-bound-execution.js";
-import { validateApprovedProjectContractConsistency } from "../domain/approved-project-contract.js";
+import {
+  normalizeApprovedProjectContract,
+  validateApprovedProjectContractConsistency,
+} from "../domain/approved-project-contract.js";
+import {
+  detectEngineeringSignals,
+  engineeringFloorPromptSegments,
+  validateEngineeringFloor,
+} from "../domain/engineering-floor.js";
 
 export const PRODUCTION_MISSION_SOURCE = "PRODUCTION_MISSION_SERVICE";
 const BROWSER_ISOLATION_RESTORE_REASON =
@@ -57,10 +66,20 @@ const MAX_PROCEDURE_REPAIR_CALLS = 0;
 const MAX_APPROVED_PROTOTYPE_GENERATION_CORRECTION_CALLS = 2;
 const MAX_APPROVED_PROTOTYPE_PROCEDURE_REPAIR_CALLS = 2;
 // Browser repair is reserved for evidence-backed runtime or design failures.
-// Two focused attempts are enough to correct a scoped source/style mismatch
-// without turning verification into an unbounded paid regeneration loop.
-const MAX_BROWSER_REPAIR_CALLS = 2;
-const MAX_DESIGN_FIDELITY_REPAIR_CALLS = 2;
+// Raised from two on evidence rather than by guess: once every check carried
+// diagnostics, repairs began reducing failures monotonically — 8 then 5 then 3
+// across consecutive attempts — and the budget cut that descent off partway
+// rather than the repairs running out of ideas. Four keeps it bounded while
+// letting a converging sequence finish; a repair that stops making progress
+// still stops, because a repeated proposal is rejected before it is paid for.
+const MAX_BROWSER_REPAIR_CALLS = 4;
+// Raised for the same reason as browser repair, and on the same kind of
+// evidence rather than by analogy: once fidelity verdicts carried per-aspect
+// measurements, repairs reduced failing aspects 6 then 5 then 2 across
+// consecutive attempts and the old limit of two cut that descent off with two
+// aspects left. A repair that stops making progress still stops, because a
+// repeated proposal is rejected before it is paid for.
+const MAX_DESIGN_FIDELITY_REPAIR_CALLS = 4;
 const MAX_RUNTIME_RESTARTS = 2;
 
 export function productionRepairBudgets({ approvedPrototype = false } = {}) {
@@ -75,6 +94,46 @@ export function productionRepairBudgets({ approvedPrototype = false } = {}) {
     designFidelityRepairCalls: MAX_DESIGN_FIDELITY_REPAIR_CALLS,
     runtimeRestarts: MAX_RUNTIME_RESTARTS,
   });
+}
+
+// A check reported false with no diagnostics was never computed: the test
+// exited before reaching it and the finally block emitted its initial value.
+// Reporting that as "the check failed" sent repairs chasing application
+// defects that did not exist, once for every check downstream of a single
+// early break.
+export function browserCheckObservationFailure(failedCheckIds, diagnostics = {}) {
+  const uncomputed = failedCheckIds.filter(
+    (checkId) => Object.keys(diagnostics?.[checkId] ?? {}).length === 0,
+  );
+  const observed = failedCheckIds.filter((checkId) => !uncomputed.includes(checkId));
+  const failedSubchecks = Object.fromEntries(
+    observed.flatMap((checkId) => {
+      const failed = Object.entries(diagnostics?.[checkId] ?? {})
+        .filter(([, passed]) => passed === false)
+        .map(([name]) => name);
+      return failed.length === 0 ? [] : [[checkId, failed]];
+    }),
+  );
+  const lines =
+    uncomputed.length === failedCheckIds.length && uncomputed.length > 0
+      ? [
+          `The browser observation test stopped before it computed ${uncomputed.length} of its required checks: ${uncomputed.join(", ")}. Their reported false values are the initial values, not observations, and no diagnostics were emitted for any of them.`,
+          "Do not treat these as application defects. Find why the test run ended early — an unhandled rejection, a failed await, a timeout, or a locator that never resolved — and make every check compute independently so one failed step cannot leave the rest unobserved.",
+        ]
+      : [
+          `The following real browser checks were false: ${observed.join(", ")}.`,
+          ...(uncomputed.length === 0
+            ? []
+            : [
+                `These checks were never computed because the test stopped early, so their false values are not observations: ${uncomputed.join(", ")}. Fix the run first; do not change application source on their account.`,
+              ]),
+        ];
+  return [
+    ...lines,
+    ...(Object.keys(failedSubchecks).length === 0
+      ? []
+      : [`Failed named sub-checks: ${JSON.stringify(failedSubchecks)}.`]),
+  ].join("\n");
 }
 
 export function productionBrowserRepairPolicy(observationFailure) {
@@ -1507,9 +1566,20 @@ export function validateBrowserObservationTestSource(
         "Responsive browser verification must measure page or workflow height against the visible viewport height.",
       );
     }
-    if (/\b[A-Za-z_$][\w$]*(?:count|length|rows)\s*>=\s*0\b/iu.test(source)) {
+    // This scans the whole test file, so the offending expression is usually in
+    // some other check entirely. Naming it is the difference between a
+    // correction that fixes the real line and one that rewrites the responsive
+    // check, fails again, and burns another paid regeneration.
+    const vacuousCount = /\b[A-Za-z_$][\w$]*(?:count|length|rows)\s*>=\s*0\b/iu.exec(
+      source,
+    );
+    if (vacuousCount !== null) {
+      const line = source.slice(0, vacuousCount.index).split("\n").length;
       throw new TypeError(
-        "Responsive browser verification may not use a vacuous zero-or-more count as passing evidence.",
+        [
+          `The browser observation test uses a vacuous zero-or-more count as passing evidence: "${vacuousCount[0]}" (line ${line}).`,
+          "A \">= 0\" comparison is always true and proves nothing. Replace exactly that expression with a real observation of the state it is meant to prove, and leave every other check unchanged.",
+        ].join(" "),
       );
     }
     const hasLiteralInteractionBound = /(?:<=|<)\s*\d+/u.test(source);
@@ -2054,7 +2124,11 @@ export function bindMissingApprovedRequirementTraces(plan, approvedContract) {
   ) {
     return plan;
   }
-  const identityBoundPlan = bindApprovedPrototypeFidelityIdentity(plan, approvedContract);
+  const contractBoundPlan = bindApprovedContractIdentity(plan, approvedContract);
+  const identityBoundPlan = bindApprovedPrototypeFidelityIdentity(
+    contractBoundPlan,
+    approvedContract,
+  );
   const evidenceBoundPlan = bindApprovedPrototypeBrowserEvidence(
     identityBoundPlan,
     approvedContract,
@@ -2165,6 +2239,52 @@ export function bindMissingApprovedRequirementTraces(plan, approvedContract) {
   };
 }
 
+// The approved contract hash, version, platform, and design-direction hash are
+// Foundry-owned facts, not model judgement. The model cannot know a SHA-256 it
+// was never shown, so requiring it to echo one turned every approved-design run
+// into a guaranteed admission failure followed by paid regeneration. Bind them
+// deterministically and keep validation for the parts the model actually owns.
+// The single place that decides whether a build is prototype-comparable. An
+// armed deferred shock means the customer asked Foundry to depart from the
+// approved prototype on purpose, so comparing the result against it would fail
+// by design. Every prototype-fidelity behaviour keys off this.
+export function comparablePrototypeDesign(approvedContract) {
+  const design =
+    approvedContract?.productBlueprint?.designSpecification
+      ?.approvedDesignContract ?? null;
+  if (design === null) return null;
+  const shocked =
+    Array.isArray(design.shockDirectives) &&
+    design.shockDirectives.some(
+      (directive) => typeof directive === "string" && directive.trim() !== "",
+    );
+  return shocked ? null : design;
+}
+
+export function bindApprovedContractIdentity(plan, approvedContract) {
+  if (
+    plan === null ||
+    typeof plan !== "object" ||
+    approvedContract === null ||
+    typeof approvedContract !== "object"
+  ) {
+    return plan;
+  }
+  let normalized;
+  try {
+    normalized = normalizeApprovedProjectContract(approvedContract);
+  } catch {
+    return plan;
+  }
+  return {
+    ...plan,
+    contractHash: normalized.contentHash,
+    contractVersion: normalized.contractVersion,
+    supportedPlatform: normalized.supportedPlatform,
+    designDirectionHash: approvedDesignDirectionHash(normalized),
+  };
+}
+
 export function bindApprovedPrototypeFidelityIdentity(plan, approvedContract) {
   const approved = approvedContract?.productBlueprint?.designSpecification?.approvedDesignContract ?? null;
   if (
@@ -2225,6 +2345,13 @@ export function bindApprovedPrototypeBrowserEvidence(plan, approvedContract) {
 
 test("captures deterministic approved-design fidelity evidence", async ({ page }) => {
   await page.goto("/");
+  // Written as three explicit calls rather than a loop because admission
+  // counts setViewportSize occurrences in the source text. Looping made
+  // Foundry's own evidence fail Foundry's own viewport gate, which then forced
+  // the model to duplicate this capture just to reach the threshold.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.setViewportSize({ width: 768, height: 1024 });
+  await page.setViewportSize({ width: 1280, height: 900 });
   const viewports = [
     { name: "phone", width: 390, height: 844 },
     { name: "tablet", width: 768, height: 1024 },
@@ -2278,7 +2405,9 @@ test("captures deterministic approved-design fidelity evidence", async ({ page }
 }
 
 export function bindApprovedPrototypeSourceGuardrails(plan, approvedContract) {
-  const approved = approvedContract?.productBlueprint?.designSpecification?.approvedDesignContract ?? null;
+  // Forcing the approved palette into a build the customer asked to be
+  // surprised by would fight the shock directives.
+  const approved = comparablePrototypeDesign(approvedContract);
   if (
     approved === null ||
     !Array.isArray(plan?.files) ||
@@ -2351,7 +2480,138 @@ export function bindApprovedPrototypeSourceGuardrails(plan, approvedContract) {
   };
 }
 
-function bundlePrompt(profile, contract, bindings) {
+// The approved design is the customer's decision, so it has to reach the model
+// that writes the source. Without this the generator never saw the selected
+// concept and the downstream fidelity comparison could only ever fail.
+// An approved design is a multi-surface composition with its own palette,
+// spacing scale, and responsive rules, and the mandatory Playwright test alone
+// routinely costs 10,000 characters. Holding those runs to the plain-path
+// 18,000-character budget forced the model to ship a single thin surface, which
+// is why composition, surface order, colour, and spacing fidelity all failed.
+// The generation prompt carried the whole ProjectProfile, including the design
+// alternatives the customer rejected. Sending losing designs to the generator
+// that must reproduce the winning one is waste at best and a distraction at
+// worst. Verification and design authority both live in the binding task
+// contract, so drop the profile's duplicate copies too.
+export function generationProfileView(profile, approvedContract) {
+  if (
+    profile === null ||
+    typeof profile !== "object" ||
+    approvedContract === null ||
+    typeof approvedContract !== "object"
+  ) {
+    return profile;
+  }
+  const {
+    designAlternatives: _designAlternatives,
+    contextualSuggestions: _contextualSuggestions,
+    verificationPlan: _verificationPlan,
+    ...retained
+  } = profile;
+  return retained;
+}
+
+export function bundleBudgetInstruction(approvedContract) {
+  const approvedDesign =
+    approvedContract?.productBlueprint?.designSpecification
+      ?.approvedDesignContract ?? null;
+  if (approvedDesign === null) {
+    return "Keep the complete bundle compact: use no more than 10 generated files and keep the combined file content below 18,000 characters. Prefer a small number of cohesive modules, concise seeded data, and non-repetitive UI copy while still implementing every approved requirement and real browser check.";
+  }
+  const surfaces = Array.isArray(approvedDesign.approvedSurfaceSequence)
+    ? approvedDesign.approvedSurfaceSequence.length
+    : 1;
+  const fileBudget = Math.min(24, Math.max(14, 8 + surfaces * 2));
+  const characterBudget = Math.min(64_000, Math.max(38_000, 18_000 + surfaces * 6_000));
+  return [
+    `Keep the complete bundle focused: use no more than ${fileBudget} generated files and keep the combined file content below ${characterBudget.toLocaleString("en-US")} characters.`,
+    "Spend that budget on the approved design. Every approved surface in the sequence needs a real implementation with the approved palette, spacing scale, and responsive behavior applied to actual elements; a single condensed page is a fidelity failure even when it builds and passes its browser checks.",
+    "Prefer cohesive modules and non-repetitive UI copy, but never drop an approved surface, collapse the approved composition, or thin the approved styling to save characters.",
+  ].join(" ");
+}
+
+export function approvedDesignPromptSegments(approvedContract) {
+  if (approvedContract === null || typeof approvedContract !== "object") {
+    return [];
+  }
+  const design =
+    approvedContract.productBlueprint?.designSpecification
+      ?.approvedDesignContract ?? null;
+  const direction = approvedContract.selectedDesignDirection ?? null;
+  if (design === null && direction === null) return [];
+
+  // An armed deferred shock inverts the instruction: the customer asked to be
+  // surprised, so the approved prototype becomes a starting point to depart
+  // from rather than a target to reproduce.
+  const shockDirectives = Array.isArray(design?.shockDirectives)
+    ? design.shockDirectives.filter(
+        (directive) => typeof directive === "string" && directive.trim() !== "",
+      )
+    : [];
+  if (shockDirectives.length > 0) {
+    return [
+      "The customer explicitly asked Foundry to surprise them. Treat the approved design below as context to react against, not as a specification to reproduce.",
+      ...shockDirectives,
+      ...(design === null
+        ? []
+        : [
+            `Approved design context to depart from:\n${JSON.stringify({
+              creativeThesis: design.creativeThesis,
+              approvedSurfaceSequence: design.approvedSurfaceSequence,
+              navigation: design.navigation,
+              colorTokens: design.colorTokens,
+              typography: design.typography,
+              customerModifications: design.customerModifications,
+              explicitExclusions: design.explicitExclusions,
+            })}`,
+          ]),
+    ];
+  }
+
+  const segments = [
+    // Foundry injects tests/foundry-design-fidelity-evidence.spec.ts for every
+    // approved-design build. The model was still being told to write the same
+    // screenshot and computed-style capture itself, so roughly half of its
+    // output was a second copy of evidence Foundry already owns. Output tokens
+    // are the whole cost of a generation call.
+    "Foundry supplies its own Playwright spec that captures screenshots and computed-style evidence at phone, tablet, and desktop widths and proves no horizontal overflow and observable keyboard focus. Do not write that evidence capture again.",
+    "Your Playwright test must cover only the supplied browser-check obligations and emit the FOUNDRY_BROWSER_RESULT line. Set whatever viewport a specific check needs in order to compute its own verdict, but do not add screenshot capture, font/color/computed-style surveys, or general responsive evidence beyond what a listed check requires. Keep it as small as the checks allow.",
+    "The customer approved a specific visual design. Reproduce that approved design in the generated source; do not substitute your own art direction, palette, type scale, or layout.",
+    "Implement the approved color tokens, typography system, and spacing scale as real CSS applied to real elements. Declaring unused custom properties is not implementing the design.",
+    "Follow the approved surface sequence, navigation model, and composition rules so the produced pages match the approved prototype's structure and visual order.",
+    "Honor the approved responsive, interaction, motion, and accessibility rules. Respect the approved deliberate exclusions: do not add surfaces or components the design excluded.",
+  ];
+  if (direction !== null) {
+    segments.push(`Approved design direction:\n${JSON.stringify(direction)}`);
+  }
+  if (design !== null) {
+    segments.push(
+      `Approved design contract:\n${JSON.stringify({
+        creativeThesis: design.creativeThesis,
+        approvedSurfaceSequence: design.approvedSurfaceSequence,
+        compositionRules: design.compositionRules,
+        navigation: design.navigation,
+        typography: design.typography,
+        colorTokens: design.colorTokens,
+        spacingTokens: design.spacingTokens,
+        imagery: design.imagery,
+        components: design.components,
+        interactions: design.interactions,
+        motion: design.motion,
+        responsiveBehavior: design.responsiveBehavior,
+        accessibility: design.accessibility,
+        customerModifications: design.customerModifications,
+        explicitExclusions: design.explicitExclusions,
+      })}`,
+    );
+    segments.push(
+      "A real browser compares the produced pages against the approved prototype's recorded evidence at phone, tablet, and desktop widths. Composition, palette, and type must survive that comparison.",
+    );
+  }
+  return segments;
+}
+
+function bundlePrompt(profile, contract, bindings, approvedContract = null, engineeringSignals = null) {
   const browserChecks = contract.obligations
     .filter(
       (obligation) =>
@@ -2396,6 +2656,9 @@ function bundlePrompt(profile, contract, bindings) {
     "Locate an asynchronously loaded booking slot by its semantic accessible label, not by a visual class shared with Back or secondary-action buttons.",
     "A handled HTTP 422 validation response is application evidence, not a blocking browser failure; console capture may exclude only explicit 422/Unprocessable Entity messages while retaining every 404, 5xx, script, and page error.",
     "Initialize every browser check as false and later assign it a boolean expression computed from observed runtime values. Never assign a literal true or Boolean(true) as a passing verdict, including after assertions or inside a conditional branch.",
+    "Never compare a count, length, or row total against zero with >= anywhere in the test file. An expression such as errorCount >= 0 is always true and proves nothing; admission rejects the entire bundle for a single occurrence, in any check. To prove something is present compare against >= 1 or a real expected total; to prove something is absent compare against === 0.",
+    "Every check must be computed independently, so that one failing step cannot leave the remaining checks unobserved. Wrap each check's own observation in its own try/catch, record the caught message into that check's diagnostics, and continue to the next check instead of letting the failure end the run. A long workflow — sign up, sign in, reach a protected area, sign out — must not be a single chain in which an early break silently leaves every later check at its initial false.",
+    "Always write diagnostics for every required check, including the ones that fail, before emitting FOUNDRY_BROWSER_RESULT. A check reported false with no diagnostics is indistinguishable from a check that was never reached, and it will be rejected as an incomplete observation rather than treated as a defect.",
     "For every responsiveQualityRequired browser check, use a real 280–480px phone viewport and compute the verdict from measured horizontal overflow, workflow height relative to viewport height, and a finite bound on interactive controls in the active choice surface after the primary interaction. A long ungrouped list of controls is a failure even when the workflow can technically be completed; redesign it with progressive disclosure, grouping, filtering, or pagination rather than weakening the check.",
     "Set the phone viewport in executable Playwright setup before navigation or measurement; numeric width/height constants and comments alone are not viewport setup.",
     "For every accessibilityQualityRequired browser check, press Tab through the real page, observe actual focus through document.activeElement, :focus-visible, or an equivalent Playwright focus assertion, and verify a nonzero set of controls has an accessible label. Include both measured focus and label results in that check's boolean expression; zero-or-more comparisons are not evidence.",
@@ -2406,10 +2669,20 @@ function bundlePrompt(profile, contract, bindings) {
     "Treat customerContent.supplied as the complete allowlist of customer-provided real-world facts. A model-derived project name or summary is a design proposal, not proof of a real business identity.",
     "Never invent a phone number, email address, street or service-area location, opening date, credential, certification, award, customer identity, testimonial, price, business hours, social account, client logo, or quantitative trust claim. If a value is absent from customerContent.supplied, omit the public claim and put an honest launch-content checklist in an owner-facing area when relevant.",
     "Do not make missing customer content look complete with realistic placeholders. Browser checks must return false if their stated customer-provided outcome is not actually supported by customerContent.supplied.",
-    "Keep the complete bundle compact: use no more than 10 generated files and keep the combined file content below 18,000 characters. Prefer a small number of cohesive modules, concise seeded data, and non-repetitive UI copy while still implementing every approved requirement and real browser check.",
+    ...engineeringFloorPromptSegments(
+      engineeringSignals ?? detectEngineeringSignals(profile, null),
+    ),
+    bundleBudgetInstruction(approvedContract),
     "Do not include node_modules, package-lock.json, build output, binary content, or markdown fences. The Execution Engine, not the model, owns lockfile creation.",
-    `ProjectProfile:\n${JSON.stringify(profile)}`,
-    `Requirement Contract:\n${JSON.stringify(contract)}`,
+    ...approvedDesignPromptSegments(approvedContract),
+    `ProjectProfile:\n${JSON.stringify(
+      generationProfileView(profile, approvedContract),
+    )}`,
+    // The binding task contract already carries every obligation as a strict
+    // superset of this contract's, so repeating it only inflates the prompt.
+    ...(approvedContract === null
+      ? [`Requirement Contract:\n${JSON.stringify(contract)}`]
+      : []),
     `Browser checks:\n${JSON.stringify(browserChecks)}`,
   ].join("\n\n");
 }
@@ -2947,6 +3220,7 @@ export function createProductionMissionService({
         approvedContract === null
           ? projectBundleSchema
           : CONTRACT_BOUND_BUNDLE_SCHEMA;
+      const engineeringSignals = detectEngineeringSignals(profile, null);
       const repairBudgets = productionRepairBudgets({
         approvedPrototype:
           approvedContract?.productBlueprint?.designSpecification
@@ -2966,7 +3240,7 @@ export function createProductionMissionService({
               requestId: generationRequestId,
               missionId,
               workUnitId: `${generationRequestId}-plan`,
-              purpose: bundlePrompt(profile, contract, bindings),
+              purpose: bundlePrompt(profile, contract, bindings, approvedContract, engineeringSignals),
               taskClass: ModelTaskClass.FILE_GENERATION,
               contextReferences: [
                 { kind: "contract", id: `${missionId}-contract` },
@@ -3023,6 +3297,10 @@ export function createProductionMissionService({
               accessibilityCheckIds: accessibilityBrowserCheckIds,
             },
           );
+          // Deterministic, before any dependency install or build. A violation
+          // is a defect in the bundle, so it routes through the same bounded
+          // correction loop as any other admission failure.
+          validateEngineeringFloor(validatedFiles, engineeringSignals);
           break;
         } catch (error) {
           const correctionCount = models
@@ -3044,7 +3322,7 @@ export function createProductionMissionService({
             missionId,
             workUnitId: `${requestId}-plan`,
             purpose: [
-              bundlePrompt(profile, contract, bindings),
+              bundlePrompt(profile, contract, bindings, approvedContract, engineeringSignals),
               "The prior generated bundle failed deterministic certified-stack admission before any dependency installation or build was run.",
               `Admission failure: ${error.message}`,
               "Return the complete corrected bundle. Preserve valid project behavior and fix the structural stack defect; do not remove obligations or weaken verification.",
@@ -3319,12 +3597,14 @@ export function createProductionMissionService({
               }),
             }));
           const repairPrefix = `${contractRequestNamespace}-${safeName(procedureName)}-repair-`;
-          const repairSequence =
-            models
-              .listCalls(missionId)
-              .filter((call) => call.requestId.startsWith(repairPrefix))
-              .length + 1;
-          const repairRequestId = `${repairPrefix}${repairSequence}`;
+          const nextRepairRequestId = () =>
+            `${repairPrefix}${
+              models
+                .listCalls(missionId)
+                .filter((call) => call.requestId.startsWith(repairPrefix))
+                .length + 1
+            }`;
+          let repairRequestId = nextRepairRequestId();
           const repairRequirementIds =
             targets.length > 0 ? targets : generationTargetIds;
           const repairFileSchema = contractTraceSchema({
@@ -3339,11 +3619,31 @@ export function createProductionMissionService({
               content: { type: "string", minLength: 8 },
             },
           }, approvedContract !== null);
-          const repair = await requestModel({
+          // A rejected repair proposal is a correctable model mistake, not a
+          // reason to end the mission. Model Gateway classifies its own
+          // semantic rejection as terminal, so without this the first slightly
+          // malformed proposal killed the run outright. Bounded, and the paid
+          // repair budget above still applies.
+          let repair = null;
+          let proposalRejection = null;
+          for (
+            let proposalAttempt = 0;
+            proposalAttempt < 3 && repair === null;
+            proposalAttempt += 1
+          ) {
+          repairRequestId = nextRepairRequestId();
+          try {
+          repair = await requestModel({
             requestId: repairRequestId,
             missionId,
             workUnitId: `${repairRequestId}-plan`,
             purpose: [
+              ...(proposalRejection === null
+                ? []
+                : [
+                    `Your previous proposal was rejected before it was applied: ${proposalRejection}`,
+                    "Return a proposal that satisfies that requirement exactly. Do not repeat the rejected output.",
+                  ]),
               `The real ${procedureName} procedure failed for the generated project.`,
               `Deterministic repair classification: ${failureClassification.scope}. Hypothesis: ${failureClassification.hypothesis}`,
               "Diagnose the observed output and return the complete corrected content of exactly one source or configuration file.",
@@ -3400,6 +3700,14 @@ export function createProductionMissionService({
             relevantRequirementIds: repairRequirementIds,
             taskObjective: `Repair the observed ${procedureName} failure while preserving the approved project contract.`,
           });
+          } catch (error) {
+            const message = String(error?.message ?? error);
+            if (!/failed semantic validation/iu.test(message)) throw error;
+            proposalRejection = message;
+            repair = null;
+            if (proposalAttempt === 2) throw error;
+          }
+          }
           const repairMode = validateGeneratedRepairPath(
             repair.structuredOutput.path,
             currentFiles,
@@ -3763,8 +4071,9 @@ export function createProductionMissionService({
         .filter(([, binding]) => binding === "browser-check")
         .map(([obligationId]) => obligationId)
         .sort((left, right) => left.localeCompare(right));
-      const approvedPrototypeContract =
-        approvedContract?.productBlueprint?.designSpecification?.approvedDesignContract ?? null;
+      // An armed deferred shock has no prototype to compare against, so the
+      // fidelity gate is skipped for that build by design.
+      const approvedPrototypeContract = comparablePrototypeDesign(approvedContract);
       let browser;
       for (let attempt = 0; attempt < 7; attempt += 1) {
         browser = await work(
@@ -3828,22 +4137,12 @@ export function createProductionMissionService({
                 `Observed: ${JSON.stringify(observedCheckIds)}`,
               ].join("\n"));
             } else if (failedChecks.length > 0) {
-              const failedSubchecks = Object.fromEntries(
-                failedChecks.flatMap((checkId) => {
-                  const failed = Object.entries(
-                    browserResult.diagnostics?.[checkId] ?? {},
-                  )
-                    .filter(([, passed]) => passed === false)
-                    .map(([name]) => name);
-                  return failed.length === 0 ? [] : [[checkId, failed]];
-                }),
+              observationFailures.push(
+                browserCheckObservationFailure(
+                  failedChecks,
+                  browserResult.diagnostics ?? {},
+                ),
               );
-              observationFailures.push([
-                `The following real browser checks were false: ${failedChecks.join(", ")}.`,
-                ...(Object.keys(failedSubchecks).length === 0
-                  ? []
-                  : [`Failed named sub-checks: ${JSON.stringify(failedSubchecks)}.`]),
-              ].join("\n"));
             } else if (blockingErrors.length > 0) {
               observationFailures.push([
                 "The browser observation recorded blocking errors.",
@@ -3904,8 +4203,36 @@ export function createProductionMissionService({
                     throw new Error("Persisted prototype fidelity evidence does not match the replayed comparison.");
                   }
                   if (!fidelity.passed) {
+                    // Naming the failed aspects without their measurements gave
+                    // the repair nothing to aim at: it was told "composition,
+                    // spacing" and asked to correct a numeric geometry
+                    // mismatch with no numbers, so every attempt reproduced the
+                    // same verdict. Carry each failed verdict's own evidence.
+                    const failedDetail = (fidelity.verdicts ?? [])
+                      .filter((entry) => entry.verdict === "FAIL")
+                      .map((entry) =>
+                        `${entry.aspect}: ${entry.summary} ${JSON.stringify(entry.detail ?? {})}`,
+                      );
+                    // The geometry guidance only applies to the aspects
+                    // measured by layout distance. Attaching it to every
+                    // failure sent a navigation-only repair chasing
+                    // meanDistance, the same way the vacuous-count error once
+                    // reported itself as a responsive failure.
+                    const geometryAspects = new Set(["composition", "spacing", "surface-order"]);
+                    const geometryFailed = fidelity.failedAspects.some(
+                      (aspect) => geometryAspects.has(aspect),
+                    );
                     observationFailures.push(
-                      `Production design fidelity failed against the approved live prototype: ${fidelity.failedAspects.join(", ")}.`,
+                      [
+                        `Production design fidelity failed against the approved live prototype: ${fidelity.failedAspects.join(", ")}.`,
+                        ...failedDetail,
+                        ...(geometryFailed
+                          ? [
+                              "Each comparison is keyed by surface and viewport. meanDistance is the normalized distance between the approved prototype's layout geometry and the produced page at that viewport; it must be at most 0.75, and matched must reach the expected surface count. Move the produced layout toward the approved geometry at the exact viewports listed below tolerance.",
+                            ]
+                          : []),
+                        "Correct only the aspects listed above. Each carries its own measurements and, where useful, an explicit remedy: use them directly instead of re-deriving the problem, and leave every passing aspect untouched.",
+                      ].join("\n"),
                     );
                   }
                 } catch (error) {
@@ -4103,11 +4430,20 @@ export function createProductionMissionService({
                   "The persisted browser evidence proves the running application behavior failed an approved check. This repair must target application source; changing Playwright tests or configuration is not permitted for this failure.",
                 ]
               : []),
+            // The floor was stated at generation but not here, so a repair
+            // working on a floor obligation — ending a session, refusing an
+            // unauthenticated route — had no idea what it was required to
+            // build, and stalled reproducing the same failure.
+            ...engineeringFloorPromptSegments(engineeringSignals),
             ...(designFidelityRepair
               ? [
                   "This is a design-fidelity repair. Treat the immutable approved prototype, its exact failed aspects, and its desktop/tablet/mobile evidence as authority.",
                   "Change only the application source or isolated styles implicated by the failed fidelity aspects. Preserve every already-working workflow, API behavior, test assertion, and accessible interaction.",
                   "Do not solve a scoped styling or composition mismatch by replacing the application, rewriting functional logic, changing the approved contract, or weakening the comparator.",
+                  // Naming the failed aspects without supplying the approved
+                  // values gave the repair nothing to edit toward: it was told
+                  // "colors" failed but never told which colors were approved.
+                  ...approvedDesignPromptSegments(approvedContract),
                 ]
               : []),
             "When several downstream checks are false, diagnose shared discovery or navigation variables first; do not patch each false check independently.",
@@ -4222,10 +4558,27 @@ export function createProductionMissionService({
                 .length >= MAX_BROWSER_REPAIR_CALLS
             ) {
               throw new Error(
-                "Browser verification received three semantically invalid or repeated correction proposals and stopped without another paid repair.",
+                `Browser verification exhausted its ${MAX_BROWSER_REPAIR_CALLS} paid correction proposals without an admissible one, and stopped rather than buying another.`,
               );
             }
-            repair = await requestBrowserRepair(semanticRejection);
+            try {
+              repair = await requestBrowserRepair(semanticRejection);
+            } catch (error) {
+              // Model Gateway also runs this proposal's semantic validator, and
+              // it classifies that rejection as terminal because re-buying the
+              // same generation repeats the defect. A repair patch is different:
+              // an oldText that no longer matches the current file exactly once
+              // is a mechanical mistake the model corrects readily when told.
+              // Escaping here failed the whole mission over a fixable patch, so
+              // route it into the proposal loop that already exists for exactly
+              // this class of rejection. The paid-call budget above still bounds
+              // it.
+              const message = String(error?.message ?? error);
+              if (!/failed semantic validation/iu.test(message)) throw error;
+              semanticRejection = message;
+              repair = null;
+              continue;
+            }
           }
           try {
             const isPriorReplay =

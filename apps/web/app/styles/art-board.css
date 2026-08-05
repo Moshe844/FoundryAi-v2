@@ -21,6 +21,34 @@
   contain: paint;
 }
 
+.concept-render-frame {
+  position: relative;
+  inline-size: 100%;
+  aspect-ratio: 16 / 10;
+  min-block-size: 480px;
+  max-block-size: 640px;
+  overflow: hidden;
+  background: #f5f3ee;
+}
+
+.concept-render-frame > iframe {
+  position: absolute;
+  inset: 0;
+  inline-size: 100%;
+  block-size: 100%;
+  border: 0;
+  pointer-events: auto;
+  background: transparent;
+}
+
+@container (max-width: 640px) {
+  .concept-render-frame {
+    aspect-ratio: 4 / 5;
+    min-block-size: 460px;
+    max-block-size: 560px;
+  }
+}
+
 .ab-canvas {
   position: relative;
   display: grid;

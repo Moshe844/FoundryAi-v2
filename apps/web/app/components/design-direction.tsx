@@ -405,11 +405,20 @@ export function DesignDirection({
           type="button"
           className="shock-concept-button"
           data-concept-action="shock"
+          data-shock-armed={studio.deferredShock?.status === "ARMED" ? "true" : undefined}
           disabled={studio.evolution?.status === "GENERATING"}
           onClick={requestShockConcept}
         >
-          <strong>{studio.evolution?.kind === "shock" && studio.evolution.status === "GENERATING" ? "Creating the surprising directionâ€¦" : "Let Foundry shock me"}</strong>
-          <span>This explores a more surprising direction while preserving your project goals.</span>
+          <strong>
+            {studio.deferredShock?.status === "ARMED"
+              ? "Foundry will shock you when it builds"
+              : "Let Foundry shock me"}
+          </strong>
+          <span>
+            {studio.deferredShock?.status === "ARMED"
+              ? "Armed. Pick any concept below as the starting point — Foundry will deliberately depart from it and surprise you in the finished project. This build is not checked for visual fidelity."
+              : "This explores a more surprising direction while preserving your project goals. Nothing is generated now: the surprise arrives in the built project."}
+          </span>
         </button>
       </header>
 

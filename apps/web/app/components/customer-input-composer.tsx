@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type {
   CustomerFollowUpAnswer,
@@ -48,20 +48,28 @@ export function CustomerInputComposer({
   conversation,
   profileVersion,
   proposal,
+  onPendingChange,
   onSubmit,
 }: Readonly<{
   busy: boolean;
   conversation: DiscoveryConversation;
   profileVersion: number;
   proposal: FoundryProposal;
-  onSubmit: (answer: CustomerFollowUpAnswer) => Promise<void>;
+  onPendingChange?: (pending: boolean) => void;
+  onSubmit: (answer: CustomerFollowUpAnswer) => Promise<boolean>;
 }>) {
   const [message, setMessage] = useState("");
   const [correcting, setCorrecting] = useState<string | null>(null);
   const [dismissed, setDismissed] = useState<ReadonlySet<string>>(() => new Set());
   const [accepted, setAccepted] = useState<ReadonlySet<string>>(() => new Set());
   const [showAll, setShowAll] = useState(false);
+  const [submissionError, setSubmissionError] = useState<string | null>(null);
+  const [showCurrentRevision, setShowCurrentRevision] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    onPendingChange?.(message.trim() !== "");
+  }, [message, onPendingChange]);
 
   // At most three high-value suggestions are visible. Anything the customer has
   // already accepted or dismissed is gone for good, so the surface gets calmer
@@ -76,13 +84,23 @@ export function CustomerInputComposer({
 
   async function send(value = message.trim(), classification: string | null = null) {
     const normalized = value.trim();
-    if (normalized === "" || busy) return;
-    await onSubmit(
+    if (normalized === "" || busy) return false;
+    setSubmissionError(null);
+    const accepted = await onSubmit(
       classification === null
         ? messageAnswer(normalized, profileVersion)
         : correctedMessageAnswer(normalized, profileVersion, classification),
     );
-    setMessage("");
+    if (accepted) {
+      setMessage("");
+      setShowCurrentRevision(true);
+    } else {
+      setShowCurrentRevision(false);
+      setSubmissionError(
+        "Foundry recorded this instruction but could not revise the plan. Your text is still here so you can retry without retyping it.",
+      );
+    }
+    return accepted;
   }
 
   const revision = conversation.latestRevision;
@@ -109,8 +127,11 @@ export function CustomerInputComposer({
                   disabled={busy}
                   title={suggestion.reason.value}
                   onClick={() => {
-                    setAccepted((current) => new Set(current).add(suggestion.id));
-                    void send(suggestion.reason.value);
+                    void send(suggestion.reason.value).then((saved) => {
+                      if (saved) {
+                        setAccepted((current) => new Set(current).add(suggestion.id));
+                      }
+                    });
                   }}
                 >
                   {suggestion.label.value}
@@ -158,7 +179,10 @@ export function CustomerInputComposer({
         maxLength={5_000}
         placeholder="Add a preference, rule, correction, or missing fact"
         value={message}
-        onChange={(event) => setMessage(event.target.value)}
+        onChange={(event) => {
+          setMessage(event.target.value);
+          if (submissionError !== null) setSubmissionError(null);
+        }}
       />
       <div className="composer-actions">
         <span className="t-caption ink-tertiary">
@@ -174,7 +198,15 @@ export function CustomerInputComposer({
         </button>
       </div>
 
-      {revision.profileVersion > 1 && (
+      {submissionError !== null && (
+        <div className="banner banner-fault" role="alert">
+          <div className="banner-body">
+            <p className="t-body-s">{submissionError}</p>
+          </div>
+        </div>
+      )}
+
+      {showCurrentRevision && revision.profileVersion > 1 && submissionError === null && (
         <div className="revision-summary" role="status" aria-live="polite">
           <span className="revision-dot" aria-hidden="true" />
           <div>
@@ -199,18 +231,34 @@ export function CustomerInputComposer({
             {conversation.messages.map((item) => (
               <li key={`${item.messageId}-${item.profileVersion}`}>
                 <span className="t-caption">
-                  {item.kind === "context"
+                  {item.status === "pending"
+                    ? "Pending instruction"
+                    : item.kind === "context"
                     ? "Project instruction"
                     : item.kind.replaceAll("-", " ")}
                 </span>
                 <p className="t-body-s">{item.text.replace(/^[^:]+:\s*/u, "")}</p>
                 <p className="t-caption ink-tertiary">{item.interpretation}</p>
+                {item.status === "pending" && (
+                  <button
+                    className="btn-quiet small"
+                    type="button"
+                    onClick={() => {
+                      setMessage(item.text);
+                      textareaRef.current?.focus();
+                    }}
+                  >
+                    Restore and retry
+                  </button>
+                )}
                 {item.affectedSections.length > 0 && (
                   <p className="t-caption ink-tertiary">Updated: {item.affectedSections.join(", ")}</p>
                 )}
-                <button className="btn-quiet small" type="button" onClick={() => setCorrecting((current) => current === item.messageId ? null : item.messageId)}>
-                  Correct interpretation
-                </button>
+                {item.status === "applied" && (
+                  <button className="btn-quiet small" type="button" onClick={() => setCorrecting((current) => current === item.messageId ? null : item.messageId)}>
+                    Correct interpretation
+                  </button>
+                )}
                 {correcting === item.messageId && (
                   <div className="message-interpretation-correction">
                     <span className="t-caption">Treat this instruction as</span>
@@ -225,7 +273,9 @@ export function CustomerInputComposer({
                           disabled={busy}
                           key={kind}
                           type="button"
-                          onClick={() => void send(`Correction: interpret my prior instruction \"${item.text}\" as ${kind.replaceAll("-", " ")}.`, kind).then(() => setCorrecting(null))}
+                          onClick={() => void send(`Correction: interpret my prior instruction \"${item.text}\" as ${kind.replaceAll("-", " ")}.`, kind).then((saved) => {
+                            if (saved) setCorrecting(null);
+                          })}
                         >
                           {kind.replaceAll("-", " ")}
                         </button>

@@ -8,6 +8,11 @@ import {
   normalizeCustomerFollowUpAnswers,
   validateStructuredModelOutput,
 } from "../src/index.js";
+import {
+  filterContradictingRecommendations,
+  parseUnderstandingRevisionValue,
+  validateCustomerFollowUpTraceability,
+} from "../src/understanding-plane/project-understanding-service.js";
 import { projectDiscoveryConversation } from "../apps/web/local-api/discovery-conversation.mjs";
 
 function profile(profileVersion, overrides = {}) {
@@ -67,6 +72,80 @@ test("Phase 3 preserves every customer follow-up across model revisions", () => 
   );
 });
 
+test("Phase 3 deduplicates a retried natural instruction by meaning, not UI id", () => {
+  const recorded = {
+    questionId: "customer-message-first-id",
+    answer: "Keep the class list readable for older members.",
+    selection: {
+      kind: "customer-message",
+      subjectId: "customer-message-first-id",
+      mode: "message",
+      optionId: null,
+      value: "Keep the class list readable for older members.",
+      reason: "Customer context.",
+      classification: null,
+      sourceProfileVersion: 2,
+    },
+  };
+  const retried = {
+    ...recorded,
+    questionId: "customer-message-retry-id",
+    selection: {
+      ...recorded.selection,
+      subjectId: "customer-message-retry-id",
+    },
+  };
+  const ledger = {
+    listEvents() {
+      return [{ fact: { metadata: { customerFollowUpAnswers: [recorded] } } }];
+    },
+  };
+  assert.deepEqual(
+    cumulativeCustomerFollowUpAnswers(ledger, "phase-3", [retried]),
+    [recorded],
+  );
+});
+
+test("Phase 3 prevents an explicit customer outcome from being dropped or negated", () => {
+  const answers = [{
+    questionId: "customer-message-dashboard",
+    answer: "It should take you to a nice admin dashboard",
+    selection: { kind: "customer-message" },
+  }];
+  const design = {
+    verificationPlan: [],
+    projectIntent: { constraints: [] },
+    productProposal: {
+      intentionallyExcludedCapabilities: [],
+      futureCapabilities: [],
+    },
+    architectureDecisions: [],
+  };
+
+  assert.throws(
+    () => validateCustomerFollowUpTraceability(design, answers),
+    /customer-follow-up-1 is not preserved/u,
+  );
+
+  design.verificationPlan = [{
+    observableOutcome: "The admin dashboard is visible after successful sign-in.",
+    sourceRequirement: "customer-follow-up-1",
+  }];
+  design.projectIntent.constraints = ["No dashboard content in the first version."];
+  assert.throws(
+    () => validateCustomerFollowUpTraceability(design, answers),
+    /conflicts with proposed scope: No dashboard content/u,
+  );
+
+  design.projectIntent.constraints = [];
+  design.architectureDecisions = [
+    "Successful sign-in navigates to the first-version admin dashboard.",
+  ];
+  assert.doesNotThrow(() =>
+    validateCustomerFollowUpTraceability(design, answers),
+  );
+});
+
 test("Phase 3 rejects malformed, empty, oversized, and widened customer input", () => {
   assert.deepEqual(
     normalizeCustomerFollowUpAnswers([{ questionId: "customer-input-context-a", answer: "  Keep it simple.  " }]),
@@ -111,6 +190,33 @@ test("Phase 3 validates nullable compact replacements without weakening schemas"
   assert.throws(
     () => validateStructuredModelOutput({ change: "too-long" }, schema),
     /exactly one allowed schema/u,
+  );
+});
+
+test("Phase 3 normalizes an unquoted string leaf without weakening structured revisions", () => {
+  assert.equal(
+    parseUnderstandingRevisionValue({
+      valueJson: "Prioritize phone booking for older members.",
+      operation: "replace",
+      existingValue: "Prioritize online booking.",
+    }),
+    "Prioritize phone booking for older members.",
+  );
+  assert.deepEqual(
+    parseUnderstandingRevisionValue({
+      valueJson: '["phone", "online"]',
+      operation: "replace",
+      existingValue: [],
+    }),
+    ["phone", "online"],
+  );
+  assert.throws(
+    () => parseUnderstandingRevisionValue({
+      valueJson: "phone, online",
+      operation: "replace",
+      existingValue: [],
+    }),
+    /valid JSON for a non-string leaf/u,
   );
 });
 
@@ -183,6 +289,61 @@ test("Phase 3 exposes a durably recorded message even before re-evaluation succe
   assert.equal(conversation.latestRevision.profileVersion, 1);
 });
 
+test("Phase 3 exposes a failed natural revision as pending, never as applied", () => {
+  const answer = {
+    questionId: "customer-message-pending",
+    answer: "Keep the class list readable for older members.",
+    selection: {
+      kind: "customer-message",
+      sourceProfileVersion: 1,
+    },
+  };
+  const conversation = projectDiscoveryConversation([
+    fact(1, []),
+    {
+      occurredAt: "2026-07-31T12:02:00.000Z",
+      fact: {
+        metadata: {
+          customerFollowUpAnswers: [answer],
+          requestedProfileVersion: 2,
+        },
+      },
+    },
+  ]);
+  assert.equal(conversation.messages.length, 1);
+  assert.equal(conversation.messages[0].status, "pending");
+  assert.deepEqual(conversation.messages[0].affectedSections, []);
+  assert.match(conversation.messages[0].interpretation, /has not completed/u);
+});
+
+test("Phase 3 projects an applied natural instruction exactly once", () => {
+  const answer = {
+    questionId: "customer-message-applied",
+    answer: "Keep the class list readable for older members.",
+    selection: {
+      kind: "customer-message",
+      sourceProfileVersion: 1,
+    },
+  };
+  const conversation = projectDiscoveryConversation([
+    fact(1, []),
+    {
+      occurredAt: "2026-07-31T12:02:00.000Z",
+      fact: {
+        metadata: {
+          customerFollowUpAnswers: [answer],
+          requestedProfileVersion: 2,
+        },
+      },
+    },
+    fact(2, [answer], {
+      designDirection: { tone: "Calm and readable" },
+    }),
+  ]);
+  assert.equal(conversation.messages.length, 1);
+  assert.equal(conversation.messages[0].status, "applied");
+});
+
 test("Phase 3 production is a staged working session with unrestricted custom input", () => {
   const discovery = readFileSync(
     new URL("../apps/web/app/components/project-discovery.tsx", import.meta.url),
@@ -196,9 +357,15 @@ test("Phase 3 production is a staged working session with unrestricted custom in
     new URL("../apps/web/local-api/server.mjs", import.meta.url),
     "utf8",
   );
+  const styles = readFileSync(
+    new URL("../apps/web/app/globals.css", import.meta.url),
+    "utf8",
+  );
   assert.match(discovery, /Step \{stage \+ 1\} of \{stages\.length\}/u);
-  assert.match(discovery, /stage === 0/u);
-  assert.match(discovery, /stage === 6/u);
+  assert.match(styles, /grid-template-columns:\s*repeat\(7, minmax\(0, 1fr\)\)/u);
+  assert.doesNotMatch(styles, /repeat\(7, minmax\(132px, 1fr\)\)/u);
+  assert.match(discovery, /stageId === "read"/u);
+  assert.match(discovery, /stageId === "review"/u);
   assert.match(discovery, /Continue with Foundry&rsquo;s recommendations/u);
   assert.match(discovery, /CustomerInputComposer/u);
   assert.doesNotMatch(composer, /<select/u);
@@ -226,6 +393,7 @@ test("Phase 3 production is a staged working session with unrestricted custom in
   assert.match(understandingService, /copy each essential capability exactly/u);
   assert.match(understandingService, /MAX_PRODUCT_INTELLIGENCE_GENERATIONS = 1/u);
   assert.match(understandingService, /MAX_PRODUCT_INTELLIGENCE_ROUTES = 1/u);
+  assert.match(understandingService, /if \(!failureDisposition\.retryable\) break/u);
   assert.match(understandingService, /priority: "FAST_RESPONSE"/u);
   assert.match(
     understandingService,
@@ -274,6 +442,10 @@ test("Phase 3 production is a staged working session with unrestricted custom in
   );
   assert.match(
     server,
+    /designContract\?\.selectionMode === "custom"[\s\S]*customComposition\?\.complete === true/u,
+  );
+  assert.match(
+    server,
     /control\.understanding\.recordSelections/u,
   );
   assert.match(
@@ -290,7 +462,7 @@ test("Phase 3 production is a staged working session with unrestricted custom in
   );
   assert.match(
     liveAdapters,
-    /request\.taskClass === "PROJECT_UNDERSTANDING"\) return 30_000/u,
+    /request\.taskClass === "PROJECT_UNDERSTANDING"\) return 120_000/u,
   );
   assert.match(
     liveAdapters,
@@ -301,4 +473,42 @@ test("Phase 3 production is a staged working session with unrestricted custom in
   assert.match(liveAdapters, /unsupported value:/u);
   assert.match(liveAdapters, /const fenced =/u);
   assert.doesNotMatch(`${discovery}\n${composer}`, /insurance|photographer|booking|plumbing/iu);
+});
+
+test("Useful ideas drop directions the customer rejected in Visual Direction", () => {
+  const selected = {
+    name: "Editorial Welcome",
+    visualSystem: { layoutType: "editorial", navigationType: "inline", density: "spacious" },
+  };
+  const rejected = [
+    { name: "Ops Console", visualSystem: { layoutType: "dashboard", navigationType: "sidebar", density: "dense" } },
+  ];
+  const recommendations = [
+    { title: "A", specificValue: "Add a dashboard summary tile", whyThisProjectNeedsIt: "", impact: "" },
+    { title: "B", specificValue: "Put controls in a sidebar", whyThisProjectNeedsIt: "", impact: "" },
+    { title: "C", specificValue: "Offer a saved-search shortcut", whyThisProjectNeedsIt: "", impact: "" },
+    { title: "D", specificValue: "Send a weekly digest email", whyThisProjectNeedsIt: "", impact: "" },
+    { title: "E", specificValue: "Let people export a record", whyThisProjectNeedsIt: "", impact: "" },
+  ];
+
+  const kept = filterContradictingRecommendations(recommendations, selected, rejected);
+  const titles = kept.map((entry) => entry.title);
+  assert.deepEqual(titles, ["C", "D", "E"]);
+
+  // Ideas that name the chosen direction alongside a rejected one are comparing,
+  // not contradicting, and must survive.
+  const comparing = [
+    { title: "A", specificValue: "Prefer an editorial rhythm over a dashboard grid", whyThisProjectNeedsIt: "", impact: "" },
+    { title: "C", specificValue: "Offer a saved-search shortcut", whyThisProjectNeedsIt: "", impact: "" },
+    { title: "D", specificValue: "Send a weekly digest email", whyThisProjectNeedsIt: "", impact: "" },
+  ];
+  assert.equal(filterContradictingRecommendations(comparing, selected, rejected).length, 3);
+
+  // normalizeProjectDesign rejects fewer than three, so the floor holds even
+  // when everything conflicts.
+  const allConflicting = recommendations.slice(0, 3).map((entry, index) => ({
+    ...entry,
+    specificValue: index === 2 ? entry.specificValue : "Use a dense dashboard sidebar",
+  }));
+  assert.equal(filterContradictingRecommendations(allConflicting, selected, rejected).length, 3);
 });

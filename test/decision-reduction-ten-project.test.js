@@ -6,6 +6,7 @@ import test from "node:test";
 import {
   approvedContractRequirementCatalogue,
   createApprovedProjectContract,
+  createDesignRenderContract,
   createProductBlueprint,
   normalizeProductBlueprint,
   createModelTaskContract,
@@ -296,6 +297,18 @@ test("a complete immutable Product Blueprint is projected from live project inte
   assert.equal(blueprint.blueprintVersion, 3);
   assert.deepEqual(blueprint.selectedSubtypes, ["Customer self-service portal"]);
   assert.equal(blueprint.integrityHash.length, 64);
+  assert.match(
+    blueprint.designSpecification.renderContract.renderContractId,
+    /^fdr-[a-f0-9]{8}$/u,
+  );
+  assert.equal(
+    blueprint.designSpecification.renderContract.directionName,
+    blueprint.designSpecification.selection.approvedLabel,
+  );
+  assert.ok(
+    blueprint.designSpecification.renderContract.regions.length >= 3,
+    "the approved blueprint must carry the same complete product regions shown in Visual Direction",
+  );
   assert.ok(Object.isFrozen(blueprint));
   const changed = structuredClone(blueprint);
   changed.businessGoal = "A silently changed goal";
@@ -433,6 +446,115 @@ test("custom natural-language input remains typed data without UI-side project c
   assert.doesNotMatch(productionSource, /STARTER_SUGGESTIONS|suggestionsForIntent|<select|option value=/u);
   assert.match(productionSource, /smartSuggestions/u);
   assert.match(productionSource, /classification: null/u);
+});
+
+test("a combined visual concept stays structured through transport and blueprint binding", () => {
+  const spec = cases[1];
+  const design = validateProjectDesignQuality(projectDesign(spec), {
+    originalRequest: spec.request,
+  });
+  const customDNA = {
+    ...design.designAlternatives[0].creativeDNA,
+    typeVoice: design.designAlternatives[1].creativeDNA.typeVoice,
+    typeScale: design.designAlternatives[1].creativeDNA.typeScale,
+  };
+  const customSystem = {
+    ...design.designAlternatives[0].visualSystem,
+    colorRoles: design.designAlternatives[1].visualSystem.colorRoles,
+  };
+  const submittedRenderContract = createDesignRenderContract({
+    productName: "Combined Photographer Portfolio",
+    outcome: "A photographer portfolio with an approved hybrid art direction.",
+    directionName: "Customer-composed portfolio concept",
+    personality: "Immersive and editorial",
+    workflows: design.userExperiencePlan.primaryJourneys,
+    visualSystem: customSystem,
+    creativeDNA: customDNA,
+  });
+  const designContract = {
+    schemaVersion: 1,
+    sourceProfileVersion: 3,
+    selectionMode: "custom",
+    selectedDirectionId: null,
+    selectedDirectionName: "Customer-composed portfolio concept",
+    rationale: "Use the exhibition composition with the monograph typography and palette.",
+    customerInstructions: null,
+    composition: {
+      layoutApproach: design.designAlternatives[0].layoutApproach,
+      navigationApproach: design.designAlternatives[0].navigationApproach,
+      informationDensity: design.designAlternatives[0].informationDensity,
+      mobileBehavior: design.designAlternatives[0].mobileBehavior,
+    },
+    visualCharacter: {
+      personality: "Immersive and editorial",
+      typography: `${customDNA.typeVoice}, ${customDNA.typeScale}`,
+      colorMood: "Warm monograph palette",
+      hierarchy: design.designAlternatives[0].preview.hierarchy,
+      spacingDensity: design.designAlternatives[0].preview.spacingDensity,
+    },
+    visualSystem: customSystem,
+    creativeDNA: customDNA,
+    compositionPrimitive: customDNA.compositionPrimitive,
+    surfaceSequence: customDNA.surfaceSequence,
+    exclusions: customDNA.exclusions,
+    customComposition: { complete: true },
+    accessibilityRequirements: design.designDirection.accessibilityNeeds,
+    tradeoff: "The hybrid favors atmosphere over scanning speed.",
+    confidence: 0.82,
+    renderContract: submittedRenderContract,
+  };
+  const [answer] = normalizeCustomerFollowUpAnswers([{
+    questionId: "customer-design-direction",
+    answer: "Use the combined direction.",
+    selection: {
+      kind: "design-direction",
+      subjectId: "design-direction",
+      mode: "other",
+      optionId: null,
+      value: designContract.selectedDirectionName,
+      reason: designContract.rationale,
+      classification: "design preference",
+      sourceProfileVersion: 3,
+      designContract,
+    },
+  }]);
+  assert.deepEqual(answer.selection.designContract.creativeDNA, customDNA);
+
+  const blueprint = createProductBlueprint({
+    missionId: "combined-portfolio-blueprint",
+    originalCustomerRequest: spec.request,
+    profile: {
+      profileVersion: 3,
+      family: "website",
+      name: "Combined Photographer Portfolio",
+      summary: "A photographer portfolio with an approved hybrid art direction.",
+      primaryJourneys: design.userExperiencePlan.primaryJourneys,
+      dataConcepts: ["photography project"],
+      architectureDecisions: ["Render an accessible responsive website"],
+      selectedStack: {
+        stackId: "nextjs-typescript-sqlite-npm-playwright",
+        version: "1.0.0",
+      },
+    },
+    projectDesign: design,
+    answers: [answer],
+  });
+  assert.equal(
+    blueprint.designSpecification.renderContract.primitive,
+    customDNA.compositionPrimitive,
+  );
+  assert.equal(
+    blueprint.designSpecification.renderContract.typeVoice,
+    customDNA.typeVoice,
+  );
+  assert.deepEqual(
+    blueprint.designSpecification.renderContract.colors,
+    customSystem.colorRoles,
+  );
+  assert.equal(
+    blueprint.designSpecification.renderContract.renderContractId,
+    submittedRenderContract.renderContractId,
+  );
 });
 
 test("contract consistency rejects missing and contradictory choice ledgers", () => {

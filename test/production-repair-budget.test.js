@@ -11,15 +11,15 @@ test("production repair budgets allow bounded evidence-backed recovery", () => {
   assert.deepEqual(productionRepairBudgets(), {
     generationCorrectionCalls: 0,
     procedureRepairCalls: 0,
-    browserRepairCalls: 2,
-    designFidelityRepairCalls: 2,
+    browserRepairCalls: 4,
+    designFidelityRepairCalls: 4,
     runtimeRestarts: 2,
   });
   assert.deepEqual(productionRepairBudgets({ approvedPrototype: true }), {
     generationCorrectionCalls: 2,
     procedureRepairCalls: 2,
-    browserRepairCalls: 2,
-    designFidelityRepairCalls: 2,
+    browserRepairCalls: 4,
+    designFidelityRepairCalls: 4,
     runtimeRestarts: 2,
   });
 });
@@ -52,15 +52,19 @@ test("browser observation and design fidelity repairs have independent budgets",
     "Production design fidelity failed against the approved live prototype: typography.",
   );
 
+  // Both repair loops converge once their failures carry measurements: browser
+  // checks fell 8 then 5 then 3, fidelity aspects 6 then 5 then 2, and a budget
+  // of two truncated each descent while it was still making progress.
   assert.deepEqual(browser, {
     designFidelity: false,
     requestSegment: "browser-repair",
-    maxCalls: 2,
+    maxCalls: 4,
   });
   assert.deepEqual(fidelity, {
     designFidelity: true,
     requestSegment: "design-fidelity-repair",
-    maxCalls: 2,
+    maxCalls: 4,
   });
+  assert.equal(browser.maxCalls, fidelity.maxCalls);
   assert.notEqual(browser.requestSegment, fidelity.requestSegment);
 });

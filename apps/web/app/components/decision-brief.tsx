@@ -155,6 +155,11 @@ export function DecisionBrief({
   const framework = technical.frameworkVersion.value
     ? `${technical.framework.value} ${technical.frameworkVersion.value}`
     : technical.framework.value;
+  const productShape = blueprint === null
+    ? ""
+    : blueprint.selectedSubtypes
+        .filter((subtype) => !["web-application", "website"].includes(subtype.toLowerCase()))
+        .join(" + ") || blueprint.productName;
 
   function changeSomething() {
     if (brief.decisions.length > 0) {
@@ -225,7 +230,7 @@ export function DecisionBrief({
             <dt>Approved product shape</dt>
             <dd>
               <p className="t-body-m">
-                <strong>{blueprint.selectedSubtypes.join(" + ")}</strong>
+                <strong>{productShape}</strong>
                 {" — "}{blueprint.oneSentenceOutcome}
               </p>
               <p className="t-caption ink-tertiary">

@@ -47,12 +47,19 @@ function text(target) {
   return Buffer.concat(target.chunks).toString("utf8");
 }
 
-function runtimeSourceManifest(checkpoint) {
+// This proves the running application source did not change under an
+// observation. Anything the observation itself produces is an output, not
+// source: screenshots written to evidence/ by the very Playwright run being
+// verified made the post-observation checkpoint differ from the artifact the
+// runtime started, so a build whose fidelity fully passed was still rejected
+// as if its source had been swapped.
+export function runtimeSourceManifest(checkpoint) {
   return JSON.stringify(
     checkpoint.contentManifest.filter(
       (entry) =>
         !entry.path.startsWith("data/") &&
         !entry.path.startsWith("tests/") &&
+        !entry.path.startsWith("evidence/") &&
         entry.path !== "playwright.config.ts",
     ),
   );

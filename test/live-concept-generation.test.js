@@ -20,6 +20,7 @@ import {
   ModelExecutionStage,
   createDeterministicLocalModelProvider,
   prototypeModelsInCooldown,
+  modelsTimedOutForWorkload,
   rankPrototypeCandidates,
 } from "../src/work-plane/model-gateway.js";
 
@@ -336,5 +337,57 @@ test("pre-production concepts use the real Model Gateway during clarification wh
       sensitiveValues: [],
     }),
     /only during EXECUTING/u,
+  );
+});
+
+test("a production timeout does not demote the model that generates prototypes", () => {
+  // Design prototypes and production bundles share the FILE_GENERATION task
+  // class but differ in output size and timeout budget. Keying the timeout
+  // cooldown on task class alone demoted the prototype model on the strength
+  // of production timeouts, pushing that work onto heavyweight routes that
+  // returned empty files and failed the studio.
+  const history = [
+    {
+      kind: "failure",
+      failureCategory: "TIMEOUT",
+      taskClass: "FILE_GENERATION",
+      executionStage: "PRODUCTION_EXECUTION",
+      modelId: "slow-in-production",
+    },
+    {
+      kind: "failure",
+      failureCategory: "TIMEOUT",
+      taskClass: "FILE_GENERATION",
+      executionStage: "DESIGN_PROTOTYPE",
+      modelId: "slow-in-prototypes",
+    },
+    {
+      kind: "failure",
+      failureCategory: "TRANSIENT_PROVIDER_FAILURE",
+      taskClass: "FILE_GENERATION",
+      executionStage: "PRODUCTION_EXECUTION",
+      modelId: "merely-flaky",
+    },
+  ];
+
+  const production = modelsTimedOutForWorkload(history, "FILE_GENERATION", "PRODUCTION_EXECUTION");
+  assert.equal(production.has("slow-in-production"), true);
+  assert.equal(production.has("slow-in-prototypes"), false, "a prototype timeout must not demote a production route");
+  assert.equal(production.has("merely-flaky"), false, "only timeouts trigger the cooldown");
+
+  const prototype = modelsTimedOutForWorkload(history, "FILE_GENERATION", "DESIGN_PROTOTYPE");
+  assert.equal(prototype.has("slow-in-prototypes"), true);
+  assert.equal(prototype.has("slow-in-production"), false, "a production timeout must not demote the prototype route");
+
+  // A different task class is never affected, and an absent stage defaults to
+  // production rather than matching everything.
+  assert.equal(modelsTimedOutForWorkload(history, "PROJECT_UNDERSTANDING", "PRODUCTION_EXECUTION").size, 0);
+  assert.equal(
+    modelsTimedOutForWorkload(
+      [{ kind: "failure", failureCategory: "TIMEOUT", taskClass: "FILE_GENERATION", modelId: "no-stage" }],
+      "FILE_GENERATION",
+      "PRODUCTION_EXECUTION",
+    ).has("no-stage"),
+    true,
   );
 });

@@ -783,6 +783,15 @@ function overlap(left, right) {
   return false;
 }
 
+function tokenSimilarity(leftValue, rightValue) {
+  const left = tokens(leftValue);
+  const right = tokens(rightValue);
+  if (left.size === 0 || right.size === 0) return 0;
+  let shared = 0;
+  for (const token of left) if (right.has(token)) shared += 1;
+  return shared / new Set([...left, ...right]).size;
+}
+
 function wordCount(value) {
   return normalizeText(value).split(" ").filter(Boolean).length;
 }
@@ -881,6 +890,15 @@ export function validateProjectDesignQuality(
     }
     if (decision.consequenceOfEachChoice.some((item) => wordCount(item) < 5)) {
       issues.push(`decisions[${index}] contains a vague consequence.`);
+    }
+    for (let left = 0; left < decision.alternatives.length; left += 1) {
+      for (let right = left + 1; right < decision.alternatives.length; right += 1) {
+        if (tokenSimilarity(decision.alternatives[left], decision.alternatives[right]) >= 0.72) {
+          issues.push(
+            `decisions[${index}] alternatives ${left + 1} and ${right + 1} describe the same practical choice.`,
+          );
+        }
+      }
     }
   }
   for (const [label, value] of [["projectIntent", intent.confidence], ["foundryInsights", design.foundryInsights.confidence]]) {

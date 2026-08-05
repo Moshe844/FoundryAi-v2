@@ -139,6 +139,9 @@ const markup = render({
   alternatives: uiAlternatives,
   choice: { mode: "recommended", optionId: "direction-1" },
   direction,
+  outcome: "Present complete bodies of work and make considered collector inquiries easy.",
+  productName: "a fine-art photographer portfolio",
+  workflows: ["Opening image", "Selected projects", "Artist context", "Inquiry path"],
   onChange: () => {},
 });
 try {

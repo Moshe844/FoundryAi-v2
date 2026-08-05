@@ -742,6 +742,45 @@ ol {
   color: var(--ink-secondary);
   font: 500 13px/18px var(--font-text);
 }
+.understanding-contract {
+  display: grid;
+  gap: var(--space-9);
+  margin-top: var(--space-10);
+  padding-top: var(--space-8);
+  border-top: 1px solid var(--line-hairline);
+}
+.understanding-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.understanding-list li {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: var(--space-3);
+  align-items: start;
+  padding: var(--space-4);
+  border: 1px solid var(--line-hairline);
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+}
+.understanding-list-plain li {
+  grid-template-columns: 10px minmax(0, 1fr);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: var(--space-2) 0;
+}
+.understanding-bullet {
+  width: 5px;
+  height: 5px;
+  margin-top: 9px;
+  border-radius: 50%;
+  background: var(--accent-fill);
+}
 .feature-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1933,12 +1972,19 @@ details[open] > summary .chev {
 
 @media (max-width: 1099px) {
   .discovery-progress nav {
-    overflow-x: auto;
-    padding-bottom: var(--space-1);
-    scrollbar-width: thin;
+    min-width: 0;
+    overflow: hidden;
   }
   .discovery-progress ol {
-    grid-template-columns: repeat(7, minmax(132px, 1fr));
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+  }
+  .discovery-progress button {
+    grid-template-columns: 22px minmax(0, 1fr);
+    gap: 6px;
+    padding-inline: 6px;
+  }
+  .discovery-progress button em {
+    font-size: 11px;
   }
   .discovery-workspace {
     grid-template-columns: 1fr;
@@ -1954,7 +2000,18 @@ details[open] > summary .chev {
     display: grid;
   }
   .discovery-progress button em {
-    white-space: normal;
+    display: none;
+  }
+  .discovery-progress button {
+    display: grid;
+    grid-template-columns: 1fr;
+    justify-items: center;
+    min-height: 38px;
+    padding: 4px;
+  }
+  .discovery-progress button[aria-current="step"] {
+    outline: 1px solid var(--accent-line);
+    outline-offset: -1px;
   }
   .discovery-workspace {
     gap: var(--space-8);
@@ -3369,6 +3426,7 @@ mark {
 
 @media (max-width: 767px) {
   .feature-grid,
+  .understanding-list,
   .design-recommendation,
   .design-facts,
   .alternative-choices {

@@ -691,6 +691,14 @@ export type LiveConceptStudio = Readonly<{
     costUsd: number;
   }>;
   selectedConceptId: string | null;
+  // Armed without generating a prototype: the directives are applied at build
+  // time, and that build is not compared against the approved prototype.
+  deferredShock?: Readonly<{
+    status: "ARMED";
+    sourceConceptId: string;
+    directives: readonly string[];
+    armedAt: string;
+  }>;
   evolution?: Readonly<{
     kind: "revision" | "composition" | "shock";
     status: "GENERATING" | "PASSED" | "FAILED" | "INTERRUPTED";

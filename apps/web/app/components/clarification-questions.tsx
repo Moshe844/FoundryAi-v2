@@ -185,13 +185,13 @@ function QuestionCard({
                 <span className="opt-decide-lead">
                   Let Foundry choose
                 </span>
-                <span className="badge">Recommended</span>
+                <span className="badge">Flexible</span>
               </span>
               <span className="opt-decide-detail t-body-s">
-                {question.recommendation.value}
+                Current recommendation: {question.recommendation.value}
               </span>
               <span className="opt-consequence t-caption">
-                {question.recommendationReason.value}
+                Foundry may reconsider this before final approval if later input changes what fits best.
               </span>
             </span>
           </span>
@@ -216,7 +216,12 @@ function QuestionCard({
                   <span className="opt-check" aria-hidden="true">
                     &#10003;
                   </span>
-                  <span>{option}</span>
+                  <span>
+                    {option}
+                    {option === question.recommendation.value && (
+                      <span className="badge">Recommended now</span>
+                    )}
+                  </span>
                 </span>
                 <span className="opt-consequence t-caption">
                   {question.consequences.value[index]}

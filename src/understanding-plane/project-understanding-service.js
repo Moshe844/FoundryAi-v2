@@ -1029,6 +1029,29 @@ function understandingFromCurrent(profile, projectDesign) {
   };
 }
 
+export function parseUnderstandingRevisionValue({
+  valueJson,
+  operation = "replace",
+  existingValue,
+  operationIndex = 0,
+}) {
+  try {
+    return JSON.parse(valueJson);
+  } catch (error) {
+    if (
+      operation !== "remove" &&
+      operation !== "add" &&
+      typeof existingValue === "string"
+    ) {
+      return valueJson.trim();
+    }
+    throw new TypeError(
+      `Revision operation ${operationIndex + 1} must contain valid JSON for a non-string leaf.`,
+      { cause: error },
+    );
+  }
+}
+
 function applyUnderstandingRevision(
   currentUnderstanding,
   envelope,
@@ -1074,7 +1097,20 @@ function applyUnderstandingRevision(
       parent = parent[key];
     }
     const finalSegment = segments.at(-1);
-    const value = JSON.parse(operation.valueJson);
+    // Structured-output providers occasionally satisfy a string-valued
+    // `valueJson` field with the intended leaf text but omit the second layer
+    // of JSON quotes. Normalize that unambiguous, type-safe case locally.
+    const existingValue = Array.isArray(parent)
+      ? parent[Number(finalSegment)]
+      : parent !== null && typeof parent === "object"
+        ? parent[finalSegment]
+        : undefined;
+    const value = parseUnderstandingRevisionValue({
+      valueJson: operation.valueJson,
+      operation: operation.op,
+      existingValue,
+      operationIndex,
+    });
     if (Array.isArray(parent)) {
       if (operation.op === "add" && finalSegment === "-") {
         parent.push(value);
@@ -1195,6 +1231,36 @@ function acceptance(mode, checkId) {
   }
 }
 
+function obligationsFromVerificationPlan(verificationPlan, contractVersion) {
+  return verificationPlan.map((entry, index) => {
+    const obligationId = identifier("obligation", index);
+    const observation = acceptance(entry.acceptanceMethod, obligationId);
+    const dependencyObligationIds = [
+      ...new Set(
+        (entry.dependencyIndexes ?? [])
+          .filter(
+            (dependency) =>
+              Number.isSafeInteger(dependency) &&
+              dependency >= 1 &&
+              dependency <= verificationPlan.length &&
+              dependency !== index + 1,
+          )
+          .map((dependency) => identifier("obligation", dependency - 1)),
+      ),
+    ];
+    return {
+      obligationId,
+      statement: entry.observableOutcome,
+      origin: entry.origin,
+      acceptanceCondition: observation.acceptanceCondition,
+      requiredEvidenceKinds: observation.evidenceKinds,
+      dependencyObligationIds,
+      contractVersion,
+      sourceRequirement: entry.sourceRequirement,
+    };
+  });
+}
+
 function nonEmptyStrings(values, fallback) {
   const result = Array.isArray(values)
     ? [...new Set(values.map((value) => String(value).trim()).filter(Boolean))]
@@ -1290,6 +1356,106 @@ function validateOutcomeCoverage(result) {
   }
 }
 
+const CUSTOMER_FOLLOW_UP_STOP_WORDS = new Set([
+  "about",
+  "also",
+  "could",
+  "from",
+  "have",
+  "into",
+  "just",
+  "like",
+  "make",
+  "nice",
+  "page",
+  "should",
+  "take",
+  "that",
+  "their",
+  "there",
+  "these",
+  "this",
+  "through",
+  "want",
+  "with",
+  "would",
+  "your",
+]);
+
+function customerInstructionTerms(value) {
+  return [
+    ...new Set(
+      String(value)
+        .toLowerCase()
+        .replace(/[^\p{L}\p{N}]+/gu, " ")
+        .split(" ")
+        .filter(
+          (term) =>
+            term.length >= 4 && !CUSTOMER_FOLLOW_UP_STOP_WORDS.has(term),
+        ),
+    ),
+  ];
+}
+
+function containsCustomerInstructionTerm(value, terms) {
+  const candidateTerms = new Set(customerInstructionTerms(value));
+  return terms.some((term) => candidateTerms.has(term));
+}
+
+export function validateCustomerFollowUpTraceability(projectDesign, answers) {
+  const followUps = answers
+    .map((answer, index) => ({ answer, index }))
+    .filter(
+      ({ answer }) =>
+        answer?.selection === undefined ||
+        answer.selection.kind === "customer-message",
+    );
+  for (const { answer, index } of followUps) {
+    const requirementReference = `customer-follow-up-${index + 1}`;
+    const terms = customerInstructionTerms(answer.answer);
+    const tracedOutcomes = projectDesign.verificationPlan.filter(
+      (entry) => entry.sourceRequirement === requirementReference,
+    );
+    if (
+      tracedOutcomes.length === 0 ||
+      (terms.length > 0 &&
+        !tracedOutcomes.some((entry) =>
+          containsCustomerInstructionTerm(entry.observableOutcome, terms),
+        ))
+    ) {
+      throw new TypeError(
+        `Customer instruction ${requirementReference} is not preserved by a traceable observable outcome.`,
+      );
+    }
+
+    const instructionIsAffirmative =
+      !/\b(?:avoid|do\s+not|don['’]?t|exclude|excluded|later|no|not|skip|without)\b/iu.test(
+        answer.answer,
+      );
+    if (!instructionIsAffirmative || terms.length === 0) continue;
+
+    const negatedScope = [
+      ...projectDesign.projectIntent.constraints,
+      ...projectDesign.productProposal.intentionallyExcludedCapabilities,
+      ...projectDesign.productProposal.futureCapabilities.map(
+        (capability) => `Later: ${capability}`,
+      ),
+      ...(projectDesign.architectureDecisions ?? []),
+    ];
+    const contradiction = negatedScope.find(
+      (entry) =>
+        /\b(?:avoid|do\s+not|don['’]?t|exclude|excluded|later|no|not|outside|without)\b/iu.test(
+          entry,
+        ) && containsCustomerInstructionTerm(entry, terms),
+    );
+    if (contradiction !== undefined) {
+      throw new TypeError(
+        `Customer instruction ${requirementReference} conflicts with proposed scope: ${contradiction}`,
+      );
+    }
+  }
+}
+
 function profileFromUnderstanding(
   missionId,
   intent,
@@ -1302,6 +1468,16 @@ function profileFromUnderstanding(
       PROJECT_DESIGN_MODEL_FIELDS.map((key) => [key, result[key]]),
     ),
     { designFamily: result.family },
+  );
+  validateCustomerFollowUpTraceability(
+    {
+      ...projectDesign,
+      architectureDecisions: nonEmptyStrings(
+        result.architectureDecisions,
+        [],
+      ),
+    },
+    answers,
   );
   const obligations = projectDesign.verificationPlan;
   if (obligations.length === 0) {
@@ -1517,6 +1693,42 @@ function latestBlueprintApproval(ledger, missionId) {
   return null;
 }
 
+function normalizeSubmittedDesignContract(value, label) {
+  if (
+    value === null ||
+    typeof value !== "object" ||
+    Array.isArray(value) ||
+    value.schemaVersion !== 1 ||
+    !Number.isSafeInteger(value.sourceProfileVersion) ||
+    value.sourceProfileVersion < 1 ||
+    !["recommended", "alternative", "custom"].includes(value.selectionMode) ||
+    typeof value.selectedDirectionName !== "string" ||
+    value.selectedDirectionName.trim() === "" ||
+    typeof value.rationale !== "string" ||
+    value.rationale.trim() === "" ||
+    value.composition === null ||
+    typeof value.composition !== "object" ||
+    value.visualCharacter === null ||
+    typeof value.visualCharacter !== "object" ||
+    !Array.isArray(value.surfaceSequence) ||
+    value.surfaceSequence.length === 0 ||
+    !Array.isArray(value.accessibilityRequirements)
+  ) {
+    throw new TypeError(`${label} is invalid.`);
+  }
+  if (
+    value.selectionMode === "custom" &&
+    (value.customComposition === null ||
+      typeof value.customComposition !== "object" ||
+      value.customComposition.complete !== true ||
+      value.creativeDNA === null ||
+      value.visualSystem === null)
+  ) {
+    throw new TypeError(`${label} does not contain a complete custom composition.`);
+  }
+  return Object.freeze(structuredClone(value));
+}
+
 export function normalizeCustomerFollowUpAnswers(value) {
   if (!Array.isArray(value)) {
     throw new TypeError("Customer follow-up answers must be an array.");
@@ -1553,6 +1765,11 @@ export function normalizeCustomerFollowUpAnswers(value) {
           "subjectId",
           "value",
         ];
+        const actualSelectionKeys = Object.keys(candidate).sort();
+        const allowedSelectionKeys = [
+          [...selectionKeys].sort(),
+          [...selectionKeys, "designContract"].sort(),
+        ];
         const kinds = new Set([
           "product-subtype",
           "blueprint-approval",
@@ -1576,8 +1793,11 @@ export function normalizeCustomerFollowUpAnswers(value) {
           candidate === null ||
           typeof candidate !== "object" ||
           Array.isArray(candidate) ||
-          Object.keys(candidate).sort().join(",") !==
-            selectionKeys.sort().join(",") ||
+          !allowedSelectionKeys.some(
+            (keys) => keys.join(",") === actualSelectionKeys.join(","),
+          ) ||
+          (candidate.designContract !== undefined &&
+            candidate.kind !== "design-direction") ||
           !kinds.has(candidate.kind) ||
           !modes.has(candidate.mode) ||
           typeof candidate.subjectId !== "string" ||
@@ -1614,6 +1834,14 @@ export function normalizeCustomerFollowUpAnswers(value) {
               ? null
               : candidate.classification.trim(),
           sourceProfileVersion: candidate.sourceProfileVersion,
+          ...(candidate.designContract === undefined
+            ? {}
+            : {
+                designContract: normalizeSubmittedDesignContract(
+                  candidate.designContract,
+                  `Customer follow-up answer ${index + 1} design contract`,
+                ),
+              }),
         });
       }
       return Object.freeze({
@@ -1644,7 +1872,12 @@ export function cumulativeCustomerFollowUpAnswers(
   ];
   for (const batch of batches) {
     for (const answer of normalizeCustomerFollowUpAnswers(batch)) {
-      const key = `${answer.questionId}\u0000${answer.answer}\u0000${JSON.stringify(answer.selection ?? null)}`;
+      // Retrying a natural-language instruction creates a fresh UI message id.
+      // Deduplicate it by its actual customer meaning so one retry does not
+      // become two requirements or shift every later traceability reference.
+      const key = answer.selection?.kind === "customer-message"
+        ? `customer-message\u0000${answer.answer.trim().toLowerCase()}\u0000${answer.selection.classification ?? ""}`
+        : `${answer.questionId}\u0000${answer.answer}\u0000${JSON.stringify(answer.selection ?? null)}`;
       if (seen.has(key)) continue;
       seen.add(key);
       accumulated.push(answer);
@@ -1928,6 +2161,82 @@ export function approvedArchitectureConstraints(projectDesign, profile) {
   ]);
 }
 
+// Design vocabulary distinctive enough to match against customer-facing prose.
+// The common-English enum values ("none", "open", "direct", "flat", "action",
+// "status", "data", "balanced", "solid", "quiet") are deliberately excluded:
+// matching those would delete good ideas over an incidental word.
+const DISTINCTIVE_VISUAL_TERMS = new Set([
+  "sidebar", "top-nav", "split-screen", "editorial", "dashboard",
+  "guided-flow", "canvas", "documentation",
+  "top-bar", "tabs", "stepper",
+  "humanist", "geometric", "technical", "expressive",
+  "spacious", "dense", "rhythmic",
+  "bordered", "elevated", "layered", "immersive",
+  "ambient", "hero", "gallery",
+  "exploratory", "command-driven", "review-and-confirm",
+  "pill",
+]);
+
+function visualTermPattern(term) {
+  return new RegExp(`\\b${term.replaceAll("-", "[ -]")}\\b`, "iu");
+}
+
+// A recommendation contradicts the chosen direction when it names a rejected
+// alternative's distinctive vocabulary on an axis the customer actually chose
+// between, without naming the value they picked.
+function contradictsSelectedDirection(recommendation, selected, rejected) {
+  const system = selected?.visualSystem;
+  if (system === null || typeof system !== "object") return false;
+  const text = [
+    recommendation.title,
+    recommendation.specificValue,
+    recommendation.whyThisProjectNeedsIt,
+    recommendation.impact,
+  ]
+    .filter((value) => typeof value === "string")
+    .join(" ");
+  for (const [axis, selectedValue] of Object.entries(system)) {
+    if (typeof selectedValue !== "string") continue;
+    const rejectedValues = new Set(
+      rejected
+        .map((entry) => entry.visualSystem?.[axis])
+        .filter(
+          (value) => typeof value === "string" && value !== selectedValue,
+        ),
+    );
+    for (const value of rejectedValues) {
+      if (!DISTINCTIVE_VISUAL_TERMS.has(value)) continue;
+      if (!visualTermPattern(value).test(text)) continue;
+      // Naming the chosen value too means it is comparing, not contradicting.
+      if (visualTermPattern(selectedValue).test(text)) continue;
+      return true;
+    }
+  }
+  return false;
+}
+
+export function filterContradictingRecommendations(recommendations, selected, rejected) {
+  if (!Array.isArray(recommendations)) return recommendations;
+  const contradicting = recommendations.map((recommendation) =>
+    contradictsSelectedDirection(recommendation, selected, rejected),
+  );
+  // normalizeProjectDesign rejects a design with fewer than three
+  // recommendations, so keep the earliest conflicting ones rather than
+  // breaking the customer's selection outright.
+  let restore = Math.max(
+    0,
+    3 - contradicting.filter((flagged) => !flagged).length,
+  );
+  return recommendations.filter((_, index) => {
+    if (!contradicting[index]) return true;
+    if (restore > 0) {
+      restore -= 1;
+      return true;
+    }
+    return false;
+  });
+}
+
 function applyStructuredSelectionChoices(currentUnderstanding, answers) {
   const revised = structuredClone(currentUnderstanding);
   const designSelection = [...answers]
@@ -1955,6 +2264,14 @@ function applyStructuredSelectionChoices(currentUnderstanding, answers) {
     responsivePriority: selected.mobileBehavior,
     rationale: selected.whyItFits,
   };
+  // Useful ideas were written against the originally recommended direction.
+  // Carrying them over unchanged is what made them contradict the design the
+  // customer actually chose.
+  revised.recommendations = filterContradictingRecommendations(
+    revised.recommendations,
+    selected,
+    revised.designAlternatives.filter((alternative) => alternative !== selected),
+  );
   revised.designAlternatives = revised.designAlternatives.map((alternative) => ({
     ...alternative,
     recommended: alternative.name === selected.name,
@@ -2020,8 +2337,8 @@ function understandingPrompt(intent, answers, currentDesign) {
     "DesignDirection must be an actual visual and interaction recommendation for these users and this use case. Explain personality, density, navigation, content, responsive behavior, accessibility, interaction style, and the tradeoff behind the choice.",
     "Always return three to seven genuinely different designAlternatives and mark exactly one recommended. Give every alternative a short customer-facing name. Make the recommended alternative's visualPersonality match designDirection.visualPersonality character-for-character. Every direction must provide a distinct structured visualSystem across layout, navigation, typography, density, color roles, spacing, surfaces, content emphasis, imagery, interactions, buttons, and project-specific sample labels. For APIs and other nonvisual work, generate documentation and developer-tool directions, never website themes. Reject cosmetic renames of the same direction.",
     "FoundryInsights must contain non-obvious observations, opportunities, risks, ambiguities, and explicit assumptions grounded in this request. Every observation must contain at least one concrete noun or workflow phrase used in the original request so its grounding remains visible to the customer.",
-    "Recommendations must be few, useful, and specific. Each specificValue must be at least six words and each whyThisProjectNeedsIt must be at least eight words. Both must explicitly name a user, workflow, risk, or goal from the original request. Each recommendation must also state scope/cost/security/integration impact, default selection, confidence, and dependencies. A recommendation that could apply unchanged to an unrelated project is invalid.",
-    "Decisions are only choices that can materially change outcome, architecture, cost, integrations, or scope. Write questions in customer language, copy the recommended option character-for-character into the alternatives array, give exactly one consequence per alternative, and mark whether Foundry can safely decide. Never ask about APIs, databases, schemas, runtimes, middleware, persistence, or architecture.",
+    "Recommendations must be few, useful, and specific. Each specificValue must be at least six words and each whyThisProjectNeedsIt must be at least eight words. Both must explicitly name a user, workflow, risk, or goal from the original request. Each recommendation must also state scope/cost/security/integration impact, default selection, confidence, and dependencies. Mark at least one recommendation selected by default and at least one genuinely optional so the customer receives useful stage-aware suggestion chips instead of an all-or-nothing list. A recommendation that could apply unchanged to an unrelated project is invalid.",
+    "Decisions are only choices that can materially change outcome, architecture, cost, integrations, or scope. Write questions in customer language, copy the recommended option character-for-character into the alternatives array, give exactly one consequence per alternative, and mark whether Foundry can safely decide. Every non-recommended alternative must represent a materially different outcome, not a verb-only rephrasing such as Use versus Show. Never ask about APIs, databases, schemas, runtimes, middleware, persistence, or architecture.",
     `Use only these stable sourceRequirement values for customer requirements: ${requirementReferences.join(", ")}. Foundry-derived quality obligations may use foundry-derived followed by a descriptive identifier. Every essential capability must have an observable verification item traceable to one of those sources.`,
     "VerificationPlan must describe observable outcomes, a supported acceptance method, exact evidence required, its stable source requirement, origin, and one-based dependency indexes. Dependency indexes must reference existing other items, must never reference the current item, and the dependency graph must be acyclic. For traceability, create at least one verification item for every essential capability and begin that item's observableOutcome by copying the complete essential capability text character-for-character. Do not promise anything the acceptance method cannot prove.",
     "For a visual web project, add a foundry-derived browser-check verification item that makes the selected design direction observable. Its outcome must explicitly cover the approved information density, responsive priority, navigation behavior, and accessibility needs. Phone or responsive claims must fail for horizontal overflow, excessively tall ungrouped workflow states, or an unbounded concentration of interactive choices; technical completion alone is not design-quality proof.",
@@ -2042,8 +2359,8 @@ function understandingPrompt(intent, answers, currentDesign) {
 function fastUnderstandingPrompt(intent, answers) {
   return [
     "Create a concise, genuinely project-specific customer proposal as strict JSON. Infer users, workflows, scope, design, risks, and useful recommendations from this exact request; never use a category template or generic checklist.",
-    "Return exactly three meaningfully different design alternatives and exactly three non-obvious recommendations. Mark exactly one design alternative recommended. Keep each string to one short sentence.",
-    "Return no more than two decisions, and only when a customer-visible choice materially changes scope. Do not ask about APIs, databases, schemas, runtimes, middleware, persistence, or architecture. Omit choices Foundry can safely make.",
+    "Return exactly three meaningfully different design alternatives and exactly three non-obvious recommendations. Mark exactly one design alternative recommended. Mark at least one recommendation selected by default and at least one genuinely optional. Keep each string to one short sentence.",
+    "Return no more than two decisions, and only when a customer-visible choice materially changes scope. Decision alternatives must be mutually distinct outcomes; never return verb-only rewrites of the same practical choice. Do not ask about APIs, databases, schemas, runtimes, middleware, persistence, or architecture. Omit choices Foundry can safely make.",
     "For each essential capability, select the concrete acceptance method that can prove it. Preserve every requested behavior and deliberate exclusion. Do not invent business identity, contact details, credentials, pricing, hours, testimonials, or assets.",
     "missingCustomerContent is only for content the customer explicitly promised to provide later. Return [] for unspecified details Foundry can safely choose with professional defaults.",
     "When customer follow-up messages contain structured product-subtype selections, treat those generated subtype titles and any customer context as authoritative. If several compatible subtypes were selected, compose their distinct users, workflows, and outcomes into one coherent product rather than dropping any selection.",
@@ -2487,12 +2804,17 @@ export function createProjectUnderstandingService({
         normalizedAnswers.some(
           (answer) =>
             answer.selection === undefined ||
-            answer.selection.mode === "other" ||
+            (answer.selection.mode === "other" &&
+              !(
+                answer.selection.kind === "design-direction" &&
+                answer.selection.designContract?.selectionMode === "custom" &&
+                answer.selection.designContract?.customComposition?.complete === true
+              )) ||
             answer.selection.kind === "customer-message",
         )
       ) {
         throw new TypeError(
-          "Only generated-option selections can be recorded without project re-evaluation.",
+          "Only generated-option selections or complete structured visual contracts can be recorded without project re-evaluation.",
         );
       }
       validateStructuredSelectionsAgainstCurrent(
@@ -2687,8 +3009,16 @@ export function createProjectUnderstandingService({
         missionId,
         normalizedAnswers,
       );
+      // A natural customer message already has a structured selection wrapper
+      // so it can be traced, but it is not a request to regenerate the entire
+      // product brief. Treating it like a design/decision selection made every
+      // conversational edit pay for a full understanding pass and multiplied
+      // the chance of provider timeouts. Natural messages use the bounded
+      // revision envelope; only explicit studio choices require regeneration.
       const requiresCompleteRegeneration = normalizedAnswers.some(
-        (answer) => answer.selection !== undefined,
+        (answer) =>
+          answer.selection !== undefined &&
+          answer.selection.kind !== "customer-message",
       );
       const isRevision =
         current !== null &&
@@ -3058,6 +3388,10 @@ export function createProjectUnderstandingService({
               },
             },
           });
+          // A provider outage may use one different healthy provider. A
+          // semantic, schema, policy, or quality rejection is not made better
+          // by paying another provider for the same request, so stop there.
+          if (!failureDisposition.retryable) break;
         }
       }
       if (
@@ -3328,6 +3662,18 @@ export function createProjectUnderstandingService({
         );
       }
       const draft = profiles.contractDraft(profile);
+      // Production requires an explicitly approved Product Blueprint. Tests,
+      // migrations, and replay of pre-blueprint ledgers may intentionally run
+      // with that gate disabled; retain their already-validated deep plan.
+      const approvedVerificationPlan =
+        productBlueprint?.verificationPlan ?? projectDesign.verificationPlan;
+      const approvedObligations = obligationsFromVerificationPlan(
+        approvedVerificationPlan,
+        draft.contractVersion,
+      );
+      const requirementObligations = approvedObligations.map(
+        ({ sourceRequirement: _sourceRequirement, ...obligation }) => obligation,
+      );
       const approvalTimestamp = clock();
       const decisionSelections = [
         ...resolvedDecisionSelections(projectDesign, context.clarificationAnswers, profile.profileVersion),
@@ -3359,6 +3705,28 @@ export function createProjectUnderstandingService({
           )
           .map((selection) => selection.value),
       );
+      const selectedDesignDirection = productBlueprint === null
+        ? structuredClone(projectDesign.designDirection)
+        : {
+            visualPersonality:
+              productBlueprint.designSpecification.objective.visualPersonality,
+            tone: productBlueprint.designSpecification.color.mood,
+            layoutStrategy:
+              productBlueprint.designSpecification.composition.layoutStrategy,
+            informationDensity:
+              productBlueprint.designSpecification.composition.informationDensity,
+            navigationApproach:
+              productBlueprint.designSpecification.navigation.approach,
+            responsivePriority:
+              productBlueprint.designSpecification.responsive.priority,
+            accessibilityNeeds:
+              productBlueprint.designSpecification.accessibility.requirements,
+            contentStrategy:
+              productBlueprint.designSpecification.surfaces.contentEmphasis,
+            interactionStyle:
+              productBlueprint.designSpecification.navigation.interactionStyle,
+            rationale: productBlueprint.designSpecification.objective.rationale,
+          };
       const approvedDraft = createApprovedProjectContract({
         missionId,
         originalCustomerRequest: context.originalCustomerRequest,
@@ -3377,7 +3745,7 @@ export function createProjectUnderstandingService({
         finalInterpretedIntent: projectDesign.projectIntent,
         audiences: projectDesign.projectIntent.intendedUsers,
         workflows: projectDesign.userExperiencePlan,
-        selectedDesignDirection: projectDesign.designDirection,
+        selectedDesignDirection,
         acceptedRecommendations,
         rejectedRecommendations,
         customerDecisions: projectDesign.decisions.filter(
@@ -3407,14 +3775,8 @@ export function createProjectUnderstandingService({
           stackVersion: profile.selectedStack.version,
           capabilities: profile.capabilities,
         },
-        acceptanceObligations: draft.obligations.map(
-          (obligation, index) => ({
-            ...obligation,
-            sourceRequirement:
-              projectDesign.verificationPlan[index].sourceRequirement,
-          }),
-        ),
-        verificationPlan: projectDesign.verificationPlan,
+        acceptanceObligations: approvedObligations,
+        verificationPlan: approvedVerificationPlan,
         ...(blueprintApproval === null ? {} : { productBlueprint }),
         decisionSelections,
         contractVersion:
@@ -3427,7 +3789,7 @@ export function createProjectUnderstandingService({
         eventId,
         causationId,
         contractVersion: draft.contractVersion,
-        obligations: draft.obligations,
+        obligations: requirementObligations,
       });
       approvedContracts.approve({
         missionId,

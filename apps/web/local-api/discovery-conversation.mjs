@@ -109,9 +109,22 @@ export function projectDiscoveryConversation(events) {
   const messages = [];
   const seen = new Set();
   for (const record of customerMessageRecords(events)) {
-    const kind = customerInputKind(record.answer, records);
+    // A customer message is recorded before model re-evaluation so it cannot
+    // be lost. It is not, however, a successfully interpreted conversation
+    // item until the requested profile revision exists. Publishing it early
+    // mislabeled transient failures as "other" and falsely claimed the plan
+    // had been revised.
+    const pending =
+      record.answer?.selection?.kind === "customer-message" &&
+      !records.some(
+        (item) => item.profile.profileVersion === record.profileVersion,
+      );
+    const kind = pending ? "other" : customerInputKind(record.answer, records);
     if (kind === null) continue;
-    const key = `${record.answer.questionId}\u0000${record.answer.answer}`;
+    const key =
+      record.answer?.selection?.kind === "customer-message"
+        ? `customer-message\u0000${record.profileVersion}\u0000${record.answer.answer}`
+        : `${record.answer.questionId}\u0000${record.answer.answer}`;
     if (seen.has(key)) continue;
     seen.add(key);
     messages.push({
@@ -120,8 +133,11 @@ export function projectDiscoveryConversation(events) {
       text: record.answer.answer,
       ...(record.answer?.selection?.kind === "customer-message"
         ? {
-            interpretation: `Foundry treated this as ${kind.replaceAll("-", " ")} based on the sections revised by the model.`,
-            affectedSections: (() => {
+            status: pending ? "pending" : "applied",
+            interpretation: pending
+              ? "This instruction is preserved, but the plan revision has not completed yet."
+              : `Foundry treated this as ${kind.replaceAll("-", " ")} based on the sections revised by the model.`,
+            affectedSections: pending ? [] : (() => {
               const matching = records.find((item) => item.profile.profileVersion === record.profileVersion);
               const index = matching === undefined ? -1 : records.indexOf(matching);
               return index > 0 ? changedSections(records[index - 1].profile, matching.profile) : [];
@@ -136,7 +152,9 @@ export function projectDiscoveryConversation(events) {
     for (const answer of record.answers) {
       const kind = customerInputKind(answer, records);
       if (kind === null) continue;
-      const key = `${answer.questionId}\u0000${answer.answer}`;
+      const key = answer?.selection?.kind === "customer-message"
+        ? `customer-message\u0000${record.profile.profileVersion}\u0000${answer.answer}`
+        : `${answer.questionId}\u0000${answer.answer}`;
       if (seen.has(key)) continue;
       seen.add(key);
       messages.push({
@@ -145,6 +163,7 @@ export function projectDiscoveryConversation(events) {
         text: answer.answer,
         ...(answer?.selection?.kind === "customer-message"
           ? {
+              status: "applied",
               interpretation: `Foundry treated this as ${kind.replaceAll("-", " ")} based on the model-authored revision.`,
               affectedSections: changedSections(records.at(-2)?.profile, record.profile),
             }

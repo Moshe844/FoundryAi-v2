@@ -1,8 +1,16 @@
 "use client";
 
-import type { CSSProperties, ReactNode } from "react";
+import { useMemo, type CSSProperties, type ReactNode } from "react";
 
-import type { CreativeDNA, DesignAlternative } from "../../experience/contracts";
+import type {
+  CreativeDNA,
+  DesignAlternative,
+  DesignVisualSystem,
+} from "../../experience/contracts";
+import {
+  createDesignRenderContract,
+  renderDesignConceptDocument,
+} from "../../../../src/domain/design-concept-renderer.js";
 
 /**
  * A composable art-direction board.
@@ -316,58 +324,133 @@ function PhoneInset({ dna }: Readonly<{ dna?: CreativeDNA }>) {
 
 export function ArtDirectionBoard({
   direction,
-  compact = false,
-}: Readonly<{ direction: DesignAlternative; compact?: boolean }>) {
+  outcome,
+  productName,
+  workflows = [],
+  audiences = [],
+  capabilities = [],
+  dataConcepts = [],
+}: Readonly<{
+  direction: DesignAlternative;
+  outcome?: string;
+  productName?: string;
+  workflows?: readonly string[];
+  audiences?: readonly string[];
+  capabilities?: readonly string[];
+  dataConcepts?: readonly string[];
+}>) {
   const dna = direction.creativeDNA;
   const system = direction.visualSystem;
-  const primitive = dna?.compositionPrimitive ?? "editorial-spread";
-  const grid = PRIMITIVE_GRIDS[primitive] ?? PRIMITIVE_GRIDS["editorial-spread"];
-  const regions = (dna?.surfaceSequence ?? ["masthead", "lead-column", "sidebar-notes", "plate-grid"]) as readonly RegionKind[];
-
-  const colors = system?.colorRoles;
-  const style = {
-    "--ab-bg": colors?.background ?? "#f5f3ee",
-    "--ab-surface": colors?.surface ?? "#ffffff",
-    "--ab-primary": colors?.primary ?? "#1f3b34",
-    "--ab-accent": colors?.accent ?? "#c8703c",
-    "--ab-text": colors?.text ?? "#171f1d",
-    "--ab-grid": grid,
-    "--ab-beat": `${SPACING_BEAT[dna?.spacingRhythm ?? "steady-beat"] ?? 6}px`,
-  } as CSSProperties;
+  const contract = useMemo(
+    () => createDesignRenderContract({
+      productName: productName ?? direction.name.value,
+      outcome: outcome ?? direction.description.value,
+      directionName: direction.name.value,
+      personality: direction.visualPersonality.value,
+      workflows,
+      audiences,
+      capabilities,
+      dataConcepts,
+      visualSystem: system,
+      creativeDNA: dna,
+    }),
+    [audiences, capabilities, dataConcepts, direction, dna, outcome, productName, system, workflows],
+  );
+  const document = useMemo(
+    () => renderDesignConceptDocument(contract),
+    [contract],
+  );
 
   return (
     <figure
-      className="art-board-v2"
-      data-primitive={primitive}
-      data-depth={dna?.surfaceDepth ?? "hairline-ruled"}
-      data-motion={dna?.motionStrategy ?? "restrained"}
-      data-imagery={dna?.imageryTreatment ?? "framed-plate"}
-      data-compact={compact || undefined}
-      style={style}
+      className="art-board-v2 concept-render"
+      data-primitive={contract.primitive}
+      data-render-contract={contract.renderContractId}
     >
-      <div className="ab-canvas" role="img" aria-label={boardDescription(direction)}>
-        {regions.slice(0, AREA_KEYS.length).map((region, index) => (
-          <div
-            className="ab-slot"
-            style={{ gridArea: AREA_KEYS[index] }}
-            key={`${region}-${index}`}
-          >
-            <Region kind={region} direction={direction} dna={dna} />
-          </div>
-        ))}
-        <PhoneInset dna={dna} />
+      <div className="concept-render-frame" role="img" aria-label={boardDescription(direction)}>
+        <iframe
+          srcDoc={document}
+          tabIndex={0}
+          title={`${direction.name.value} complete concept preview`}
+        />
       </div>
       <figcaption className="ab-caption">
         <span className="ab-palette" aria-hidden="true">
-          {[colors?.background, colors?.surface, colors?.primary, colors?.accent, colors?.text]
+          {Object.values(contract.colors)
             .filter((value): value is string => Boolean(value))
             .map((color, index) => <i key={`${color}-${index}`} style={{ background: color }} />)}
         </span>
-        {dna ? (
+        {
           <span className="ab-caption-meta">
-            {dna.typeVoice.replaceAll("-", " ")} · {dna.typeScale} scale · {dna.motionStrategy} motion
+            Complete concept · {contract.primitive.replaceAll("-", " ")} · {contract.responsiveTransform.replaceAll("-", " ")} on phones
           </span>
-        ) : null}
+        }
+      </figcaption>
+    </figure>
+  );
+}
+
+export function DesignConceptFrame({
+  creativeDNA,
+  directionName,
+  outcome,
+  personality,
+  productName,
+  visualSystem,
+  workflows = [],
+  audiences = [],
+  capabilities = [],
+  dataConcepts = [],
+}: Readonly<{
+  creativeDNA: CreativeDNA | null;
+  directionName: string;
+  outcome: string;
+  personality: string;
+  productName: string;
+  visualSystem: DesignVisualSystem | null;
+  workflows?: readonly string[];
+  audiences?: readonly string[];
+  capabilities?: readonly string[];
+  dataConcepts?: readonly string[];
+}>) {
+  const contract = useMemo(
+    () => createDesignRenderContract({
+      productName,
+      outcome,
+      directionName,
+      personality,
+      workflows,
+      audiences,
+      capabilities,
+      dataConcepts,
+      visualSystem,
+      creativeDNA,
+    }),
+    [audiences, capabilities, creativeDNA, dataConcepts, directionName, outcome, personality, productName, visualSystem, workflows],
+  );
+  const document = useMemo(() => renderDesignConceptDocument(contract), [contract]);
+  return (
+    <figure
+      className="art-board-v2 concept-render"
+      data-primitive={contract.primitive}
+      data-render-contract={contract.renderContractId}
+    >
+      <div className="concept-render-frame" role="img" aria-label={`${directionName} combined product concept`}>
+        <iframe
+          srcDoc={document}
+          tabIndex={0}
+          title={`${directionName} complete concept preview`}
+        />
+      </div>
+      <figcaption className="ab-caption">
+        <span className="ab-palette" aria-hidden="true">
+          {Object.values(contract.colors).map((color, index) => (
+            <i key={`${color}-${index}`} style={{ background: color }} />
+          ))}
+        </span>
+        <span className="ab-caption-meta">
+          Live combined concept · contract {contract.renderContractId}
+        </span>
       </figcaption>
     </figure>
   );

@@ -159,6 +159,32 @@ export function diversifyProviderRoutes(routes) {
   return diversified;
 }
 
+// Scoped to the task class AND the execution stage. A design prototype and a
+// production bundle are both FILE_GENERATION but have different output sizes
+// and timeout budgets, so a production timeout says nothing about prototype
+// suitability. Keying on task class alone demoted the model that generates
+// prototypes well and pushed that work onto heavyweight routes that returned
+// empty files.
+export function modelsTimedOutForWorkload(
+  history,
+  taskClass,
+  executionStage = "PRODUCTION_EXECUTION",
+) {
+  const stage = executionStage ?? "PRODUCTION_EXECUTION";
+  return new Set(
+    (history ?? [])
+      .filter(
+        (entry) =>
+          entry?.kind === "failure" &&
+          entry.failureCategory === "TIMEOUT" &&
+          entry.taskClass === taskClass &&
+          (entry.executionStage ?? "PRODUCTION_EXECUTION") === stage &&
+          typeof entry.modelId === "string",
+      )
+      .map((entry) => entry.modelId),
+  );
+}
+
 export function classifyModelRouteFailure(errorOrMessage) {
   const message = String(
     errorOrMessage?.message ?? errorOrMessage ?? "",
@@ -794,6 +820,34 @@ export function createModelGateway({
             ),
         );
         if (survivingRoutes.length > 0) routedProviders = survivingRoutes;
+      }
+      // A model that times out on this task class keeps being tried first on
+      // every later run, burning the whole timeout budget before failing over
+      // to a route that completes in a fraction of it. This cooldown existed
+      // for design prototypes only, so production file generation never
+      // learned: the same route timed out at five minutes on run after run.
+      // Deprioritise a model that has timed out on this task class, but never
+      // empty the route list — a cold history must still be able to route.
+      const timedOutOnThisTaskClass = modelsTimedOutForWorkload(
+        routeHistory(),
+        input.taskClass,
+        input.executionStage,
+      );
+      if (timedOutOnThisTaskClass.size > 0) {
+        const unaffected = routedProviders.filter(
+          (provider) =>
+            !timedOutOnThisTaskClass.has(
+              providerRepairMetadata(provider).modelId,
+            ),
+        );
+        const affected = routedProviders.filter((provider) =>
+          timedOutOnThisTaskClass.has(
+            providerRepairMetadata(provider).modelId,
+          ),
+        );
+        // Demoted, not removed: a previously slow model is still a valid
+        // fallback when nothing else is eligible.
+        if (unaffected.length > 0) routedProviders = [...unaffected, ...affected];
       }
       if (designPrototypeRequest) {
         const prototypeHistory = (routeHistory() ?? []).filter(
