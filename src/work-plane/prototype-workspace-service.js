@@ -20,6 +20,8 @@ const WORKSPACE_SCHEMA_VERSION = 1;
 const RUNTIME_REGISTRY_SCHEMA_VERSION = 1;
 const MAX_FILE_BYTES = 1_000_000;
 const MAX_TOTAL_BYTES = 4_000_000;
+const MAX_EVIDENCE_FILE_BYTES = 8_000_000;
+const MAX_EVIDENCE_WRITE_BYTES = 24_000_000;
 
 function fail(message) {
   throw new TypeError(`Prototype workspace: ${message}`);
@@ -298,6 +300,41 @@ export function createPrototypeWorkspaceService({ prototypeRoot }) {
     return deepFreeze(structuredClone(record));
   }
 
+  function writeEvidenceFiles(contractInput, files) {
+    const contract = normalizeConceptPrototypeContract(contractInput);
+    const { paths, state } = readState(contract);
+    if (state.status !== "FINALIZED") fail("evidence requires a finalized prototype workspace.");
+    if (files === null || typeof files !== "object" || Array.isArray(files)) {
+      fail("evidence files must be an object keyed by relative path.");
+    }
+    let totalBytes = 0;
+    const manifest = [];
+    for (const [relativePath, value] of Object.entries(files)) {
+      const content = Buffer.isBuffer(value)
+        ? value
+        : typeof value === "string"
+          ? Buffer.from(value, "utf8")
+          : fail(`evidence file "${relativePath}" must be text or a Buffer.`);
+      if (content.length > MAX_EVIDENCE_FILE_BYTES) {
+        fail(`evidence file "${relativePath}" exceeds the output limit.`);
+      }
+      totalBytes += content.length;
+      if (totalBytes > MAX_EVIDENCE_WRITE_BYTES) fail("evidence output exceeds the total limit.");
+      const path = safeSourcePath(paths.evidencePath, relativePath);
+      if (existsSync(path)) {
+        if (!statSync(path).isFile() || lstatSync(path).isSymbolicLink()) {
+          fail(`evidence file "${relativePath}" is unsafe.`);
+        }
+        const existing = readFileSync(path);
+        if (!existing.equals(content)) fail(`evidence file "${relativePath}" is immutable.`);
+      } else {
+        atomicWrite(path, content);
+      }
+      manifest.push({ path: relativePath, contentHash: sha256(content), size: content.length });
+    }
+    return deepFreeze(manifest.sort((left, right) => left.path.localeCompare(right.path)));
+  }
+
   return Object.freeze({
     provision,
     writeFiles,
@@ -307,5 +344,6 @@ export function createPrototypeWorkspaceService({ prototypeRoot }) {
     loadContractAt,
     runtimeRecords,
     saveRuntimeRecord,
+    writeEvidenceFiles,
   });
 }

@@ -350,6 +350,11 @@ export {
 export { createPrototypeWorkspaceService } from "./work-plane/prototype-workspace-service.js";
 export { createPrototypeRuntimeService } from "./work-plane/prototype-runtime-service.js";
 export {
+  createChromePrototypeBrowserVerifier,
+  resolveCertifiedPrototypeBrowser,
+} from "./work-plane/prototype-browser-verifier.js";
+export { createPrototypeVerificationService } from "./work-plane/prototype-verification-service.js";
+export {
   CONCEPT_GENERATION_OUTPUT_SCHEMA,
   createPrototypeGenerationService,
 } from "./work-plane/prototype-generation-service.js";

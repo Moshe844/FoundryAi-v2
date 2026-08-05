@@ -143,7 +143,21 @@ export function createPrototypeRuntimeService({ workspaceService }) {
       try {
         const url = new URL(request.url ?? "/", "http://127.0.0.1");
         const decoded = decodeURIComponent(url.pathname);
-        const relativePath = decoded === "/" ? "index.html" : decoded.replace(/^\/+/, "");
+        if (decoded === "/favicon.ico") {
+          headers(response, "image/x-icon");
+          response.writeHead(204);
+          response.end();
+          return;
+        }
+        const requestedPath = decoded.replace(/^\/+|\/+$/gu, "");
+        const expectedRoute = conceptContract.expectedPreviewRoutes.includes(
+          decoded === "/" ? "/" : `/${requestedPath}`,
+        );
+        const relativePath = expectedRoute
+          ? "index.html"
+          : decoded === "/"
+            ? "index.html"
+            : decoded.replace(/^\/+/, "");
         if (
           !allowedFiles.has(relativePath) ||
           relativePath.split("/").some((part) => part === "" || part === "." || part === "..")

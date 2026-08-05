@@ -25,6 +25,10 @@ export interface PrototypeWorkspaceService {
   loadContractAt(workspaceRoot: string): ConceptPrototypeContract;
   runtimeRecords(): unknown[];
   saveRuntimeRecord(record: Record<string, unknown>): Readonly<Record<string, unknown>>;
+  writeEvidenceFiles(
+    contract: ConceptPrototypeContract,
+    files: Readonly<Record<string, string | Buffer>>,
+  ): readonly PrototypeFileManifestEntry[];
 }
 
 export function createPrototypeWorkspaceService(input: {
