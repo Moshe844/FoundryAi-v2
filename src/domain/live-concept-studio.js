@@ -357,9 +357,10 @@ function approvedPayload(input) {
   ) fail("prototypeFileManifest does not match the selected concept expected files.");
   const approvalTimestamp = text(input.approvalTimestamp, "approvalTimestamp");
   if (Number.isNaN(Date.parse(approvalTimestamp))) fail("approvalTimestamp must be ISO-8601.");
-  const prototypeContentHash = sha256(
+  const prototypeContentHash = input.prototypeContentHash ?? sha256(
     manifest.map(({ path, contentHash, size }) => ({ path, contentHash, size })),
   );
+  if (!HASH.test(prototypeContentHash)) fail("prototypeContentHash must be SHA-256.");
   return {
     schemaVersion: APPROVED_DESIGN_CONTRACT_SCHEMA_VERSION,
     approvedDesignId: `approved-${selected.conceptId}-v${selected.conceptVersion}`,

@@ -355,6 +355,7 @@ export {
 } from "./work-plane/prototype-browser-verifier.js";
 export { createPrototypeVerificationService } from "./work-plane/prototype-verification-service.js";
 export { createPrototypeStudioSessionService } from "./work-plane/prototype-studio-session-service.js";
+export { createPrototypeApprovalService } from "./work-plane/prototype-approval-service.js";
 export { createConceptEvolutionService } from "./work-plane/concept-evolution-service.js";
 export {
   CONCEPT_GENERATION_OUTPUT_SCHEMA,

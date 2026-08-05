@@ -11,6 +11,7 @@ import type {
 } from "../../experience/contracts";
 import {
   buildApprovedDesignContract,
+  type ApprovedPrototypeContract,
   type StructuredCustomerFollowUpAnswer,
 } from "../../experience/design-contract";
 import {
@@ -37,6 +38,8 @@ type StageId =
   | "decisions"
   | "conversation"
   | "review";
+
+const API = "http://127.0.0.1:3927";
 
 type DiscoveryStage = Readonly<{
   id: StageId;
@@ -148,6 +151,7 @@ export function ProjectDiscovery({
   );
   const [designChoice, setDesignChoice] =
     useState<DesignDirectionChoice>({ mode: "recommended" });
+  const [approvedPrototype, setApprovedPrototype] = useState<ApprovedPrototypeContract | null>(null);
   const [designSubmissionError, setDesignSubmissionError] = useState<string | null>(null);
   const [customerInputPending, setCustomerInputPending] = useState(false);
   const hasPendingInstructions = conversation.messages.some(
@@ -213,14 +217,18 @@ export function ProjectDiscovery({
     return onClarify([answer]);
   }
 
-  function designFollowUp(): StructuredCustomerFollowUpAnswer {
+  function designFollowUp(approvedPrototypeContract: ApprovedPrototypeContract | null = approvedPrototype): StructuredCustomerFollowUpAnswer {
     const selectedDirection = proposal.alternatives.find(
       (alternative) =>
         alternative.id === designChoice.optionId ||
         (designChoice.mode === "recommended" && alternative.recommended.value),
     );
+    const selectedLiveConcept = conceptStudio?.concepts.find(
+      (concept) => concept.contract.conceptId === designChoice.optionId,
+    );
     const value =
       designChoice.value?.trim() ||
+      selectedLiveConcept?.contract.conceptName ||
       selectedDirection?.name.value ||
       proposal.designDirection.recommendedStyle.value;
     const mode =
@@ -246,6 +254,7 @@ export function ProjectDiscovery({
         ...proposal.includedDefaults.value,
       ],
       dataConcepts: proposal.items.value,
+      approvedPrototypeContract,
     });
 
     return {
@@ -258,9 +267,10 @@ export function ProjectDiscovery({
         kind: "design-direction",
         subjectId: "design-direction",
         mode,
-        optionId: selectedDirection?.id ?? null,
+        optionId: designChoice.optionId ?? selectedDirection?.id ?? null,
         value,
         reason:
+          selectedLiveConcept?.contract.designRationale ??
           selectedDirection?.whyItFits.value ??
           proposal.designDirection.reason.value,
         classification: "design preference",
@@ -277,7 +287,25 @@ export function ProjectDiscovery({
     if (designChoice.mode === "other" && designChoice.composition?.complete !== true) return;
     setDesignSubmissionError(null);
     try {
-      const accepted = await onClarify([designFollowUp()]);
+      const selectedConceptId = designChoice.optionId ?? conceptStudio?.selectedConceptId ?? conceptStudio?.recommendedConceptId;
+      if (selectedConceptId === null || selectedConceptId === undefined) {
+        throw new Error("Select a browser-admitted concept before continuing.");
+      }
+      const approvalResponse = await fetch(`${API}/missions/${missionId}/concepts/${selectedConceptId}/approve`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+        signal: AbortSignal.timeout(30_000),
+      });
+      const approvalPayload = await approvalResponse.json() as {
+        approvedDesignContract?: ApprovedPrototypeContract;
+        error?: string;
+      };
+      if (!approvalResponse.ok || approvalPayload.approvedDesignContract === undefined) {
+        throw new Error(approvalPayload.error ?? "Foundry could not freeze the selected prototype evidence.");
+      }
+      setApprovedPrototype(approvalPayload.approvedDesignContract);
+      const accepted = await onClarify([designFollowUp(approvalPayload.approvedDesignContract)]);
       if (accepted) {
         advance();
       } else {
@@ -375,6 +403,7 @@ export function ProjectDiscovery({
       ),
     );
     setDesignChoice({ mode: "recommended" });
+    setApprovedPrototype(null);
   }
 
   return (
@@ -467,7 +496,10 @@ export function ProjectDiscovery({
               <DesignDirection
                 choice={designChoice}
                 missionId={missionId}
-                onChange={setDesignChoice}
+                onChange={(choice) => {
+                  setDesignChoice(choice);
+                  setApprovedPrototype(null);
+                }}
                 studio={conceptStudio}
               />
               <div className="stage-actions">

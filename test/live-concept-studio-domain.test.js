@@ -146,6 +146,7 @@ test("ApprovedDesignContract freezes selected prototype evidence without promoti
     ],
     screenshotEvidenceReferences: ["evidence://concept/desktop", "evidence://concept/mobile"],
     browserEvidenceReferences: ["evidence://concept/browser-verification"],
+    prototypeContentHash: "d".repeat(64),
     approvalTimestamp: "2026-08-04T20:00:00.000Z",
   });
 
@@ -153,6 +154,7 @@ test("ApprovedDesignContract freezes selected prototype evidence without promoti
   assert.equal(approved.selectedConceptVersion, 1);
   assert.equal(approved.prototypeIntegrityHash, selected.integrityHash);
   assert.equal(approved.prototypeFileManifest.length, 3);
+  assert.equal(approved.prototypeContentHash, "d".repeat(64));
   assert.equal(normalizeApprovedDesignContract(approved), approved);
   assert.ok(Object.isFrozen(approved));
   assert.ok(designFidelityRequiresPrototypeEvidence({ approvedDesignContract: approved }));

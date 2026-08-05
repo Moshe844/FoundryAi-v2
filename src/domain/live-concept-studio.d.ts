@@ -124,6 +124,7 @@ export function createApprovedDesignContract(input: {
   prototypeFileManifest: readonly PrototypeFileManifestEntry[];
   screenshotEvidenceReferences: readonly string[];
   browserEvidenceReferences: readonly string[];
+  prototypeContentHash?: string;
   approvalTimestamp: string;
 }): ApprovedDesignContract;
 export function normalizeApprovedDesignContract(input: ApprovedDesignContract): ApprovedDesignContract;

@@ -19,6 +19,7 @@ import {
   createChromePrototypeBrowserVerifier,
   createPrototypeVerificationService,
   createPrototypeStudioSessionService,
+  createPrototypeApprovalService,
   createConceptEvolutionService,
   ConceptStrategy,
   openMissionControl,
@@ -117,6 +118,7 @@ const prototypeVerification = createPrototypeVerificationService({
 });
 const prototypeSessions = createPrototypeStudioSessionService({ prototypeRoot });
 const conceptEvolution = createConceptEvolutionService();
+const prototypeApproval = createPrototypeApprovalService({ workspaceService: prototypeWorkspaces });
 
 // Build the persisted route index before serving requests. Subsequent reads
 // reparse only ledger files that changed, keeping project creation responsive.
@@ -1486,6 +1488,8 @@ function routeConceptStudio(pathname) {
   if (compose !== null) return { kind: "compose", missionId: compose[1], conceptId: null, fileName: null };
   const revise = /^\/missions\/([A-Za-z0-9_-]+)\/concepts\/([A-Za-z0-9._-]+)\/revise$/u.exec(pathname);
   if (revise !== null) return { kind: "revise", missionId: revise[1], conceptId: revise[2], fileName: null };
+  const approve = /^\/missions\/([A-Za-z0-9_-]+)\/concepts\/([A-Za-z0-9._-]+)\/approve$/u.exec(pathname);
+  if (approve !== null) return { kind: "approve", missionId: approve[1], conceptId: approve[2], fileName: null };
   const preview = /^\/missions\/([A-Za-z0-9_-]+)\/concepts\/([A-Za-z0-9._-]+)\/preview$/u.exec(pathname);
   if (preview !== null) return { kind: "preview", missionId: preview[1], conceptId: preview[2], fileName: null };
   const evidence = /^\/missions\/([A-Za-z0-9_-]+)\/concepts\/([A-Za-z0-9._-]+)\/evidence\/([A-Za-z0-9._-]+\.png)$/u.exec(pathname);
@@ -1752,6 +1756,52 @@ const server = createServer(async (request, response) => {
         conceptVersion: result.contract.conceptVersion,
         composition: result.composition,
       });
+    }
+    if (request.method === "POST" && conceptRoute?.kind === "approve") {
+      if (activeConceptJobs.has(conceptRoute.missionId)) {
+        return json(response, 409, { error: "Wait for the active concept generation to finish before approval." });
+      }
+      let session = prototypeSessions.read(conceptRoute.missionId);
+      const concept = session?.concepts.find(
+        (entry) => entry.contract.conceptId === conceptRoute.conceptId && entry.verificationStatus === "PASSED",
+      );
+      if (session?.status !== "READY" || concept === undefined) {
+        return json(response, 409, { error: "Only a currently admitted concept can become approval evidence." });
+      }
+      const existing = session.approval?.approvedDesignContract;
+      if (
+        existing?.selectedConceptId === concept.contract.conceptId &&
+        existing?.selectedConceptVersion === concept.contract.conceptVersion &&
+        existing?.prototypeContentHash === concept.contentHash
+      ) {
+        return json(response, 200, { approvedDesignContract: existing, reused: true });
+      }
+      const composition = (session.compositions ?? []).find(
+        (entry) => entry.compositionId === concept.contract.conceptId,
+      );
+      const customerModifications = [
+        ...(session.evolution?.status === "PASSED" && session.evolution.conceptId === concept.contract.conceptId
+          ? session.evolution.changedSummary ?? []
+          : []),
+        ...(composition?.customerNotes ?? []),
+      ];
+      const approvedDesignContract = prototypeApproval.approve({
+        conceptRecord: concept,
+        customerModifications,
+      });
+      session = prototypeSessions.save({
+        ...session,
+        selectedConceptId: concept.contract.conceptId,
+        approvalHistory: session.approval === undefined
+          ? session.approvalHistory ?? []
+          : [...(session.approvalHistory ?? []), session.approval],
+        approval: {
+          status: "APPROVED",
+          approvedDesignContract,
+          approvedAt: approvedDesignContract.approvalTimestamp,
+        },
+      });
+      return json(response, 200, { approvedDesignContract, reused: false });
     }
     if (request.method === "POST" && conceptRoute?.kind === "preview") {
       const session = prototypeSessions.read(conceptRoute.missionId);

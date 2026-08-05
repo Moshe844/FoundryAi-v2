@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { createDesignRenderContract } from "./design-concept-renderer.js";
 
 export const PRODUCT_BLUEPRINT_SCHEMA_VERSION = 1;
 
@@ -175,9 +176,10 @@ function selectedDesignAlternative(projectDesign, selection) {
   ) ?? null;
 }
 
-function buildDesignSpecification(projectDesign, answers) {
+export function buildDesignSpecification(projectDesign, answers) {
   const selection = latestDesignSelection(answers);
   const alternative = selectedDesignAlternative(projectDesign, selection);
+  const approvedDesign = selection?.designContract ?? null;
   const direction = projectDesign.designDirection;
   const customInstruction =
     selection?.mode === "other" ? String(selection.value).trim() : null;
@@ -188,65 +190,89 @@ function buildDesignSpecification(projectDesign, answers) {
       mode: selection?.mode ?? "accept-recommendation",
       optionId: selection?.optionId ?? null,
       approvedLabel:
-        customInstruction ?? alternative?.name ?? direction.visualPersonality,
+        approvedDesign?.selectedDirectionName ??
+        customInstruction ??
+        alternative?.name ??
+        direction.visualPersonality,
       customerInstruction: customInstruction,
       recommendationAccepted:
         selection === null || selection.mode === "accept-recommendation",
     },
     objective: {
       visualPersonality:
+        approvedDesign?.visualCharacter?.personality ??
         alternative?.visualPersonality ?? direction.visualPersonality,
       intendedEmotionalResponse:
+        approvedDesign?.creativeDNA?.emotionalGoal ??
         alternative?.creativeDNA?.emotionalGoal ??
         alternative?.description ??
         direction.rationale,
-      rationale: alternative?.whyItFits ?? direction.rationale,
+      rationale:
+        approvedDesign?.rationale ?? alternative?.whyItFits ?? direction.rationale,
     },
     // The approved direction's structural DNA travels with the blueprint so the
     // build contract can bind composition, sequence, type, imagery, motion,
     // rhythm, depth and responsive transform — not just a name and a palette.
-    creativeDNA: alternative?.creativeDNA
-      ? structuredClone(alternative.creativeDNA)
+    creativeDNA: (approvedDesign?.creativeDNA ?? alternative?.creativeDNA)
+      ? structuredClone(approvedDesign?.creativeDNA ?? alternative.creativeDNA)
       : null,
     composition: {
-      layoutStrategy: alternative?.layoutApproach ?? direction.layoutStrategy,
+      layoutStrategy:
+        approvedDesign?.composition?.layoutApproach ??
+        alternative?.layoutApproach ??
+        direction.layoutStrategy,
       informationDensity:
+        approvedDesign?.composition?.informationDensity ??
         alternative?.informationDensity ?? direction.informationDensity,
       contentHierarchy:
+        approvedDesign?.visualCharacter?.hierarchy ??
         alternative?.preview?.hierarchy ?? direction.contentStrategy,
       spacingDensity:
+        approvedDesign?.visualCharacter?.spacingDensity ??
         alternative?.preview?.spacingDensity ?? direction.informationDensity,
     },
     navigation: {
       approach:
+        approvedDesign?.composition?.navigationApproach ??
         alternative?.navigationApproach ?? direction.navigationApproach,
       interactionStyle: direction.interactionStyle,
     },
     typography: {
       character:
+        approvedDesign?.visualCharacter?.typography ??
         alternative?.preview?.typographyCharacter ?? direction.visualPersonality,
     },
     color: {
-      mood: alternative?.preview?.colorMood ?? direction.tone,
-      roles: structuredClone(alternative?.visualSystem?.colorRoles ?? {}),
+      mood:
+        approvedDesign?.visualCharacter?.colorMood ??
+        alternative?.preview?.colorMood ??
+        direction.tone,
+      roles: structuredClone(
+        approvedDesign?.visualSystem?.colorRoles ??
+        alternative?.visualSystem?.colorRoles ??
+        {},
+      ),
     },
     imagery: {
-      strategy: alternative?.visualSystem?.imageStrategy ?? "Project-appropriate imagery follows the approved visual hierarchy.",
+      strategy: approvedDesign?.visualSystem?.imageStrategy ?? alternative?.visualSystem?.imageStrategy ?? "Project-appropriate imagery follows the approved visual hierarchy.",
     },
     surfaces: {
-      treatment: alternative?.visualSystem?.surfaceTreatment ?? "Use a coherent surface system that supports the approved visual personality.",
-      buttonTreatment: alternative?.visualSystem?.buttonTreatment ?? "Controls must follow the approved interaction personality and hierarchy.",
-      contentEmphasis: alternative?.visualSystem?.contentEmphasis ?? direction.contentStrategy,
+      treatment: approvedDesign?.visualSystem?.surfaceTreatment ?? alternative?.visualSystem?.surfaceTreatment ?? "Use a coherent surface system that supports the approved visual personality.",
+      buttonTreatment: approvedDesign?.visualSystem?.buttonTreatment ?? alternative?.visualSystem?.buttonTreatment ?? "Controls must follow the approved interaction personality and hierarchy.",
+      contentEmphasis: approvedDesign?.visualSystem?.contentEmphasis ?? alternative?.visualSystem?.contentEmphasis ?? direction.contentStrategy,
     },
     responsive: {
-      priority: alternative?.mobileBehavior ?? direction.responsivePriority,
+      priority: approvedDesign?.composition?.mobileBehavior ?? alternative?.mobileBehavior ?? direction.responsivePriority,
     },
     accessibility: {
-      requirements: unique(direction.accessibilityNeeds),
+      requirements: unique(approvedDesign?.accessibilityRequirements ?? direction.accessibilityNeeds),
     },
-    visualSystem: structuredClone(alternative?.visualSystem ?? null),
-    tradeoff: alternative?.tradeoff ?? null,
-    confidence: alternative?.confidence?.score ?? projectDesign.projectIntent.confidence.score,
+    visualSystem: structuredClone(approvedDesign?.visualSystem ?? alternative?.visualSystem ?? null),
+    approvedDesignContract: approvedDesign?.approvedPrototypeContract === undefined
+      ? null
+      : structuredClone(approvedDesign.approvedPrototypeContract),
+    tradeoff: approvedDesign?.tradeoff ?? alternative?.tradeoff ?? null,
+    confidence: approvedDesign?.confidence ?? alternative?.confidence?.score ?? projectDesign.projectIntent.confidence.score,
   };
 }
 
@@ -456,6 +482,21 @@ export function createProductBlueprint({
     ...projectDesign.recommendations.flatMap((recommendation) => recommendation.requiredDependencies),
   ]);
   const designSpecification = buildDesignSpecification(projectDesign, answers);
+  const submittedRenderContract = latestDesignSelection(answers)?.designContract?.renderContract;
+  designSpecification.renderContract = submittedRenderContract === undefined
+    ? createDesignRenderContract({
+        productName: profile.name,
+        outcome: profile.summary,
+        directionName: designSpecification.selection.approvedLabel,
+        personality: designSpecification.objective.visualPersonality,
+        workflows: profile.primaryJourneys,
+        audiences: profile.primaryActors,
+        capabilities: profile.capabilities,
+        dataConcepts: profile.dataConcepts,
+        visualSystem: designSpecification.visualSystem,
+        creativeDNA: designSpecification.creativeDNA,
+      })
+    : structuredClone(submittedRenderContract);
   const designVerification = designVerificationEntries(profile.name, designSpecification);
   const verificationPlan = [
     ...structuredClone(projectDesign.verificationPlan),

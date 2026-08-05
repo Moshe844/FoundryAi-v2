@@ -14,6 +14,8 @@ test("Phase 4 renders observations, meaningful directions, and recommendation co
   ]);
 
   assert.match(discovery, /<FoundryObservations observations=\{proposal\.observations\}/u);
+  assert.match(discovery, /concepts\/\$\{selectedConceptId\}\/approve/u);
+  assert.match(discovery, /approvedPrototypeContract/u);
   assert.match(design, /concept\.contract\.designRationale/u);
   assert.match(design, /concept\.tradeoff/u);
   assert.match(design, /<iframe/u);
@@ -31,6 +33,7 @@ test("Phase 4 renders observations, meaningful directions, and recommendation co
   assert.match(server, /conceptEvolution\.revise/u);
   assert.match(server, /conceptEvolution\.compose/u);
   assert.match(server, /conceptEvolution\.shock/u);
+  assert.match(server, /prototypeApproval\.approve/u);
   assert.match(server, /verifyStudioDifferentiation/u);
   assert.match(recommendations, /recommendation\.value\.value/u);
   assert.match(recommendations, /recommendation\.impact\.value/u);

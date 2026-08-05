@@ -7,6 +7,13 @@ import type {
   ProjectDesignDirection,
 } from "./contracts";
 import type { CustomDesignComposition } from "./custom-direction";
+import {
+  createDesignRenderContract,
+  type DesignRenderContract,
+} from "../../../src/domain/design-concept-renderer.js";
+import type { ApprovedDesignContract as LiveApprovedDesignContract } from "../../../src/domain/live-concept-studio.js";
+
+export type ApprovedPrototypeContract = LiveApprovedDesignContract;
 
 export type ApprovedDesignContract = Readonly<{
   schemaVersion: 1;
@@ -41,6 +48,8 @@ export type ApprovedDesignContract = Readonly<{
   accessibilityRequirements: readonly string[];
   tradeoff: string | null;
   confidence: number | null;
+  renderContract: DesignRenderContract;
+  approvedPrototypeContract: LiveApprovedDesignContract | null;
 }>;
 
 export type StructuredDecisionSelection = DecisionSelection &
@@ -81,7 +90,14 @@ export function buildApprovedDesignContract({
   optionId,
   customValue,
   customComposition,
+  outcome,
+  productName,
   sourceProfileVersion,
+  workflows,
+  audiences = [],
+  capabilities = [],
+  dataConcepts = [],
+  approvedPrototypeContract = null,
 }: Readonly<{
   alternatives: readonly DesignAlternative[];
   direction: ProjectDesignDirection;
@@ -89,7 +105,14 @@ export function buildApprovedDesignContract({
   optionId?: string;
   customValue?: string;
   customComposition?: CustomDesignComposition;
+  outcome: string;
+  productName: string;
   sourceProfileVersion: number;
+  workflows: readonly string[];
+  audiences?: readonly string[];
+  capabilities?: readonly string[];
+  dataConcepts?: readonly string[];
+  approvedPrototypeContract?: LiveApprovedDesignContract | null;
 }>): ApprovedDesignContract {
   const selected = selectedAlternative(alternatives, mode, optionId);
   const recommended = alternatives.find((item) => item.recommended.value);
@@ -98,8 +121,26 @@ export function buildApprovedDesignContract({
     mode === "other" ? text(customValue, "Use a custom customer direction.") : null;
   const selectedDirectionName =
     mode === "other"
-      ? text(customValue, "Custom customer direction")
+      ? "Customer-composed direction"
       : text(selected?.name.value, direction.recommendedStyle.value);
+  const creativeDNA = customComposition?.creativeDNA ?? base?.creativeDNA ?? null;
+  const visualSystem = customComposition?.visualSystem ?? base?.visualSystem ?? null;
+  const personality =
+    mode === "other"
+      ? text(customComposition?.rationale, customerInstructions ?? direction.tone.value)
+      : text(base?.visualPersonality.value, direction.tone.value);
+  const renderContract = createDesignRenderContract({
+    productName,
+    outcome,
+    directionName: selectedDirectionName,
+    personality,
+    workflows,
+    audiences,
+    capabilities,
+    dataConcepts,
+    visualSystem,
+    creativeDNA,
+  });
 
   const contract = {
     schemaVersion: 1 as const,
@@ -155,8 +196,8 @@ export function buildApprovedDesignContract({
         "Use spacing that supports the approved information density.",
       ),
     },
-    visualSystem: customComposition?.visualSystem ?? base?.visualSystem ?? null,
-    creativeDNA: customComposition?.creativeDNA ?? base?.creativeDNA ?? null,
+    visualSystem,
+    creativeDNA,
     compositionPrimitive:
       customComposition?.creativeDNA?.compositionPrimitive ??
       base?.creativeDNA?.compositionPrimitive ??
@@ -173,17 +214,9 @@ export function buildApprovedDesignContract({
     ],
     tradeoff: selected?.tradeoff.value ?? null,
     confidence: selected?.confidence.value ?? null,
+    renderContract,
+    approvedPrototypeContract,
   };
-
-  // The local UX can inspect this contract immediately. The current strict
-  // clarification API accepts only the canonical DecisionSelection fields, so
-  // JSON transport intentionally omits this duplicate browser-side projection.
-  // The authoritative backend Product Blueprint independently reconstructs the
-  // same approved design from the canonical selection and generated design data.
-  Object.defineProperty(contract, "toJSON", {
-    value: () => undefined,
-    enumerable: false,
-  });
 
   return contract;
 }
