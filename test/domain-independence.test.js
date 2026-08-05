@@ -51,15 +51,15 @@ test("repository test commands exclude generated customer workspaces", () => {
   );
   assert.equal(
     packageManifest.scripts.test,
-    "node --test --test-concurrency=1 --test-name-pattern=\"^(?!three clean real)\" \"test/*.test.js\"",
+    "node --test --test-concurrency=1 \"test/*.test.js\"",
   );
   assert.equal(
     packageManifest.scripts["test:certification"],
-    "node --test --test-concurrency=1 --test-name-pattern=\"^three clean real\" test/milestone-8.test.js test/milestone-9.test.js",
+    "node scripts/run-live-certification-tests.mjs",
   );
   assert.equal(
     packageManifest.scripts["test:coverage"],
-    "node --test --test-concurrency=1 --experimental-test-coverage --test-name-pattern=\"^(?!three clean real)\" \"test/*.test.js\"",
+    "node --test --test-concurrency=1 --experimental-test-coverage \"test/*.test.js\"",
   );
 });
 

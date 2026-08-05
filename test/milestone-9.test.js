@@ -1400,7 +1400,10 @@ async function runRepairMission(control, missionId, defect, registerStack) {
 
 test(
   "three clean real missions repair compile, browser, and persistence defects through Foundry",
-  { timeout: 2_400_000 },
+  {
+    timeout: 2_400_000,
+    skip: process.env.FOUNDRY_RUN_LIVE_CERTIFICATION !== "1",
+  },
   async (t) => {
     const diagnosticDefect =
       process.env.FOUNDRY_M9_DIAGNOSTIC_DEFECT ?? null;

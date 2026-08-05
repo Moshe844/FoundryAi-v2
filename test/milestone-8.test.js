@@ -1161,7 +1161,10 @@ test(
 
 test(
   "three clean real inventory missions build, preview, verify, and certify the stack",
-  { timeout: 1_200_000 },
+  {
+    timeout: 1_200_000,
+    skip: process.env.FOUNDRY_RUN_LIVE_CERTIFICATION !== "1",
+  },
   async (t) => {
     const stores = temporaryStores(t, "foundry-v2-certification-");
     const control = openMissionControl({

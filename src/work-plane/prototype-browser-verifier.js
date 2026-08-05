@@ -57,6 +57,7 @@ function cdpProcess({ executablePath, timeoutMs }) {
   let nextId = 1;
   let buffer = Buffer.alloc(0);
   let stderr = "";
+  let childClosed = false;
   const pending = new Map();
   const listeners = new Set();
   const deadline = setTimeout(() => child.kill(), timeoutMs);
@@ -94,6 +95,9 @@ function cdpProcess({ executablePath, timeoutMs }) {
       request.reject(new Error(`Chrome exited before verification completed (${code}): ${stderr.slice(-500)}`));
     }
     pending.clear();
+  });
+  child.once("close", () => {
+    childClosed = true;
   });
 
   function send(method, params = {}, sessionId = undefined) {
@@ -137,13 +141,18 @@ function cdpProcess({ executablePath, timeoutMs }) {
     clearTimeout(deadline);
     try { await send("Browser.close"); } catch { child.kill(); }
     await new Promise((resolve) => {
-      if (child.exitCode !== null) resolve();
+      if (childClosed) resolve();
       else {
         const timer = setTimeout(() => { child.kill(); resolve(); }, 2_000);
-        child.once("exit", () => { clearTimeout(timer); resolve(); });
+        child.once("close", () => { clearTimeout(timer); resolve(); });
       }
     });
-    rmSync(profile, { recursive: true, force: true });
+    rmSync(profile, {
+      recursive: true,
+      force: true,
+      maxRetries: 10,
+      retryDelay: 100,
+    });
   }
 
   return { send, waitFor, listeners, close };
