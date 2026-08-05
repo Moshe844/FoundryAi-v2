@@ -346,6 +346,8 @@ export {
   normalizeApprovedDesignContract,
   normalizeConceptPrototypeContract,
 } from "./domain/live-concept-studio.js";
+export { createPrototypeWorkspaceService } from "./work-plane/prototype-workspace-service.js";
+export { createPrototypeRuntimeService } from "./work-plane/prototype-runtime-service.js";
 export {
   PROJECT_UNDERSTANDING_SOURCE,
   cumulativeCustomerFollowUpAnswers,
