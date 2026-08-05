@@ -48,17 +48,34 @@ export const ProductionRepairScope = Object.freeze({
   VERIFICATION_ONLY: "VERIFICATION_ONLY_RETRY",
 });
 
-// A production run gets one paid generation. Stack normalization and every
-// later check are local and deterministic; failures preserve exact evidence
-// instead of silently starting another paid model call.
+// Ordinary production keeps its one-call policy. A customer-approved live
+// prototype explicitly opts into a bounded recovery loop because preserving
+// the immutable design may require correcting generated syntax or compiler
+// defects without discarding the approved artifact.
 const MAX_GENERATION_CORRECTION_CALLS = 0;
 const MAX_PROCEDURE_REPAIR_CALLS = 0;
+const MAX_APPROVED_PROTOTYPE_GENERATION_CORRECTION_CALLS = 2;
+const MAX_APPROVED_PROTOTYPE_PROCEDURE_REPAIR_CALLS = 2;
 // Browser repair is reserved for evidence-backed runtime or design failures.
 // Two focused attempts are enough to correct a scoped source/style mismatch
 // without turning verification into an unbounded paid regeneration loop.
 const MAX_BROWSER_REPAIR_CALLS = 2;
 const MAX_DESIGN_FIDELITY_REPAIR_CALLS = 2;
 const MAX_RUNTIME_RESTARTS = 2;
+
+export function productionRepairBudgets({ approvedPrototype = false } = {}) {
+  return Object.freeze({
+    generationCorrectionCalls: approvedPrototype
+      ? MAX_APPROVED_PROTOTYPE_GENERATION_CORRECTION_CALLS
+      : MAX_GENERATION_CORRECTION_CALLS,
+    procedureRepairCalls: approvedPrototype
+      ? MAX_APPROVED_PROTOTYPE_PROCEDURE_REPAIR_CALLS
+      : MAX_PROCEDURE_REPAIR_CALLS,
+    browserRepairCalls: MAX_BROWSER_REPAIR_CALLS,
+    designFidelityRepairCalls: MAX_DESIGN_FIDELITY_REPAIR_CALLS,
+    runtimeRestarts: MAX_RUNTIME_RESTARTS,
+  });
+}
 
 export function productionBrowserRepairPolicy(observationFailure) {
   const designFidelity =
@@ -2806,6 +2823,11 @@ export function createProductionMissionService({
         approvedContract === null
           ? projectBundleSchema
           : CONTRACT_BOUND_BUNDLE_SCHEMA;
+      const repairBudgets = productionRepairBudgets({
+        approvedPrototype:
+          approvedContract?.productBlueprint?.designSpecification
+            ?.approvedDesignContract != null,
+      });
       const priorGenerationCalls = models
         .listCalls(missionId)
         .filter(
@@ -2890,7 +2912,7 @@ export function createProductionMissionService({
             .filter((call) =>
               call.requestId.startsWith(generationCorrectionPrefix),
             ).length;
-          if (correctionCount >= MAX_GENERATION_CORRECTION_CALLS) {
+          if (correctionCount >= repairBudgets.generationCorrectionCalls) {
             throw new Error(
               correctionCount === 0
                 ? `The original generated bundle failed deterministic admission; no paid regeneration was attempted: ${error.message}`
@@ -3094,7 +3116,7 @@ export function createProductionMissionService({
             stdout: failureEvidence.payload.stdout,
             stderr: failureEvidence.payload.stderr,
           });
-          if (MAX_PROCEDURE_REPAIR_CALLS === 0) {
+          if (repairBudgets.procedureRepairCalls === 0) {
             orchestrator.transition({
               missionId,
               eventId: `${missionId}-${safeName(procedureName)}-first-pass-failed`,
@@ -3146,13 +3168,13 @@ export function createProductionMissionService({
             }
             continue;
           }
-          if (priorRepairs.length >= MAX_PROCEDURE_REPAIR_CALLS) {
+          if (priorRepairs.length >= repairBudgets.procedureRepairCalls) {
             orchestrator.transition({
               missionId,
               eventId: `${missionId}-${safeName(procedureName)}-repairs-exhausted`,
               causationId: result.workUnitId,
               to: MissionState.EXHAUSTED,
-              reason: `The bounded ${procedureName} repair budget was exhausted after six evidence-backed changes.`,
+              reason: `The bounded ${procedureName} repair budget was exhausted after ${repairBudgets.procedureRepairCalls} evidence-backed changes.`,
             });
             throw new Error(
               `${procedureName} repair budget exhausted; the mission is EXHAUSTED.`,

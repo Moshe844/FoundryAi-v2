@@ -1,7 +1,27 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { productionBrowserRepairPolicy } from "../src/work-plane/production-mission-service.js";
+import {
+  productionBrowserRepairPolicy,
+  productionRepairBudgets,
+} from "../src/work-plane/production-mission-service.js";
+
+test("production repair budgets allow bounded evidence-backed recovery", () => {
+  assert.deepEqual(productionRepairBudgets(), {
+    generationCorrectionCalls: 0,
+    procedureRepairCalls: 0,
+    browserRepairCalls: 2,
+    designFidelityRepairCalls: 2,
+    runtimeRestarts: 2,
+  });
+  assert.deepEqual(productionRepairBudgets({ approvedPrototype: true }), {
+    generationCorrectionCalls: 2,
+    procedureRepairCalls: 2,
+    browserRepairCalls: 2,
+    designFidelityRepairCalls: 2,
+    runtimeRestarts: 2,
+  });
+});
 
 test("browser observation and design fidelity repairs have independent budgets", () => {
   const browser = productionBrowserRepairPolicy(
