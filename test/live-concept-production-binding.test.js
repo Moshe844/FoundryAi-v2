@@ -3,7 +3,10 @@ import test from "node:test";
 
 import { contractBoundModelPrompt } from "../src/domain/contract-bound-execution.js";
 import { designExecutionBrief, validateGeneratedDesignFidelity } from "../src/domain/design-fidelity.js";
-import { bindApprovedPrototypeFidelityIdentity } from "../src/work-plane/production-mission-service.js";
+import {
+  bindApprovedPrototypeBrowserEvidence,
+  bindApprovedPrototypeFidelityIdentity,
+} from "../src/work-plane/production-mission-service.js";
 import {
   ConceptStrategy,
   createApprovedDesignContract,
@@ -194,4 +197,30 @@ test("production binds immutable approval bookkeeping locally before semantic ad
   assert.equal(bound.designFidelity.approvedPrototypeContentHash, approved.prototypeContentHash);
   assert.equal(bound.designFidelity.approvedConceptVersion, approved.selectedConceptVersion);
   assert.notEqual(bound, plan);
+});
+
+test("Foundry owns deterministic browser fidelity evidence when a model omits it", () => {
+  const { contract } = fixture();
+  const plan = {
+    files: [{
+      path: "tests/workflow.spec.ts",
+      content: "test('workflow', async ({ page }) => { await page.goto('/'); });",
+      contractRequirementIds: ["approved-design-direction"],
+    }],
+  };
+  const bound = bindApprovedPrototypeBrowserEvidence(plan, contract);
+  const evidence = bound.files.find((file) =>
+    file.path.startsWith("tests/foundry-design-fidelity-evidence"),
+  );
+
+  assert(evidence);
+  assert.match(evidence.content, /page\.screenshot/u);
+  assert.match(evidence.content, /getComputedStyle/u);
+  assert.match(evidence.content, /getBoundingClientRect/u);
+  assert.match(evidence.content, /390/u);
+  assert.match(evidence.content, /768/u);
+  assert.match(evidence.content, /1280/u);
+  assert.match(evidence.content, /scrollWidth/u);
+  assert.match(evidence.content, /keyboard\.press/u);
+  assert.deepEqual(evidence.contractRequirementIds, ["approved-design-direction"]);
 });

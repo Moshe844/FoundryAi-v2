@@ -1992,6 +1992,10 @@ export function bindMissingApprovedRequirementTraces(plan, approvedContract) {
     return plan;
   }
   const identityBoundPlan = bindApprovedPrototypeFidelityIdentity(plan, approvedContract);
+  const evidenceBoundPlan = bindApprovedPrototypeBrowserEvidence(
+    identityBoundPlan,
+    approvedContract,
+  );
   const catalogue = approvedContractRequirementCatalogue(approvedContract);
   const requirements = new Map(
     catalogue.implementationRequirements.map((item) => [
@@ -2000,7 +2004,7 @@ export function bindMissingApprovedRequirementTraces(plan, approvedContract) {
     ]),
   );
   const claims = new Map();
-  for (const claim of plan.requirementClaims) {
+  for (const claim of evidenceBoundPlan.requirementClaims) {
     if (
       claim !== null &&
       typeof claim === "object" &&
@@ -2011,7 +2015,7 @@ export function bindMissingApprovedRequirementTraces(plan, approvedContract) {
     }
   }
   const filesByPath = new Map();
-  for (const file of plan.files) {
+  for (const file of evidenceBoundPlan.files) {
     const approvedTraceIds = Array.isArray(file.contractRequirementIds)
       ? [...new Set(file.contractRequirementIds.filter((id) => requirements.has(id)))]
       : [];
@@ -2111,6 +2115,98 @@ export function bindApprovedPrototypeFidelityIdentity(plan, approvedContract) {
       approvedPrototypeContentHash: approved.prototypeContentHash,
       approvedConceptVersion: approved.selectedConceptVersion,
     },
+  };
+}
+
+export function bindApprovedPrototypeBrowserEvidence(plan, approvedContract) {
+  const approved = approvedContract?.productBlueprint?.designSpecification?.approvedDesignContract ?? null;
+  if (approved === null || !Array.isArray(plan?.files)) return plan;
+
+  const browserSource = plan.files
+    .filter((file) => /^tests\/.*\.(?:spec|test)\.(?:js|jsx|ts|tsx)$/u.test(file.path))
+    .map((file) => String(file.content))
+    .join("\n");
+  const alreadyComplete =
+    /\.screenshot\s*\(/u.test(browserSource) &&
+    /(?:getComputedStyle|getBoundingClientRect|boundingBox\s*\()/u.test(browserSource) &&
+    /(?:fontFamily|fontSize|fontWeight|lineHeight|letterSpacing)/u.test(browserSource) &&
+    /(?:backgroundColor|color\b|getComputedStyle)/u.test(browserSource) &&
+    (browserSource.match(/setViewportSize\s*\(|viewport\s*:\s*\{/gu)?.length ?? 0) >= 3 &&
+    /(?:375|390|414)/u.test(browserSource) &&
+    /(?:768|810|834|1024)/u.test(browserSource) &&
+    /(?:1280|1440|1512|1728)/u.test(browserSource) &&
+    /scrollWidth|clientWidth|documentElement/u.test(browserSource) &&
+    /keyboard\.press|activeElement|focus-visible/u.test(browserSource);
+  if (alreadyComplete) return plan;
+
+  const browserStatements = new Set(
+    (approvedContract.verificationPlan ?? [])
+      .filter((entry) => entry.acceptanceMethod === "browser-check")
+      .map((entry) => entry.observableOutcome),
+  );
+  const traceIds = (approvedContract.acceptanceObligations ?? [])
+    .filter((entry) => browserStatements.has(entry.statement))
+    .map((entry) => entry.obligationId);
+  if (traceIds.length === 0) traceIds.push("approved-design-direction");
+
+  const occupied = new Set(plan.files.map((file) => file.path));
+  let path = "tests/foundry-design-fidelity-evidence.spec.ts";
+  for (let suffix = 2; occupied.has(path); suffix += 1) {
+    path = `tests/foundry-design-fidelity-evidence-${suffix}.spec.ts`;
+  }
+  const content = `import { expect, test } from "@playwright/test";
+
+test("captures deterministic approved-design fidelity evidence", async ({ page }) => {
+  await page.goto("/");
+  const viewports = [
+    { name: "phone", width: 390, height: 844 },
+    { name: "tablet", width: 768, height: 1024 },
+    { name: "desktop", width: 1280, height: 900 },
+  ];
+  for (const viewport of viewports) {
+    await page.setViewportSize({ width: viewport.width, height: viewport.height });
+    await expect(page.locator("body")).toBeVisible();
+    const evidence = await page.locator("body").evaluate((element) => {
+      const style = getComputedStyle(element);
+      const box = element.getBoundingClientRect();
+      return {
+        width: box.width,
+        height: box.height,
+        fontFamily: style.fontFamily,
+        fontSize: style.fontSize,
+        fontWeight: style.fontWeight,
+        lineHeight: style.lineHeight,
+        letterSpacing: style.letterSpacing,
+        backgroundColor: style.backgroundColor,
+        color: style.color,
+        scrollWidth: document.documentElement.scrollWidth,
+        clientWidth: document.documentElement.clientWidth,
+      };
+    });
+    expect(evidence.width).toBeGreaterThan(0);
+    expect(evidence.height).toBeGreaterThan(0);
+    expect(evidence.fontFamily).not.toBe("");
+    expect(evidence.fontSize).not.toBe("");
+    expect(evidence.backgroundColor).not.toBe("");
+    expect(evidence.color).not.toBe("");
+    expect(evidence.scrollWidth).toBeLessThanOrEqual(evidence.clientWidth);
+    await page.screenshot({
+      path: \`evidence/foundry-design-\${viewport.name}.png\`,
+      fullPage: true,
+    });
+  }
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.keyboard.press("Tab");
+  const activeElement = await page.evaluate(() => document.activeElement?.tagName ?? null);
+  expect(activeElement).not.toBeNull();
+});
+`;
+  return {
+    ...plan,
+    files: [
+      ...plan.files,
+      { path, content, contractRequirementIds: [...new Set(traceIds)] },
+    ],
   };
 }
 
