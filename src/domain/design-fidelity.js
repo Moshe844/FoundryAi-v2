@@ -84,10 +84,41 @@ function designSpecification(contract) {
 export function designExecutionBrief(contract) {
   const specification = designSpecification(contract);
   const approvedDesignContract = specification.approvedDesignContract ?? null;
+  const approvedPrototypeSeed = approvedDesignContract === null
+    ? null
+    : Object.freeze({
+        authority: "IMMUTABLE_LIVE_PROTOTYPE",
+        approvedDesignId: approvedDesignContract.approvedDesignId,
+        selectedConceptId: approvedDesignContract.selectedConceptId,
+        selectedConceptVersion: approvedDesignContract.selectedConceptVersion,
+        prototypeIntegrityHash: approvedDesignContract.prototypeIntegrityHash,
+        prototypeContentHash: approvedDesignContract.prototypeContentHash,
+        creativeThesis: approvedDesignContract.creativeThesis,
+        approvedSurfaceSequence: approvedDesignContract.approvedSurfaceSequence,
+        compositionRules: approvedDesignContract.compositionRules,
+        navigation: approvedDesignContract.navigation,
+        typography: approvedDesignContract.typography,
+        colorTokens: approvedDesignContract.colorTokens,
+        spacingTokens: approvedDesignContract.spacingTokens,
+        imagery: approvedDesignContract.imagery,
+        components: approvedDesignContract.components,
+        interactions: approvedDesignContract.interactions,
+        motion: approvedDesignContract.motion,
+        responsiveBehavior: approvedDesignContract.responsiveBehavior,
+        accessibility: approvedDesignContract.accessibility,
+        customerModifications: approvedDesignContract.customerModifications,
+        explicitExclusions: approvedDesignContract.explicitExclusions,
+        prototypeFileManifest: approvedDesignContract.prototypeFileManifest,
+        screenshotEvidenceReferences: approvedDesignContract.screenshotEvidenceReferences,
+        browserEvidenceReferences: approvedDesignContract.browserEvidenceReferences,
+      });
+  const isCertifiedLivePrototypeStack = approvedDesignContract?.prototypeFileManifest?.some(
+    (file) => file.path === "index.html",
+  ) === true;
   // A legacy visual-direction render contract is discovery input, not approval
   // evidence. Strict renderer binding starts only after a live prototype has
   // been selected and frozen into an ApprovedDesignContract.
-  const renderContract = designFidelityRequiresPrototypeEvidence(specification)
+  const renderContract = designFidelityRequiresPrototypeEvidence(specification) && !isCertifiedLivePrototypeStack
     ? specification.renderContract ?? null
     : null;
   return Object.freeze({
@@ -109,6 +140,7 @@ export function designExecutionBrief(contract) {
     visualSystem: specification.visualSystem ?? null,
     creativeDNA: specification.creativeDNA ?? null,
     approvedDesignContract,
+    approvedPrototypeSeed,
     renderContract,
     canonicalRendererDocument:
       renderContract === null
@@ -145,6 +177,9 @@ export const DESIGN_FIDELITY_SCHEMA = Object.freeze({
     "browserEvidence",
   ],
   properties: {
+    approvedDesignId: { type: "string", minLength: 1 },
+    approvedPrototypeContentHash: { type: "string", pattern: "^[a-f0-9]{64}$" },
+    approvedConceptVersion: { type: "integer", minimum: 1 },
     compositionImplementation: { type: "string", minLength: 24 },
     typographyImplementation: { type: "string", minLength: 16 },
     colorImplementation: { type: "string", minLength: 16 },
@@ -190,6 +225,18 @@ export function validateGeneratedDesignFidelity(plan, contract, fail) {
     fidelity.responsiveImplementation,
     fidelity.interactionImplementation,
   ].join(" ");
+  const approvedPrototype = specification.approvedPrototypeSeed;
+  if (approvedPrototype !== null) {
+    if (fidelity.approvedDesignId !== approvedPrototype.approvedDesignId) {
+      fail("Generated design fidelity is not bound to the approved live concept ID.");
+    }
+    if (fidelity.approvedPrototypeContentHash !== approvedPrototype.prototypeContentHash) {
+      fail("Generated design fidelity is not bound to the approved prototype content hash.");
+    }
+    if (fidelity.approvedConceptVersion !== approvedPrototype.selectedConceptVersion) {
+      fail("Generated design fidelity changed the approved concept version.");
+    }
+  }
   const approvedText = JSON.stringify(specification);
   if (overlapCount(approvedText, implementationText) < 5) {
     fail("Generated design-fidelity declaration does not preserve enough of the approved design specification.");
@@ -207,6 +254,34 @@ export function validateGeneratedDesignFidelity(plan, contract, fail) {
   const sourceText = fidelity.sourceFiles
     .map((path) => `${path}\n${filesByPath.get(path)}`)
     .join("\n");
+  if (approvedPrototype !== null) {
+    const bindingText = `${sourceText}\n${implementationText}`;
+    const sequence = approvedPrototype.approvedSurfaceSequence.filter(
+      (item) => typeof item === "string" && item.trim().length > 3,
+    );
+    if (sequence.length > 0 && overlapCount(sequence.join(" "), bindingText) === 0) {
+      fail("Customer-facing source does not preserve the approved live concept surface sequence.");
+    }
+    const composition = approvedPrototype.compositionRules.filter(
+      (item) => typeof item === "string" && item.trim().length > 3,
+    );
+    if (composition.length > 0 && overlapCount(composition.join(" "), bindingText) === 0) {
+      fail("Customer-facing source does not preserve the approved live concept composition.");
+    }
+    const approvedColors = Object.values(approvedPrototype.colorTokens)
+      .filter((value) => /^#[a-f0-9]{3,8}$/iu.test(String(value)));
+    for (const color of approvedColors) {
+      if (!sourceText.toLowerCase().includes(String(color).toLowerCase())) {
+        fail(`Customer-facing source changed approved live concept color token "${color}".`);
+      }
+    }
+    if (
+      approvedPrototype.motion.some((rule) => !/\b(?:none|static|no motion)\b/iu.test(rule)) &&
+      !/prefers-reduced-motion/iu.test(sourceText)
+    ) {
+      fail("Approved live concept motion requires a prefers-reduced-motion fallback.");
+    }
+  }
   if (!/(?:display\s*:\s*(?:grid|flex)|grid-template|position\s*:\s*(?:sticky|fixed|absolute))/iu.test(sourceText)) {
     fail("Customer-facing source does not contain a concrete composition mechanism for the approved design.");
   }

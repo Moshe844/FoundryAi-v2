@@ -672,9 +672,38 @@ function addBlueprintDesignRequirements(add, implementation, exclusions, bluepri
   }
   // Written visual-direction metadata is not a customer-approved prototype.
   // Renderer-specific obligations become binding only after Studio approval.
-  const renderContract = design.approvedDesignContract === undefined
+  const approvedPrototype = design.approvedDesignContract ?? null;
+  const isCertifiedLivePrototypeStack = approvedPrototype?.prototypeFileManifest?.some(
+    (file) => file.path === "index.html",
+  ) === true;
+  const renderContract = approvedPrototype === null || isCertifiedLivePrototypeStack
     ? null
     : design.renderContract ?? null;
+  if (approvedPrototype !== null && typeof approvedPrototype === "object") {
+    add(implementation, entry(
+      "blueprint-live-prototype-authority",
+      "approved-live-prototype",
+      `Preserve approved live prototype ${approvedPrototype.approvedDesignId}, concept ${approvedPrototype.selectedConceptId} version ${approvedPrototype.selectedConceptVersion}, content hash ${approvedPrototype.prototypeContentHash}.`,
+    ));
+    add(implementation, entry(
+      "blueprint-live-prototype-composition",
+      "approved-live-composition",
+      `Preserve the approved surface sequence ${(approvedPrototype.approvedSurfaceSequence ?? []).join(" then ")} and composition rules ${(approvedPrototype.compositionRules ?? []).join(" ")}.`,
+    ));
+    add(implementation, entry(
+      "blueprint-live-prototype-system",
+      "approved-live-design-system",
+      `Preserve navigation ${approvedPrototype.navigation}; typography ${JSON.stringify(approvedPrototype.typography)}; colors ${JSON.stringify(approvedPrototype.colorTokens)}; spacing ${JSON.stringify(approvedPrototype.spacingTokens)}; imagery ${approvedPrototype.imagery}; components ${approvedPrototype.components}.`,
+    ));
+    add(implementation, entry(
+      "blueprint-live-prototype-behavior",
+      "approved-live-behavior",
+      `Preserve interactions ${(approvedPrototype.interactions ?? []).join("; ")}; motion ${(approvedPrototype.motion ?? []).join("; ")}; responsive behavior ${(approvedPrototype.responsiveBehavior ?? []).join("; ")}; accessibility ${(approvedPrototype.accessibility ?? []).join("; ")}.`,
+    ));
+    for (const [index, exclusion] of (approvedPrototype.explicitExclusions ?? []).entries()) {
+      add(exclusions, entry(`blueprint-live-prototype-exclusion-${index + 1}`, "approved-live-exclusion", exclusion));
+    }
+  }
   if (renderContract !== null && typeof renderContract === "object") {
     add(implementation, entry(
       "blueprint-design-render-contract",
@@ -1036,6 +1065,7 @@ export function contractBoundModelPrompt(taskContract, instructions) {
     "DESIGN-DIRECTED GENERATION — BINDING",
     "Implement the approved designExecutionBrief as the real structural design of the application, not as descriptive copy. Translate its composition, navigation, hierarchy, typography, color roles, spacing density, interaction behavior, imagery strategy, mobile transformation, accessibility requirements, and customer instructions into concrete source. The finished project must be recognizably the approved direction. Reusing a generic dashboard, card stack, or universal shell that merely changes colors or labels is a contract violation.",
     "The structured output must include designFidelity explaining exactly where each design rule is implemented. designFidelity.sourceFiles must identify the actual customer-facing layout and style files. Customer-facing source must contain an inspectable responsive strategy: an explicit breakpoint or container transformation, a wrapping/auto-fit layout, or intrinsic fluid sizing with a real maximum bound. The generated Playwright test must capture screenshots at three widths — a phone (375, 390 or 414), a tablet (768, 810, 834 or 1024) and a desktop (1280, 1440, 1512 or 1728) — and must measure rendered composition, typography, color, and responsive transformation using real DOM/computed-style evidence. It must also prove the phone viewport has no horizontal overflow by comparing document.documentElement.scrollWidth with clientWidth, and prove keyboard focus remains observable (press Tab and read document.activeElement, or assert a :focus-visible style). A screenshot alone is not a passing verdict, but screenshots are mandatory evidence for review and repair. When the approved design declares a motion strategy other than static, the customer-facing source must include a prefers-reduced-motion fallback; when it excludes imagery, the source must not render images.",
+    "When designExecutionBrief.approvedPrototypeSeed is present, it is the primary and immutable design authority. It is extracted from the real browser-admitted HTML concept the customer used, not from design prose. Preserve its approvedDesignId, selectedConceptVersion, prototypeContentHash, file manifest, evidence references, surface sequence, composition, navigation, typography, color and spacing tokens, imagery, components, interactions, motion, responsive transformations, accessibility rules, customer modifications, and exclusions. Copy approvedDesignId, prototypeContentHash, and selectedConceptVersion exactly into designFidelity.approvedDesignId, designFidelity.approvedPrototypeContentHash, and designFidelity.approvedConceptVersion. The production implementation may refactor the disposable prototype, but it must remain recognizably the same experience. A generic replacement that shares only colors fails.",
     "When designExecutionBrief.renderContract is present, it is the same canonical renderer contract shown in Visual Direction, and designExecutionBrief.canonicalRendererDocument is the exact executable HTML/CSS reference the customer approved. designExecutionBrief.productRenderSpec is the frozen product tree behind that document: its screens, stable screen and region ids, navigation, actions, transitions, responsive modes, and default/loading/empty/error/success states are binding. Implement that same tree as the actual application and wire the project's real data and behavior into it; do not reinterpret it as inspiration or reconstruct a different tree from labels. Foundry owns the artifact boundary: during local admission it materializes the exact product tree at foundry/approved-product-render-spec.json and binds that artifact to the customer-facing root before fidelity validation, so model output is never rejected merely for omitting a file that does not exist until admission. Reuse the reference's structural composition, class names, geometry, typography, color roles, image treatment, and responsive transformation as the customer-facing shell. designExecutionBrief.canonicalRendererRequirements lists every required shared renderer class and structural rule. An unused reference file does not count. Do not merely copy its markers, approximate it with a different layout, replace its imagery with solid placeholder slabs, or turn its actions into no-op anchors. The built product must put the exact renderContractId, renderSpecId, and primitive in data-foundry-render-contract, data-foundry-render-spec, and data-foundry-primitive attributes on the customer-facing root. It must expose each exact approved data-foundry-screen and data-foundry-region id. The Playwright test must assert those values, complete the primary workflow transitions, locate every required renderer region, and make real assertions over geometry and computed visual tokens at the canonical 560px transformation and the required phone, tablet, and desktop widths.",
     "Copy authoritative contractHash, contractVersion, supportedPlatform, designDirectionHash, and explicitExclusionIds values exactly from the binding task contract when the output schema requests them. Never calculate, abbreviate, or reinterpret those values. Return exactly one requirementClaims entry for every requiredImplementationRequirementIds value and trace every one of those identifiers to at least one generated file. Begin each implementationSummary by quoting the requirement's statement verbatim, then ' — implemented by ' and a concrete description of where and how it is implemented; never paraphrase the quoted statement, because admission verifies its exact words. For a production-build requirement, additionally describe the production compilation, packaging, or bundle.",
     "INSTRUCTIONS",
