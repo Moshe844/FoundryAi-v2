@@ -369,7 +369,44 @@ export function DesignDirection({
         <div className="concept-generation-progress">
           <span style={{ width: `${Math.max(12, admitted.length * 33)}%` }} />
         </div>
-        <p className="t-caption ink-tertiary">{admitted.length} of 3 concepts admitted so far</p>
+        {/* A concept is published the moment it is admitted, so name the ones
+            already proven and say what the remaining slots are doing. Showing
+            only a bar left finished, browser-admitted directions invisible
+            behind a spinner while a third retried. */}
+        <ol className="concept-generation-steps">
+          {[0, 1, 2].map((slot) => {
+            const concept = admitted[slot];
+            const rejected = (studio?.concepts ?? []).filter(
+              (entry) => entry.verificationStatus !== "PASSED",
+            )[slot - admitted.length];
+            return (
+              <li key={slot} className={concept === undefined ? "pending" : "done"}>
+                {concept !== undefined ? (
+                  <>
+                    <span aria-hidden="true">✓</span>{" "}
+                    {concept.contract.conceptName} — built and opened at three sizes
+                  </>
+                ) : rejected !== undefined ? (
+                  <>
+                    <span aria-hidden="true">↻</span> Retrying a direction that did not
+                    pass its browser check
+                  </>
+                ) : (
+                  <>
+                    <span aria-hidden="true">⋯</span> Generating and opening in a real
+                    browser
+                  </>
+                )}
+              </li>
+            );
+          })}
+        </ol>
+        <p className="t-caption ink-tertiary">
+          {admitted.length} of 3 admitted
+          {admitted.length >= 2
+            ? " — enough to choose from; waiting for the last one"
+            : ""}
+        </p>
         {studio === null && requestError?.scope === "generate" && (
           <div className="banner banner-fault" role="alert">
             <p>{requestError.message}</p>

@@ -514,6 +514,28 @@ function publicConceptStudio(missionId) {
   };
 }
 
+// Save one admitted concept into the session immediately, so the studio can
+// show it while its siblings are still being generated or retried. The job's
+// own merge at the end remains the authority on ordering, token accounting and
+// recorded failures; this only makes finished work visible sooner.
+function publishAdmittedConcept(missionId, concept) {
+  try {
+    const session = prototypeSessions.read(missionId);
+    if (session === null) return;
+    prototypeSessions.save({
+      ...session,
+      concepts: [
+        ...session.concepts.filter(
+          (entry) => entry.contract.conceptId !== concept.contract.conceptId,
+        ),
+        concept,
+      ],
+    });
+  } catch {
+    // Visibility is a convenience; never let it disturb a running generation.
+  }
+}
+
 function persistedConceptVerification(concept) {
   const content = prototypeWorkspaces.readEvidenceFile(
     concept.contract,
@@ -665,6 +687,12 @@ function startConceptGenerationJob({ missionId, understanding, sourceProjectDesi
               }
               continue;
             }
+            // Publish the moment it is admitted. Holding every concept until
+            // the whole job resolved meant two finished, browser-admitted
+            // directions sat invisible for minutes behind a spinner while a
+            // third retried — the customer watching "Building live concepts…"
+            // with the work already done and nothing to show for it.
+            publishAdmittedConcept(missionId, concept);
             return { concept, usages, verification, failures, error: null };
           } catch (error) {
             const message = String(error?.message ?? error).slice(0, 1_000);
