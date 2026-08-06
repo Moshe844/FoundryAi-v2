@@ -483,3 +483,48 @@ test("the responsive probe measures the narrow end, where layouts break", async 
   // Both widths remain available to a project-specific check.
   assert.match(harness, /phoneNoHorizontalOverflow,\s*\n\s*narrowNoHorizontalOverflow,/u);
 });
+
+test("Foundry's own specs are never offered as repair targets", async () => {
+  // The real failure: three consecutive repair proposals were aimed at
+  // tests/foundry-design-fidelity-evidence.spec.ts, each proposing text
+  // identical to what was already there because there was nothing in it to
+  // fix. Foundry writes that spec and reinjects it every round, so any
+  // correction to it is discarded by construction. The mission ended after a
+  // single observation with the application's real failures — added, changed,
+  // focus, noOverflow — never addressed.
+  const { foundryOwnedTestPath } = await import(
+    "../src/work-plane/production-mission-service.js"
+  );
+
+  assert.equal(foundryOwnedTestPath("tests/foundry-observation.spec.ts"), true);
+  assert.equal(
+    foundryOwnedTestPath("tests/foundry-design-fidelity-evidence.spec.ts"),
+    true,
+  );
+  // The evidence spec takes a suffix when a mission needs more than one.
+  assert.equal(
+    foundryOwnedTestPath("tests/foundry-design-fidelity-evidence-home.spec.ts"),
+    true,
+  );
+
+  // The model's own assertions module stays repairable — it is the one test
+  // file a browser repair legitimately corrects.
+  assert.equal(foundryOwnedTestPath("tests/foundry-checks.ts"), false);
+  for (const applicationFile of [
+    "app/page.tsx",
+    "app/globals.css",
+    "lib/db.ts",
+    "playwright.config.ts",
+  ]) {
+    assert.equal(foundryOwnedTestPath(applicationFile), false, applicationFile);
+  }
+
+  // The eligible-file list must apply it.
+  const source = await import("node:fs/promises").then((fs) =>
+    fs.readFile(
+      new URL("../src/work-plane/production-mission-service.js", import.meta.url),
+      "utf8",
+    ),
+  );
+  assert.match(source, /!foundryOwnedTestPath\(file\.path\),/u);
+});

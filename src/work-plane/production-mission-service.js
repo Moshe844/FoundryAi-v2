@@ -156,6 +156,19 @@ export function browserCheckObservationFailure(failedCheckIds, diagnostics = {})
   ].join("\n");
 }
 
+// The specs Foundry authors and reinjects each round. A repair to one of them
+// is thrown away by construction, so they are never offered as repair targets;
+// tests/foundry-checks.ts, which the model writes, remains repairable.
+export function foundryOwnedTestPath(path) {
+  const normalized = String(path).replaceAll("\\", "/");
+  return (
+    normalized === "tests/foundry-observation.spec.ts" ||
+    /^tests\/foundry-design-fidelity-evidence(?:-[a-z0-9-]+)?\.spec\.ts$/u.test(
+      normalized,
+    )
+  );
+}
+
 export function productionBrowserRepairPolicy(observationFailure) {
   const designFidelity =
     typeof observationFailure === "string" &&
@@ -4924,7 +4937,16 @@ export function createProductionMissionService({
             (file) =>
               !file.path.startsWith("public/") &&
               !file.path.startsWith("data/") &&
-              file.path !== "package-lock.json",
+              file.path !== "package-lock.json" &&
+              // Foundry writes its own observation harness and design-fidelity
+              // evidence spec, and rewrites them on every round, so a
+              // correction to either is discarded. Offering them as repair
+              // targets sent three consecutive proposals at
+              // foundry-design-fidelity-evidence.spec.ts, each proposing text
+              // identical to what was already there because there was nothing
+              // in it to fix, and the mission ended after a single round with
+              // the application's real failures never addressed.
+              !foundryOwnedTestPath(file.path),
           )
           .map((file) => ({
             path: file.path,
