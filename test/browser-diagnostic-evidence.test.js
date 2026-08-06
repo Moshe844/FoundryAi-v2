@@ -421,3 +421,34 @@ test("an unbalanced JSX tag is reported with its position and cause", async () =
     assert.equal(hasBalancedJsxTags(balanced), true);
   }
 });
+
+test("a Playwright test cannot break the production build", async () => {
+  const { foundryObservationHarness } = await import(
+    "../src/work-plane/production-mission-service.js"
+  );
+  const source = await import("node:fs/promises").then((fs) =>
+    fs.readFile(
+      new URL("../src/work-plane/production-mission-service.js", import.meta.url),
+      "utf8",
+    ),
+  );
+
+  // The real failure: the observation's own assertions module used expect()
+  // without importing it, `next build` type-checks everything the project
+  // includes, and the production build failed on ./tests/foundry-checks.ts.
+  // A test file must never be able to break the shipped application.
+  assert.match(
+    source,
+    /const exclude = \[\.\.\.new Set\(\[\.\.\.\(configuration\.exclude \?\? \[\]\), "node_modules", "tests"\]\)\]/u,
+    "generated tsconfig must exclude the Playwright specs from the build",
+  );
+
+  // And the mistake is removed at its source: expect is supplied to each check,
+  // so reaching for it needs no import at all.
+  const harness = foundryObservationHarness(["obligation-001"]);
+  assert.match(
+    harness,
+    /await check\(\{ page, expect, responsiveEvidence, accessibilityEvidence \}\)/u,
+  );
+  assert.match(source, /Take expect from the supplied context rather than importing it/u);
+});

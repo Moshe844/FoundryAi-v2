@@ -1013,7 +1013,7 @@ export function ensureCertifiedStackScaffold(
     ? "./src/*"
     : "./*";
   const certifiedConfigurationFiles = certifiedPackageFiles.map((file) => {
-    if (file.path !== "tsconfig.json" || !usesRootAlias) return file;
+    if (file.path !== "tsconfig.json") return file;
     let configuration;
     try {
       configuration = JSON.parse(file.content);
@@ -1023,19 +1023,26 @@ export function ensureCertifiedStackScaffold(
     const compilerOptions = {
       ...(configuration.compilerOptions ?? {}),
     };
-    const paths = {
-      ...(compilerOptions.paths ?? {}),
-      "@/*": [sourceRoot],
-    };
+    if (usesRootAlias) {
+      compilerOptions.baseUrl = ".";
+      compilerOptions.paths = {
+        ...(compilerOptions.paths ?? {}),
+        "@/*": [sourceRoot],
+      };
+    }
+    // A Playwright spec is not application source, and `next build` type-checks
+    // everything the project includes. A missing `expect` import in the
+    // observation's own assertions module therefore failed the production
+    // build — a test file breaking the shipped application. Playwright compiles
+    // its specs itself, with its own types, so excluding them here costs no
+    // coverage and stops the test from being able to break the build.
+    const exclude = [...new Set([...(configuration.exclude ?? []), "node_modules", "tests"])];
     return {
       ...file,
       content: `${JSON.stringify({
         ...configuration,
-        compilerOptions: {
-          ...compilerOptions,
-          baseUrl: ".",
-          paths,
-        },
+        compilerOptions,
+        exclude,
       }, null, 2)}\n`,
     };
   });
@@ -2640,7 +2647,10 @@ test("foundry contract observation", async ({ page }) => {
         continue;
       }
       try {
-        const outcome = await check({ page, responsiveEvidence, accessibilityEvidence });
+        // expect is handed to the check because reaching for it is the natural
+        // way to write a Playwright assertion. A checks module that used it
+        // without importing it once failed the production build itself.
+        const outcome = await check({ page, expect, responsiveEvidence, accessibilityEvidence });
         const passed = outcome === true || (outcome !== null && typeof outcome === "object" && outcome.passed === true);
         const detail =
           outcome !== null && typeof outcome === "object" && outcome.diagnostics !== undefined
@@ -3049,7 +3059,7 @@ function bundlePrompt(profile, contract, bindings, approvedContract = null, engi
     // policing fifty rules about how it chose to write them, and rejecting
     // correct code for its style. It supplies the assertions only.
     "Do not write a Playwright spec file and do not emit FOUNDRY_BROWSER_RESULT. Foundry generates tests/foundry-observation.spec.ts, which owns the evidence marker, console and page error capture, per-check isolation, and the shared phone-layout and accessibility measurements. A spec file you write that emits the marker is discarded.",
-    "Write exactly one observation file, tests/foundry-checks.ts, exporting `export const obligationChecks: Record<string, (context: { page: any; responsiveEvidence: Record<string, boolean>; accessibilityEvidence: Record<string, boolean> }) => Promise<{ passed: boolean; diagnostics: Record<string, boolean | number | string | null> }>> = { ... }` with one entry keyed by each exact supplied checkId.",
+    "Write exactly one observation file, tests/foundry-checks.ts, exporting `export const obligationChecks: Record<string, (context: { page: any; expect: any; responsiveEvidence: Record<string, boolean>; accessibilityEvidence: Record<string, boolean> }) => Promise<{ passed: boolean; diagnostics: Record<string, boolean | number | string | null> }>> = { ... }` with one entry keyed by each exact supplied checkId. Take expect from the supplied context rather than importing it; the file must import nothing from @playwright/test.",
     "Each entry drives the running UI with Playwright through `context.page` and returns { passed, diagnostics }. passed must be computed from what the browser actually showed. diagnostics names the sub-observations behind that verdict, so a false verdict identifies its exact failed predicate. Do not initialize arrays, attach listeners, catch your own errors, or print anything: the harness does all of it.",
     "For a check about phone layout use context.responsiveEvidence, and for a check about keyboard focus or labelling use context.accessibilityEvidence, rather than measuring those again. Combine them with your own project-specific observations.",
     // The project type-checks under noImplicitAny, and an unannotated callback
