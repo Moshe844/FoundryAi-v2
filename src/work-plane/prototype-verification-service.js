@@ -41,7 +41,30 @@ function admissionFindings(contract, browserResult) {
       if (measurement.hasMain !== true) findings.push(`${prefix}: semantic main surface is missing.`);
       if (!Number.isSafeInteger(measurement.headingCount) || measurement.headingCount < 1) findings.push(`${prefix}: visual hierarchy has no heading.`);
       if (!Number.isSafeInteger(measurement.semanticSurfaceCount) || measurement.semanticSurfaceCount < 2) findings.push(`${prefix}: representative semantic surfaces are missing.`);
-      if (measurement.horizontalOverflow !== false) findings.push(`${prefix}: horizontal overflow detected.`);
+      // Overflow is the single most common reason a concept is refused, and
+      // "horizontal overflow detected" told the regeneration nothing it did not
+      // already know: one concept was refused twice for the identical finding,
+      // taking the studio below the two concepts a choice needs. Name the
+      // amount and the widest elements responsible.
+      if (measurement.horizontalOverflow !== false) {
+        const excess =
+          Number.isFinite(measurement.scrollWidth) && Number.isFinite(measurement.clientWidth)
+            ? measurement.scrollWidth - measurement.clientWidth
+            : null;
+        const offenders = (measurement.overflowingElements ?? [])
+          .map((entry) => `${entry.selector} (reaches ${entry.right}px, width ${entry.width}px)`)
+          .join("; ");
+        findings.push(
+          [
+            `${prefix}: horizontal overflow detected`,
+            excess === null
+              ? "."
+              : ` — content is ${excess}px wider than the ${measurement.clientWidth}px viewport.`,
+            offenders === "" ? "" : ` Widest offenders: ${offenders}.`,
+            " Constrain them with max-width:100%, wrapping, or fluid widths; do not set a fixed width larger than the viewport.",
+          ].join(""),
+        );
+      }
       if (!Number.isSafeInteger(measurement.focusableCount) || measurement.focusableCount < 1) findings.push(`${prefix}: no keyboard interaction target exists.`);
       if (measurement.activeElement === null || measurement.activeElement === "BODY") findings.push(`${prefix}: keyboard focus could not be established.`);
       if (measurement.missingImageAltCount !== 0) findings.push(`${prefix}: image alternative text is missing.`);

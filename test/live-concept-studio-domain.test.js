@@ -228,3 +228,37 @@ test("a studio offers the concepts it proved rather than failing over one it did
   assert.doesNotMatch(completion, /^\s*if \(firstError !== null\) throw firstError;/mu);
   assert.match(completion, /throw firstError \?\?/u, "the cause is still reported when there is no choice");
 });
+
+test("a refused concept is told what overflowed and by how much", async () => {
+  // Horizontal overflow is the most common reason a concept is refused, and
+  // "horizontal overflow detected" told the regeneration nothing it did not
+  // already know: one concept was refused twice for the identical finding, and
+  // the studio fell below the two directions a choice requires.
+  const service = await readFile(
+    new URL("../src/work-plane/prototype-verification-service.js", import.meta.url),
+    "utf8",
+  );
+  const verifier = await readFile(
+    new URL("../src/work-plane/prototype-browser-verifier.js", import.meta.url),
+    "utf8",
+  );
+  const generation = await readFile(
+    new URL("../src/work-plane/prototype-generation-service.js", import.meta.url),
+    "utf8",
+  );
+
+  // The measurement must identify the offending elements, not only that the
+  // page is too wide.
+  assert.match(verifier, /overflowingElements/u);
+  assert.match(verifier, /box\.right > viewportWidth \+ 1/u);
+
+  // The finding must carry the amount and the widest offenders.
+  assert.match(service, /content is \$\{excess\}px wider than the \$\{measurement\.clientWidth\}px viewport/u);
+  assert.match(service, /Widest offenders: \$\{offenders\}/u);
+  assert.match(service, /max-width:100%/u);
+
+  // And the generator is told the rule before it writes anything, since a
+  // refused concept costs the studio a direction.
+  assert.match(generation, /opened at 390px, 768px and 1280px wide and is refused if anything overflows/u);
+  assert.match(generation, /min-width:0/u);
+});

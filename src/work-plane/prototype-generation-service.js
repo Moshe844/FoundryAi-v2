@@ -116,6 +116,10 @@ function prompt(contract, admissionFeedback = []) {
           "The result must still satisfy the project outcome, primary users, required workflows, accessibility, responsive behavior, technical feasibility, and every explicit exclusion. Do not create a generic SaaS shell and do not use arbitrary novelty.",
         ]
       : []),
+    // Horizontal overflow is the most common reason a concept is refused
+    // admission, and a refused concept can take the studio below the two
+    // directions a choice requires.
+    "The concept is opened at 390px, 768px and 1280px wide and is refused if anything overflows horizontally at any of them. Never give an element a fixed width, min-width, or padding that can exceed the viewport. Let grids and flex rows wrap, allow flex and grid children to shrink with min-width:0, keep media and tables to max-width:100%, and give any element that must scroll its own overflow-x container rather than widening the page.",
     "Every expected file must be returned exactly once. The concept must run as a static origin-isolated HTML/CSS/ES-module application.",
     `CONCEPT_PROTOTYPE_CONTRACT ${contract.integrityHash}`,
     JSON.stringify(contract),

@@ -167,7 +167,20 @@ const MEASURE_EXPRESSION = `(() => {
   const images = [...document.querySelectorAll('img,picture,svg,video')].filter(visible).slice(0, 40).map((element) => { const box = element.getBoundingClientRect(); const style = getComputedStyle(element); return { tag: element.tagName.toLowerCase(), x: box.x, y: box.y, width: box.width, height: box.height, objectFit: style.objectFit, alt: element instanceof HTMLImageElement ? element.alt : null }; });
   const interactions = [...document.querySelectorAll('a[href],button,input,select,textarea,[tabindex]:not([tabindex="-1"])')].filter(visible).slice(0, 80).map((element) => ({ tag: element.tagName.toLowerCase(), type: element.getAttribute('type'), href: element.getAttribute('href'), label: element.getAttribute('aria-label') || element.textContent?.trim().slice(0, 80) || null }));
   const activeStyle = focusable ? getComputedStyle(focusable) : null;
+  const viewportWidth = document.documentElement.clientWidth;
+  const overflowingElements = [...document.querySelectorAll('body *')]
+    .map((element) => ({ element, box: element.getBoundingClientRect() }))
+    .filter(({ element, box }) => box.width > 0 && box.height > 0 && box.right > viewportWidth + 1 && visible(element))
+    .sort((left, right) => right.box.right - left.box.right)
+    .slice(0, 5)
+    .map(({ element, box }) => ({
+      tag: element.tagName.toLowerCase(),
+      selector: (element.id ? '#' + element.id : (typeof element.className === 'string' && element.className.trim() !== '' ? '.' + element.className.trim().split(/\\s+/).slice(0, 2).join('.') : element.tagName.toLowerCase())).slice(0, 80),
+      right: Math.round(box.right),
+      width: Math.round(box.width),
+    }));
   return {
+    overflowingElements,
     readyState: document.readyState,
     title: document.title,
     language: document.documentElement.lang,
