@@ -4465,6 +4465,18 @@ export function createProductionMissionService({
       let previousOutstandingFailures;
       let stalledRounds = 0;
       let latestFidelityFailureCount = 0;
+      // Of thirty recorded failures on this path, nine had every required
+      // browser check observed true — the application demonstrably worked, its
+      // workflows proven in a real browser — and the mission was failed anyway
+      // because the produced layout was not close enough to the approved
+      // prototype. Destroying working software over a geometry distance is the
+      // wrong trade: the customer is left with nothing when they could have had
+      // the product plus an honest account of where its design fell short.
+      // Behaviour remains non-negotiable; fidelity, once every safe correction
+      // has been spent, is reported rather than fatal.
+      let designFidelityShortfall = null;
+      let latestFidelityVerdict = null;
+      let nonFidelityFailureOutstanding = true;
       const browserTargets = Object.entries(bindings)
         .filter(
           ([, binding]) =>
@@ -4614,6 +4626,14 @@ export function createProductionMissionService({
                     throw new Error("Persisted prototype fidelity evidence does not match the replayed comparison.");
                   }
                   latestFidelityFailureCount = fidelity.passed ? 0 : fidelity.failedAspects.length;
+                  latestFidelityVerdict = fidelity.passed
+                    ? null
+                    : Object.freeze({
+                        failedAspects: Object.freeze([...fidelity.failedAspects]),
+                        comparedViewports: fidelity.comparedViewports,
+                        integrityHash: fidelity.integrityHash,
+                        verdicts: fidelity.verdicts,
+                      });
                   if (!fidelity.passed) {
                     // Naming the failed aspects without their measurements gave
                     // the repair nothing to aim at: it was told "composition,
@@ -4661,6 +4681,15 @@ export function createProductionMissionService({
                 : "The browser result could not be parsed.",
             );
           }
+          // Fidelity is the only observation whose failure may be reported
+          // rather than fatal, so it must be told apart from every other one:
+          // a false browser check, a console error, an unparseable result.
+          nonFidelityFailureOutstanding = observationFailures.some(
+            (failure) =>
+              !/^Production design fidelity failed against the approved live prototype:/u.test(
+                failure,
+              ),
+          );
           browserFailure =
             observationFailures.length === 0
               ? undefined
@@ -4672,6 +4701,33 @@ export function createProductionMissionService({
           observationVerified = true;
           break;
         }
+        // Every required workflow was observed working in a real browser and
+        // the only thing still outstanding is how closely the layout matches
+        // the approved prototype. Once no safe correction remains, deliver the
+        // working product and state the shortfall plainly.
+        const behaviourProven =
+          browserResult !== undefined &&
+          !nonFidelityFailureOutstanding &&
+          requiredBrowserChecks.every(
+            (checkId) => browserResult.checks[checkId] === true,
+          );
+        const acceptWithShortfall = (reason) => {
+          designFidelityShortfall = Object.freeze({
+            failedAspects: latestFidelityVerdict?.failedAspects ?? [],
+            comparedViewports: latestFidelityVerdict?.comparedViewports ?? null,
+            integrityHash: latestFidelityVerdict?.integrityHash ?? null,
+            observation: browserFailure,
+            reason,
+          });
+          orchestrator.transition({
+            missionId,
+            eventId: `${missionId}-design-fidelity-shortfall-accepted`,
+            causationId: browser.workUnitId,
+            to: MissionState.EXECUTING,
+            reason: `Every approved workflow was observed working in a real browser. ${reason} The project is delivered with its design shortfall recorded against the approved prototype: ${(latestFidelityVerdict?.failedAspects ?? []).join(", ") || "unmeasured"}.`,
+          });
+          observationVerified = true;
+        };
         // A converging repair earns its remaining attempts; a stalled one only
         // spends them. Two rounds in a row without fewer outstanding failures
         // means the repairs have run out of ideas, and every further round is
@@ -4691,6 +4747,12 @@ export function createProductionMissionService({
           stalledRounds = 0;
         }
         previousOutstandingFailures = outstandingFailures;
+        if (stalledRounds >= 2 && behaviourProven) {
+          acceptWithShortfall(
+            `Corrections stopped reducing the outstanding design aspects after ${attempt + 1} observations.`,
+          );
+          break;
+        }
         if (stalledRounds >= 2) {
           orchestrator.transition({
             missionId,
@@ -4791,6 +4853,12 @@ export function createProductionMissionService({
             content: file.content,
           }));
         if (priorRepairCalls.length >= repairPolicy.maxCalls) {
+          if (behaviourProven) {
+            acceptWithShortfall(
+              `Its ${priorRepairCalls.length} safe design corrections are spent.`,
+            );
+            break;
+          }
           // Two distinct honest outcomes share this gate. A zero budget means
           // the first pass failed with no correction attempted (FAILED); a
           // spent budget means every safe correction was tried (EXHAUSTED).
@@ -5222,12 +5290,46 @@ export function createProductionMissionService({
         idempotencyKey: `${missionId}-runtime-health-${runtimeAttempt}-key`,
         verificationRequestReference: `${missionId}-verification`,
       });
+      // A delivered shortfall must be as durable as a failure was. Record it as
+      // evidence so the customer is told where the design departs from what
+      // they approved, rather than quietly handed something that looks
+      // fully-approved.
+      if (designFidelityShortfall !== null) {
+        evidence.capture({
+          evidenceId: `${missionId}-design-fidelity-shortfall`,
+          missionId,
+          kind: ObservationKind.BROWSER_INTERACTION_RESULT,
+          captureMethod: "same-browser-same-viewport-prototype-comparison",
+          producingSubsystem: PRODUCTION_MISSION_SOURCE,
+          timestamp: new Date().toISOString(),
+          payload: {
+            checks: Object.fromEntries(
+              designFidelityShortfall.failedAspects.map((aspect) => [aspect, false]),
+            ),
+            accepted: true,
+            reason: designFidelityShortfall.reason,
+          },
+          metadata: {
+            comparedViewports: designFidelityShortfall.comparedViewports,
+            integrityHash: designFidelityShortfall.integrityHash,
+          },
+          workspaceCheckpointReference: browser.postWorkCheckpointId,
+          obligationReference: null,
+          verificationRequestReference: `${missionId}-verification`,
+          commandReference: browser.workUnitId,
+          workUnitReference: browser.workUnitId,
+          sensitiveValues: [],
+        });
+      }
       orchestrator.transition({
         missionId,
         eventId: `${missionId}-verifying`,
         causationId: `${missionId}-browser-observation`,
         to: MissionState.VERIFYING,
-        reason: "Real build, runtime, HTTP, and browser observations are recorded.",
+        reason:
+          designFidelityShortfall === null
+            ? "Real build, runtime, HTTP, and browser observations are recorded."
+            : `Real build, runtime, HTTP, and browser observations are recorded. The approved design was matched except for: ${designFidelityShortfall.failedAspects.join(", ") || "unmeasured aspects"}.`,
       });
       return finishVerification(missionId);
     },

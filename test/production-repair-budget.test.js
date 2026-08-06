@@ -148,3 +148,53 @@ test("a rejected patch names the text that failed and why", async () => {
     /do not change the current file in app\/globals\.css/u,
   );
 });
+
+test("a proven application is delivered even when its design falls short", async () => {
+  // Of thirty recorded failures on the approved-prototype path, nine had every
+  // required browser check observed true — add an item, update a quantity,
+  // delete with confirmation, survive a refresh, all proven in a real browser —
+  // and the mission was failed anyway because the produced layout was not close
+  // enough to the approved prototype. That is working software destroyed over a
+  // geometry distance, and it is the single largest cause of "Foundry built
+  // nothing" on that path.
+  const source = await readFile(
+    new URL("../src/work-plane/production-mission-service.js", import.meta.url),
+    "utf8",
+  );
+
+  // Behaviour is what must hold: every required check true, and no failure
+  // outstanding other than fidelity.
+  assert.match(
+    source,
+    /const behaviourProven =\s*\n\s*browserResult !== undefined &&\s*\n\s*!nonFidelityFailureOutstanding &&\s*\n\s*requiredBrowserChecks\.every\(\s*\n\s*\(checkId\) => browserResult\.checks\[checkId\] === true,\s*\n\s*\);/u,
+    "acceptance must require every browser check and no non-fidelity failure",
+  );
+
+  // Only a design-fidelity observation may be waived. Anything else — a false
+  // check, a console error, an unparseable result — still fails the mission.
+  assert.match(
+    source,
+    /nonFidelityFailureOutstanding = observationFailures\.some\(\s*\n\s*\(failure\) =>\s*\n\s*!\/\^Production design fidelity failed/u,
+  );
+
+  // Both places that previously destroyed the build now deliver it first.
+  const budgetGate = source.slice(
+    source.indexOf("if (priorRepairCalls.length >= repairPolicy.maxCalls)"),
+    source.indexOf("const repairsWereAttempted"),
+  );
+  assert.match(budgetGate, /if \(behaviourProven\) \{[\s\S]*acceptWithShortfall/u);
+
+  const stallGate = source.slice(
+    source.indexOf("if (stalledRounds >= 2 && behaviourProven)"),
+    source.indexOf("browser-repair-stalled"),
+  );
+  assert.match(stallGate, /acceptWithShortfall\(/u);
+
+  // The shortfall must be recorded as evidence and named in the verdict, so a
+  // delivered project is never silently passed off as fully matching.
+  assert.match(source, /\$\{missionId\}-design-fidelity-shortfall/u);
+  assert.match(
+    source,
+    /The approved design was matched except for: \$\{designFidelityShortfall\.failedAspects\.join\(", "\)/u,
+  );
+});
