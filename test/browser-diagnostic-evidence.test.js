@@ -155,7 +155,7 @@ test("a helper that computes checks is accepted, but not one that fakes them", (
   const faked = scaffold.replace("checks[id] = await run();", "checks[id] = true;");
   assert.throws(
     () => validateBrowserObservationTestSource(faked + emit, ["obligation-001"], {}),
-    /literal success value through a helper/u,
+    /may not be handed a literal true/u,
   );
 
   // A check that appears nowhere at all is still rejected.
@@ -287,7 +287,7 @@ test("one repair corrects a failure whose causes span several files", () => {
         currentFiles,
         requiredBrowserCheckIds: [],
       }),
-    /named the same file twice/u,
+    /named the same file twice: app\/globals\.css/u,
   );
 
   // A repeated hypothesis is still refused across the whole file set, in any
@@ -308,7 +308,7 @@ test("one repair corrects a failure whose causes span several files", () => {
         requiredBrowserCheckIds: [],
         priorStructuredOutputs: [proposal],
       }),
-    /repeats an existing hypothesis/u,
+    /repeats an earlier one exactly/u,
   );
 
   // Proposals recorded before this change named a single path; every reader

@@ -1673,7 +1673,7 @@ export function validateBrowserObservationTestSource(
     !/finally\s*\{[\s\S]*FOUNDRY_BROWSER_RESULT:/u.test(source)
   ) {
     throw new TypeError(
-      "The browser observation test must emit its evidence marker from a finally block.",
+      "The browser observation test must emit FOUNDRY_BROWSER_RESULT from a finally block. Emitted anywhere else, a failing assertion aborts the run before the marker is written and the observation is lost entirely rather than reported as a failure.",
     );
   }
   for (const checkId of requiredBrowserCheckIds) {
@@ -1730,7 +1730,7 @@ export function validateBrowserObservationTestSource(
     )
   ) {
     throw new TypeError(
-      "The browser observation test may not certify a check with a literal success value through a helper.",
+      "A helper that records check results may not be handed a literal true. The helper must receive the value an observation produced, so that what it records is what the running page actually did.",
     );
   }
   if (responsiveCheckIds.length > 0) {
@@ -1759,7 +1759,7 @@ export function validateBrowserObservationTestSource(
     );
     if (phoneViewports.length === 0) {
       throw new TypeError(
-        "Responsive browser verification must run a real phone-width viewport between 280 and 480 pixels.",
+        "Responsive verification must set a real phone-width viewport between 280 and 480 pixels before measuring. Measuring at the default desktop width proves nothing about a phone.",
       );
     }
     const tokenHasRuntimeUse = (token) => {
@@ -1779,7 +1779,7 @@ export function validateBrowserObservationTestSource(
         !declaredViewportWidthUsed)
     ) {
       throw new TypeError(
-        "Responsive browser verification must measure horizontal overflow from scrollWidth and the visible viewport width.",
+        "Responsive verification must measure horizontal overflow by comparing document.documentElement.scrollWidth with clientWidth. A screenshot or a visibility assertion cannot detect a page that is wider than its viewport.",
       );
     }
     if (
@@ -1788,7 +1788,7 @@ export function validateBrowserObservationTestSource(
         !declaredViewportHeightUsed)
     ) {
       throw new TypeError(
-        "Responsive browser verification must measure page or workflow height against the visible viewport height.",
+        "Responsive verification must compare the rendered height against window.innerHeight, so a layout that runs to many screens on a phone is observed rather than assumed acceptable.",
       );
     }
     // This scans the whole test file, so the offending expression is usually in
@@ -1836,7 +1836,7 @@ export function validateBrowserObservationTestSource(
       (!hasLiteralInteractionBound && !hasNamedInteractionBound)
     ) {
       throw new TypeError(
-        "Responsive browser verification must enforce a finite interaction-density bound for the active workflow surface.",
+        "Responsive verification must bound how many interactive controls the phone surface presents, compared against a finite number. Without a bound the check passes for any layout, however unusable.",
       );
     }
     for (const checkId of responsiveCheckIds) {
@@ -2070,15 +2070,18 @@ export function validateBrowserRepairProposal({
   const patches = repairPatchFiles(structuredOutput);
   if (patches.length === 0) {
     throw new Error(
-      "The browser repair proposed no file edits.",
+      "The browser repair returned no file edits at all. Name at least one existing project file and the exact replacements that correct the observed failure.",
     );
   }
   const patchedPaths = patches.map((patch) => patch?.path);
   if (new Set(patchedPaths).size !== patchedPaths.length) {
     // Two edits to one file would each be applied against the same starting
     // content, so the second would silently discard the first.
+    const repeated = [
+      ...new Set(patchedPaths.filter((path, index) => patchedPaths.indexOf(path) !== index)),
+    ];
     throw new Error(
-      "The browser repair named the same file twice; combine its replacements into one entry.",
+      `The browser repair named the same file twice: ${repeated.join(", ")}. Combine every replacement for a file into that file's single entry; two entries would each apply against the same starting content and the second would discard the first.`,
     );
   }
   const hypothesis = (output) =>
@@ -2092,7 +2095,7 @@ export function validateBrowserRepairProposal({
   );
   if (duplicateHypothesis && !allowPriorReplay) {
     throw new Error(
-      "The proposed repair repeats an existing hypothesis without new evidence.",
+      `The proposed repair repeats an earlier one exactly — the same replacements in ${patchedPaths.join(", ")} — and that attempt left the observation failing. Diagnose the remaining cause from the current file contents and the named failed sub-checks, and propose a different change.`,
     );
   }
   const accepted = patches.map((patch) =>
@@ -2123,8 +2126,22 @@ function validateSingleRepairPatch({
     (file) => file.path === structuredOutput?.path,
   );
   if (currentFile === undefined) {
+    // Naming neither the path nor what was available left a proposal that had
+    // simply guessed a filename with no way to correct itself.
+    const available = currentFiles.map((file) => file.path);
+    const near = available.filter((path) => {
+      const proposed = String(structuredOutput?.path ?? "");
+      const leaf = proposed.slice(proposed.lastIndexOf("/") + 1);
+      return leaf !== "" && path.endsWith(leaf);
+    });
     throw new Error(
-      "The browser repair attempted to change a file outside the current generated project.",
+      [
+        `The browser repair named "${structuredOutput?.path}", which is not a file in this project.`,
+        near.length > 0
+          ? `Did you mean ${near.join(" or ")}?`
+          : `The files you may edit are: ${available.join(", ")}.`,
+        "Use one of those exact paths.",
+      ].join(" "),
     );
   }
   const repairedContent = applyExactReplacements(
@@ -2180,9 +2197,11 @@ function validateSingleRepairPatch({
   if (repairsTestSource) {
     const expectationCount = (content) =>
       content.match(/\bexpect\s*\(/gu)?.length ?? 0;
-    if (expectationCount(repairedContent) < expectationCount(currentFile.content)) {
+    const assertionsBefore = expectationCount(currentFile.content);
+    const assertionsAfter = expectationCount(repairedContent);
+    if (assertionsAfter < assertionsBefore) {
       throw new Error(
-        "The browser repair may not remove contract assertions.",
+        `The browser repair removed ${assertionsBefore - assertionsAfter} of the ${assertionsBefore} assertions in ${structuredOutput.path}. Deleting an assertion makes the observation pass without proving anything; correct how the failing one observes — its locator, its wait, or its scope — and keep every assertion.`,
       );
     }
     const assertedLiterals = [
@@ -2192,13 +2211,14 @@ function validateSingleRepairPatch({
     ]
       .map((match) => match[1] ?? match[2])
       .filter(Boolean);
-    if (
-      assertedLiterals.some(
-        (literal) => !repairedContent.includes(literal),
-      )
-    ) {
+    const lostLiterals = assertedLiterals.filter(
+      (literal) => !repairedContent.includes(literal),
+    );
+    if (lostLiterals.length > 0) {
       throw new Error(
-        "The browser repair may not change or remove an asserted customer outcome.",
+        `The browser repair removed or altered ${lostLiterals.length} asserted customer outcome(s) in ${structuredOutput.path}: ${lostLiterals
+          .map((literal) => `"${excerptForRejection(literal)}"`)
+          .join(", ")}. Those strings are what the customer was promised; correct the locator or the wait around them and leave the asserted text exactly as it is.`,
       );
     }
     const checkExpression = (content, checkId) => {
@@ -2211,27 +2231,34 @@ function validateSingleRepairPatch({
         "u",
       ).exec(content)?.[1].trim();
     };
-    if (
-      requiredBrowserCheckIds.some(
-        (checkId) =>
-          checkExpression(repairedContent, checkId) !==
-          checkExpression(currentFile.content, checkId),
-      )
-    ) {
+    const rewrittenVerdicts = requiredBrowserCheckIds
+      .map((checkId) => ({
+        checkId,
+        was: checkExpression(currentFile.content, checkId),
+        now: checkExpression(repairedContent, checkId),
+      }))
+      .filter((entry) => entry.was !== entry.now);
+    if (rewrittenVerdicts.length > 0) {
       throw new Error(
-        "The browser repair may correct selectors or synchronization but may not change a contract-check verdict formula.",
+        [
+          `The browser repair changed the verdict formula of ${rewrittenVerdicts.length} contract check(s) in ${structuredOutput.path}:`,
+          ...rewrittenVerdicts.map(
+            (entry) =>
+              `  - ${entry.checkId}: was \`${excerptForRejection(entry.was ?? "(absent)")}\`, now \`${excerptForRejection(entry.now ?? "(absent)")}\``,
+          ),
+          "A repair may correct a selector, a wait, or a scope, but what a check concludes is the contract. Restore each formula and fix how it observes instead.",
+        ].join("\n"),
       );
     }
     const literalSuccessCount = (content) =>
       content.match(
         /(?:=|return)\s*(?:true\b|Boolean\s*\(\s*true\s*\))/gu,
       )?.length ?? 0;
-    if (
-      literalSuccessCount(repairedContent) >
-      literalSuccessCount(currentFile.content)
-    ) {
+    const literalsBefore = literalSuccessCount(currentFile.content);
+    const literalsAfter = literalSuccessCount(repairedContent);
+    if (literalsAfter > literalsBefore) {
       throw new Error(
-        "The browser repair may not introduce a literal success path.",
+        `The browser repair added ${literalsAfter - literalsBefore} assignment(s) or return(s) of a literal true in ${structuredOutput.path}. A check must conclude from something observed in the running page; hard-coding a pass reports success that was never seen. Observe the condition and return what the observation found.`,
       );
     }
     validateBrowserObservationTestSource(
@@ -2279,21 +2306,32 @@ export function validateGeneratedRepairPath(path, currentFiles) {
     path.startsWith("/") ||
     path.split("/").some((segment) => segment === "" || segment === "." || segment === "..")
   ) {
-    throw new Error("The repair model returned an unsafe project-relative path.");
+    throw new Error(
+      `The repair named "${path}", which is not a safe project-relative path. Use a forward-slash path relative to the project root, with no leading slash, no backslashes, and no "." or ".." segments — for example app/page.tsx.`,
+    );
   }
   const normalized = path.toLowerCase();
-  if (
-    normalized.startsWith("node_modules/") ||
-    normalized.startsWith(".next/") ||
-    normalized.startsWith("data/") ||
-    normalized === "package-lock.json" ||
-    normalized.endsWith(".env")
-  ) {
-    throw new Error("The repair model targeted a protected generated path.");
+  const protectedReason = normalized.startsWith("node_modules/")
+    ? "installed dependencies are not project source"
+    : normalized.startsWith(".next/")
+      ? "the build output is regenerated from source"
+      : normalized.startsWith("data/")
+        ? "that is the running application's data, not its source"
+        : normalized === "package-lock.json"
+          ? "the lockfile is produced by the installer"
+          : normalized.endsWith(".env")
+            ? "environment files are not part of the generated project"
+            : null;
+  if (protectedReason !== null) {
+    throw new Error(
+      `The repair named "${path}", which Foundry owns and regenerates: ${protectedReason}. Change the source that produces it instead.`,
+    );
   }
   const extension = path.slice(path.lastIndexOf(".")).toLowerCase();
   if (!repairableFileExtensions.has(extension)) {
-    throw new Error("The repair model returned an unsupported source or configuration file type.");
+    throw new Error(
+      `The repair named "${path}", whose "${extension}" files are not repairable. Repairable file types are: ${[...repairableFileExtensions].sort().join(", ")}.`,
+    );
   }
   if (currentFiles.some((file) => file.path === path)) return "replace";
   const parent = dirname(path).replaceAll("\\", "/");
@@ -2304,8 +2342,11 @@ export function validateGeneratedRepairPath(path, currentFiles) {
       return existingParent === parent || existingParent.startsWith(`${parent}/`);
     });
   if (!parentExists) {
+    const directories = [
+      ...new Set(currentFiles.map((file) => dirname(file.path).replaceAll("\\", "/"))),
+    ].sort();
     throw new Error(
-      "A repair may add one file only inside an existing generated project directory.",
+      `The repair would create "${path}" in "${parent}", a directory this project does not have. A new file may only be added inside an existing one: ${directories.join(", ")}.`,
     );
   }
   return "write";
@@ -2322,7 +2363,7 @@ export function validateGeneratedRepairProposal({
   );
   if (currentFile?.content === structuredOutput.content) {
     throw new Error(
-      "The proposed source repair does not change the generated project.",
+      `The proposed repair returned ${structuredOutput.path} byte-for-byte unchanged, so nothing would be corrected. Return the file with the defect actually fixed.`,
     );
   }
   if (
@@ -2333,7 +2374,7 @@ export function validateGeneratedRepairProposal({
     )
   ) {
     throw new Error(
-      "The proposed source repair repeats an unchanged hypothesis.",
+      `The proposed repair returns exactly the same ${structuredOutput.path} as an earlier attempt, and that attempt left the failure in place. Diagnose the remaining cause from the recorded output and change something different.`,
     );
   }
 }

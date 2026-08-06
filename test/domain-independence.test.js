@@ -615,15 +615,15 @@ test("bounded repair can add a missing generic source file but rejects unsafe pa
         "node_modules/example/index.js",
         generatedFiles,
       ),
-    /protected generated path/u,
+    /which Foundry owns and regenerates/u,
   );
   assert.throws(
     () => validateGeneratedRepairPath("../outside.ts", generatedFiles),
-    /unsafe project-relative path/u,
+    /is not a safe project-relative path/u,
   );
   assert.throws(
     () => validateGeneratedRepairPath("missing/deep/file.ts", generatedFiles),
-    /existing generated project directory/u,
+    /a directory this project does not have/u,
   );
 });
 
@@ -650,7 +650,7 @@ test("source repair proposals reject unchanged and repeated work before executio
         },
         currentFiles,
       }),
-    /does not change/u,
+    /byte-for-byte unchanged/u,
   );
   assert.throws(
     () =>
@@ -667,7 +667,7 @@ test("source repair proposals reject unchanged and repeated work before executio
           },
         ],
       }),
-    /repeats an unchanged hypothesis/u,
+    /exactly the same[\s\S]*as an earlier attempt/u,
   );
 });
 
@@ -1445,7 +1445,7 @@ test("browser repair admission rejects repeated or inapplicable replacements bef
         requiredBrowserCheckIds: ["check-visible"],
         priorStructuredOutputs: [valid],
       }),
-    /repeats an existing hypothesis/u,
+    /repeats an earlier one exactly/u,
   );
   assert.throws(
     () =>
@@ -1496,7 +1496,7 @@ test("browser repair may correct a selector but cannot weaken its verdict", () =
         currentFiles: [{ path: "tests/workflow.spec.ts", content: source }],
         requiredBrowserCheckIds: ["check-cancel"],
       }),
-    /may not change a contract-check verdict formula/u,
+    /changed the verdict formula of 1 contract check/u,
   );
 });
 
@@ -1604,7 +1604,7 @@ test("browser repair cannot rewrite an asserted customer outcome", () => {
         currentFiles: [{ path: "tests/workflow.spec.ts", content: source }],
         requiredBrowserCheckIds: ["check-visible"],
       }),
-    /asserted customer outcome/u,
+    /removed or altered 1 asserted customer outcome/u,
   );
 });
 
