@@ -213,3 +213,59 @@ test("a proven application is delivered even when its design falls short", async
     /The approved design was matched except for: \$\{designFidelityShortfall\.failedAspects\.join\(", "\)/u,
   );
 });
+
+test("the accepted-shortfall evidence satisfies the real evidence schema", async () => {
+  // Twice the delivery path crashed a build whose application had been proven:
+  // once asking for an EXECUTING -> EXECUTING transition, once writing a
+  // browser-interaction payload with extra keys. Both times the tests covering
+  // it passed, because matching source text cannot see a validator reject a
+  // value at runtime. This one runs the validator production runs.
+  const { ObservationKind, normalizeEvidenceInput } = await import(
+    "../src/domain/observation-evidence.js"
+  );
+
+  const capture = (failedAspects) => ({
+    evidenceId: "mission-x-design-fidelity-shortfall",
+    missionId: "mission-x",
+    kind: ObservationKind.BROWSER_INTERACTION_RESULT,
+    captureMethod: "same-browser-same-viewport-prototype-comparison",
+    producingSubsystem: "production-mission-service",
+    timestamp: "2026-08-06T15:00:00.000Z",
+    payload: {
+      checks:
+        failedAspects.length > 0
+          ? Object.fromEntries(failedAspects.map((aspect) => [aspect, false]))
+          : { "design-fidelity": false },
+    },
+    metadata: {
+      accepted: true,
+      reason: "Its 4 safe design corrections are spent.",
+      failedAspects,
+      comparedViewports: 3,
+      integrityHash: "a".repeat(64),
+      observation: "Production design fidelity failed: typography, colors.",
+    },
+    workspaceCheckpointReference: "mission-x-035-post",
+    obligationReference: null,
+    verificationRequestReference: "mission-x-verification",
+    commandReference: "mission-x-035",
+    workUnitReference: "mission-x-035",
+    sensitiveValues: [],
+  });
+
+  // The aspect names a fidelity verdict actually produces, hyphens and all.
+  assert.doesNotThrow(() =>
+    normalizeEvidenceInput(capture(["surface-order", "typography", "colors"])),
+  );
+  // A shortfall accepted on a stalled round can carry no measured aspect, and
+  // browser-interaction checks may not be empty.
+  assert.doesNotThrow(() => normalizeEvidenceInput(capture([])));
+
+  // The shape that actually killed the build: extra payload keys are rejected.
+  const invalid = capture(["typography"]);
+  invalid.payload = { ...invalid.payload, accepted: true, reason: "spent" };
+  assert.throws(
+    () => normalizeEvidenceInput(invalid),
+    /payload must contain exactly: checks/u,
+  );
+});

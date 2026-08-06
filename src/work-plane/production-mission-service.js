@@ -5337,16 +5337,29 @@ export function createProductionMissionService({
           captureMethod: "same-browser-same-viewport-prototype-comparison",
           producingSubsystem: PRODUCTION_MISSION_SOURCE,
           timestamp: new Date().toISOString(),
+          // A browser-interaction payload carries exactly its checks; every
+          // other fact belongs in metadata, exactly as the fidelity comparison
+          // above records its own.
           payload: {
-            checks: Object.fromEntries(
-              designFidelityShortfall.failedAspects.map((aspect) => [aspect, false]),
-            ),
-            accepted: true,
-            reason: designFidelityShortfall.reason,
+            // Checks may not be empty, and a shortfall accepted on a stalled
+            // round can carry no measured aspect at all.
+            checks:
+              designFidelityShortfall.failedAspects.length > 0
+                ? Object.fromEntries(
+                    designFidelityShortfall.failedAspects.map((aspect) => [
+                      aspect,
+                      false,
+                    ]),
+                  )
+                : { "design-fidelity": false },
           },
           metadata: {
+            accepted: true,
+            reason: designFidelityShortfall.reason,
+            failedAspects: designFidelityShortfall.failedAspects,
             comparedViewports: designFidelityShortfall.comparedViewports,
             integrityHash: designFidelityShortfall.integrityHash,
+            observation: designFidelityShortfall.observation ?? "",
           },
           workspaceCheckpointReference: browser.postWorkCheckpointId,
           obligationReference: null,
