@@ -4298,6 +4298,11 @@ export function createProductionMissionService({
       const approvedPrototypeContract = comparablePrototypeDesign(approvedContract);
       let browser;
       for (let attempt = 0; attempt < 7; attempt += 1) {
+        // Fidelity only runs once the browser checks pass, so this must reset
+        // each round. Carrying it forward counted a previous round's aspects
+        // against a round that never measured them, and halted a build that
+        // was in fact converging five, then five, then one.
+        latestFidelityFailureCount = 0;
         browser = await work(
           WorkUnitAction.RUN_COMMAND,
           {
