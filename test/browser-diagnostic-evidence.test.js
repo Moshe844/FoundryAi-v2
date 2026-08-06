@@ -344,3 +344,51 @@ test("only Foundry may emit the evidence marker", () => {
   // With no required checks there is nothing to observe, so nothing is injected.
   assert.deepEqual(bindFoundryObservationHarness(plan, []), plan);
 });
+
+test("an unbalanced delimiter is reported with its position and cause", async () => {
+  const { unbalancedJavaScriptDelimiter, hasBalancedJavaScriptDelimiters } =
+    await import("../src/work-plane/production-mission-service.js");
+
+  // The real defect, from a build that failed admission three times: one
+  // missing ")" inside a nested call. The gate knew exactly where it was and
+  // reported only "has unbalanced JavaScript delimiters" about a file of
+  // several thousand characters, so each regeneration re-emitted it until the
+  // correction budget ran out.
+  const truncatedCall =
+    "const locations=useMemo(()=>['All',...Array.from(new Set(items.map((i)=>i.location))],[items]);";
+  const diagnosis = unbalancedJavaScriptDelimiter(truncatedCall);
+  assert.match(diagnosis, /closing "\]" at line 1 column \d+/u);
+  assert.match(diagnosis, /does not match the "\(" opened at line 1 column \d+/u);
+  assert.match(diagnosis, /Array\.from/u, "the offending line is quoted back");
+
+  // An opener left dangling at end of file names where it was opened.
+  assert.match(
+    unbalancedJavaScriptDelimiter("export default function P(){return (<main/>;"),
+    /the "\(" opened at line 1 column 36 is never closed \(2 delimiters left open/u,
+  );
+  // A closer with no opener at all is named as such.
+  assert.match(
+    unbalancedJavaScriptDelimiter("const a = 1);"),
+    /closing "\)" at line 1 column 12 has no matching "\("/u,
+  );
+  // An unterminated string and block comment are distinguished from brackets.
+  assert.match(
+    unbalancedJavaScriptDelimiter("const a = 'unterminated;"),
+    /string opened with ' is never closed/u,
+  );
+  assert.match(
+    unbalancedJavaScriptDelimiter("const a = 1; /* open"),
+    /block comment is never closed/u,
+  );
+
+  // Balanced sources — including the JSX and apostrophe cases that were
+  // previously false positives — stay balanced.
+  for (const balanced of [
+    "export default function P(){return (<main><h1>Hi</h1></main>)}",
+    "export default function P(){return <p>Bea&apos;s desk isn't ready</p>}",
+    "const re = /[/]{1,2}/g; const n = [1,2].map((x)=>({x}));",
+  ]) {
+    assert.equal(unbalancedJavaScriptDelimiter(balanced), null, balanced);
+    assert.equal(hasBalancedJavaScriptDelimiters(balanced), true);
+  }
+});

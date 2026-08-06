@@ -157,7 +157,26 @@ export function productionBrowserRepairPolicy(observationFailure) {
   });
 }
 
-export function hasBalancedJavaScriptDelimiters(source) {
+function sourcePosition(source, index) {
+  const before = source.slice(0, index);
+  const line = before.split("\n").length;
+  const column = index - (before.lastIndexOf("\n") + 1) + 1;
+  return { line, column };
+}
+
+function lineAt(source, index) {
+  const start = source.lastIndexOf("\n", index - 1) + 1;
+  const end = source.indexOf("\n", index);
+  const text = source.slice(start, end === -1 ? source.length : end).trim();
+  return text.length > 160 ? `${text.slice(0, 160)}…` : text;
+}
+
+// The gate knew precisely which delimiter was unmatched and where, then
+// discarded it and returned a boolean. The regeneration that followed was told
+// only "has unbalanced JavaScript delimiters" about a file of several thousand
+// characters, so it re-emitted the same defect until the correction budget ran
+// out. Report the position and the offending delimiter.
+export function unbalancedJavaScriptDelimiter(source) {
   const pairs = { ")": "(", "]": "[", "}": "{" };
   const opening = new Set(Object.values(pairs));
   const stack = [];
@@ -246,17 +265,33 @@ export function hasBalancedJavaScriptDelimiters(source) {
       continue;
     }
     if (opening.has(character)) {
-      stack.push(character);
-    } else if (character in pairs && stack.pop() !== pairs[character]) {
-      return false;
+      stack.push({ character, index });
+    } else if (character in pairs) {
+      const open = stack.pop();
+      if (open === undefined) {
+        const at = sourcePosition(source, index);
+        return `a closing "${character}" at line ${at.line} column ${at.column} has no matching "${pairs[character]}" — ${lineAt(source, index)}`;
+      }
+      if (open.character !== pairs[character]) {
+        const at = sourcePosition(source, index);
+        const from = sourcePosition(source, open.index);
+        return `a closing "${character}" at line ${at.line} column ${at.column} does not match the "${open.character}" opened at line ${from.line} column ${from.column} — ${lineAt(source, index)}`;
+      }
     }
   }
-  return (
-    stack.length === 0 &&
-    quote === null &&
-    !blockComment &&
-    !regularExpression
-  );
+  if (stack.length > 0) {
+    const open = stack[stack.length - 1];
+    const at = sourcePosition(source, open.index);
+    return `the "${open.character}" opened at line ${at.line} column ${at.column} is never closed (${stack.length} delimiter${stack.length === 1 ? "" : "s"} left open at end of file) — ${lineAt(source, open.index)}`;
+  }
+  if (quote !== null) return `a ${quote === "`" ? "template literal" : "string"} opened with ${quote} is never closed`;
+  if (blockComment) return "a /* block comment is never closed";
+  if (regularExpression) return "a regular expression literal is never closed";
+  return null;
+}
+
+export function hasBalancedJavaScriptDelimiters(source) {
+  return unbalancedJavaScriptDelimiter(source) === null;
 }
 
 export function hasBalancedJsxTags(source) {
@@ -628,13 +663,13 @@ export function validateProjectBundleForStack(
     byPath.set(file.path, file.content);
   }
   for (const [path, content] of byPath) {
-    if (
-      /\.(?:js|jsx|mjs|ts|tsx)$/u.test(path) &&
-      !hasBalancedJavaScriptDelimiters(content)
-    ) {
-      throw new TypeError(
-        `Generated source "${path}" has unbalanced JavaScript delimiters.`,
-      );
+    if (/\.(?:js|jsx|mjs|ts|tsx)$/u.test(path)) {
+      const unbalanced = unbalancedJavaScriptDelimiter(content);
+      if (unbalanced !== null) {
+        throw new TypeError(
+          `Generated source "${path}" has unbalanced JavaScript delimiters: ${unbalanced}. Correct that expression and return the complete file.`,
+        );
+      }
     }
     if (/\.(?:jsx|tsx)$/u.test(path) && !hasBalancedJsxTags(content)) {
       throw new TypeError(
