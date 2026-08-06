@@ -392,3 +392,32 @@ test("an unbalanced delimiter is reported with its position and cause", async ()
     assert.equal(hasBalancedJavaScriptDelimiters(balanced), true);
   }
 });
+
+test("an unbalanced JSX tag is reported with its position and cause", async () => {
+  const { unbalancedJsxTag, hasBalancedJsxTags } = await import(
+    "../src/work-plane/production-mission-service.js"
+  );
+
+  // Rejected builds the same way the delimiter checker did: the regeneration
+  // was told only that the file "has unbalanced JSX tags" and had to locate the
+  // element itself across the whole page.
+  assert.match(
+    unbalancedJsxTag("export default function P(){return (<main><div><h1>Hi</h1></main>)}"),
+    /closing <\/main> at line 1 column \d+ does not match the <div> opened at line 1 column \d+/u,
+  );
+  assert.match(
+    unbalancedJsxTag("export default function P(){return (<main><h1>Hi</h2></main>)}"),
+    /closing <\/h2>[\s\S]*does not match the <h1>/u,
+  );
+
+  // Valid JSX — including void elements, expression attributes, and the
+  // comparison operators that must not read as tags — stays valid.
+  for (const balanced of [
+    "export default function P(){return (<main><h1>Hi</h1></main>)}",
+    'export default function P(){return (<main><img src="/a.png"/><br/><input value={x}/></main>)}',
+    "const n = a < b && c > d;",
+  ]) {
+    assert.equal(unbalancedJsxTag(balanced), null, balanced);
+    assert.equal(hasBalancedJsxTags(balanced), true);
+  }
+});

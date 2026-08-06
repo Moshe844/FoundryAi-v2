@@ -294,13 +294,20 @@ export function hasBalancedJavaScriptDelimiters(source) {
   return unbalancedJavaScriptDelimiter(source) === null;
 }
 
-export function hasBalancedJsxTags(source) {
+// Mute for the same reason the delimiter checker was, and rejected builds the
+// same way: the regeneration was told only that "app/page.tsx has unbalanced
+// JSX tags" and had to find the tag itself.
+export function unbalancedJsxTag(source) {
   const voidTags = new Set([
     "area", "base", "br", "col", "embed", "hr", "img", "input",
     "link", "meta", "param", "source", "track", "wbr",
   ]);
   const stack = [];
   let cursor = 0;
+  const describe = (index) => {
+    const at = sourcePosition(source, index);
+    return `line ${at.line} column ${at.column}`;
+  };
   while (cursor < source.length) {
     const start = source.indexOf("<", cursor);
     if (start === -1) break;
@@ -348,19 +355,35 @@ export function hasBalancedJsxTags(source) {
         break;
       }
     }
-    if (end === -1) return false;
+    if (end === -1) {
+      return `the <${tag}> at ${describe(start)} is never closed with ">" — ${lineAt(source, start)}`;
+    }
     const selfClosing =
       /\/\s*$/u.test(source.slice(position + tag.length, end)) ||
       voidTags.has(tag);
     cursor = end + 1;
     if (selfClosing) continue;
     if (closing) {
-      if (stack.pop() !== tag) return false;
+      const open = stack.pop();
+      if (open === undefined) {
+        return `a closing </${tag}> at ${describe(start)} has no matching <${tag}> — ${lineAt(source, start)}`;
+      }
+      if (open.tag !== tag) {
+        return `a closing </${tag}> at ${describe(start)} does not match the <${open.tag}> opened at ${describe(open.index)} — ${lineAt(source, start)}`;
+      }
     } else {
-      stack.push(tag);
+      stack.push({ tag, index: start });
     }
   }
-  return stack.length === 0;
+  if (stack.length > 0) {
+    const open = stack[stack.length - 1];
+    return `the <${open.tag}> opened at ${describe(open.index)} is never closed (${stack.length} tag${stack.length === 1 ? "" : "s"} left open at end of file) — ${lineAt(source, open.index)}`;
+  }
+  return null;
+}
+
+export function hasBalancedJsxTags(source) {
+  return unbalancedJsxTag(source) === null;
 }
 
 export function repairScopeForPath(path) {
@@ -671,10 +694,13 @@ export function validateProjectBundleForStack(
         );
       }
     }
-    if (/\.(?:jsx|tsx)$/u.test(path) && !hasBalancedJsxTags(content)) {
-      throw new TypeError(
-        `Generated source "${path}" has unbalanced JSX tags.`,
-      );
+    if (/\.(?:jsx|tsx)$/u.test(path)) {
+      const unbalancedTag = unbalancedJsxTag(content);
+      if (unbalancedTag !== null) {
+        throw new TypeError(
+          `Generated source "${path}" has unbalanced JSX tags: ${unbalancedTag}. Correct that element and return the complete file.`,
+        );
+      }
     }
   }
   let packageDefinition;
