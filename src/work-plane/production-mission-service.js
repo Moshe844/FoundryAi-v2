@@ -19,6 +19,10 @@ import {
   isTerminalMissionState,
 } from "../domain/lifecycle.js";
 import { ObservationKind } from "../domain/observation-evidence.js";
+import {
+  ObservationAction,
+  browserObservationDecision,
+} from "../domain/browser-observation-policy.js";
 import { CompletionResult } from "../domain/verification.js";
 import {
   parseBrowserResult,
@@ -4833,32 +4837,33 @@ export function createProductionMissionService({
           // VERIFYING transition, which is where it belongs.
           observationVerified = true;
         };
-        // A converging repair earns its remaining attempts; a stalled one only
-        // spends them. Two rounds in a row without fewer outstanding failures
-        // means the repairs have run out of ideas, and every further round is
-        // ninety seconds and a paid model call buying nothing. Stopping here
-        // turns a silent eleven-minute failure into an honest short one.
-        const outstandingFailures =
-          (browserResult === undefined
+        // Whether to keep correcting, deliver, or stop is decided by the shared
+        // policy rather than here, so the replay harness measures a change
+        // against every build Foundry has recorded before the customer meets
+        // it. Every wrong version of this decision cost a real build.
+        const outstandingChecks =
+          browserResult === undefined
             ? requiredBrowserChecks.length
-            : Object.values(browserResult.checks).filter((passed) => passed !== true).length) +
-          latestFidelityFailureCount;
-        if (
-          previousOutstandingFailures !== undefined &&
-          outstandingFailures >= previousOutstandingFailures
-        ) {
-          stalledRounds += 1;
-        } else {
-          stalledRounds = 0;
-        }
+            : Object.values(browserResult.checks).filter((passed) => passed !== true).length;
+        const decision = browserObservationDecision({
+          attempt,
+          maxAttempts: MAX_BROWSER_OBSERVATION_ATTEMPTS,
+          outstandingChecks,
+          outstandingFidelityAspects: latestFidelityFailureCount,
+          previousOutstanding: previousOutstandingFailures,
+          stalledRounds,
+          behaviourProven,
+        });
+        const outstandingFailures = decision.outstanding;
+        stalledRounds = decision.stalledRounds;
         previousOutstandingFailures = outstandingFailures;
-        if (stalledRounds >= 2 && behaviourProven) {
+        if (decision.action === ObservationAction.DELIVER_WITH_SHORTFALL) {
           acceptWithShortfall(
             `Corrections stopped reducing the outstanding design aspects after ${attempt + 1} observations.`,
           );
           break;
         }
-        if (stalledRounds >= 2) {
+        if (decision.action === ObservationAction.HALT_STALLED) {
           orchestrator.transition({
             missionId,
             eventId: `${missionId}-browser-repair-stalled`,

@@ -177,18 +177,27 @@ test("a proven application is delivered even when its design falls short", async
     /nonFidelityFailureOutstanding = observationFailures\.some\(\s*\n\s*\(failure\) =>\s*\n\s*!\/\^Production design fidelity failed/u,
   );
 
-  // Both places that previously destroyed the build now deliver it first.
+  // Both places that previously destroyed the build now deliver it first, and
+  // that is asserted by running the policy rather than by reading the loop.
   const budgetGate = source.slice(
     source.indexOf("if (priorRepairCalls.length >= repairPolicy.maxCalls)"),
     source.indexOf("const repairsWereAttempted"),
   );
   assert.match(budgetGate, /if \(behaviourProven\) \{[\s\S]*acceptWithShortfall/u);
 
-  const stallGate = source.slice(
-    source.indexOf("if (stalledRounds >= 2 && behaviourProven)"),
-    source.indexOf("browser-repair-stalled"),
+  const { ObservationAction, browserObservationDecision } = await import(
+    "../src/domain/browser-observation-policy.js"
   );
-  assert.match(stallGate, /acceptWithShortfall\(/u);
+  const stalledButProven = browserObservationDecision({
+    attempt: 2,
+    maxAttempts: 6,
+    outstandingChecks: 0,
+    outstandingFidelityAspects: 5,
+    previousOutstanding: 5,
+    stalledRounds: 1,
+    behaviourProven: true,
+  });
+  assert.equal(stalledButProven.action, ObservationAction.DELIVER_WITH_SHORTFALL);
 
   // Acceptance must not move the mission's state. It is already EXECUTING and
   // stays there until verification; asking the orchestrator for
@@ -230,12 +239,34 @@ test("browser observation is bounded by progress, not by a fixed count", async (
     source,
     /for \(let attempt = 0; attempt < MAX_BROWSER_OBSERVATION_ATTEMPTS; attempt \+= 1\)/u,
   );
+  // The loop must take its decision from the shared policy, so the replay
+  // harness measures the same reasoning the customer's build will use.
+  assert.match(source, /const decision = browserObservationDecision\(\{/u);
+  assert.match(source, /decision\.action === ObservationAction\.HALT_STALLED/u);
 
   // What actually protects the clock is the stall detector: two consecutive
   // rounds that reduce nothing ends the build, so a generous ceiling costs a
   // failing build nothing while letting a converging one finish.
-  assert.match(source, /if \(stalledRounds >= 2 && behaviourProven\)/u);
-  assert.match(source, /if \(stalledRounds >= 2\) \{/u);
+  const { replayObservationTrajectory } = await import(
+    "../src/domain/browser-observation-policy.js"
+  );
+  const flat = [
+    { checks: 4, fidelity: 0 },
+    { checks: 4, fidelity: 0 },
+    { checks: 4, fidelity: 0 },
+  ];
+  assert.equal(replayObservationTrajectory(flat, { maxAttempts: 6 }).outcome, "failed");
+  const reducing = [
+    { checks: 9, fidelity: 0 },
+    { checks: 5, fidelity: 0 },
+    { checks: 2, fidelity: 0 },
+    { checks: 1, fidelity: 0 },
+  ];
+  assert.equal(
+    replayObservationTrajectory(reducing, { maxAttempts: 6 }).outcome,
+    "still-converging",
+    "a build that keeps reducing failures is never cut off by the ceiling",
+  );
 
   // A check that was true last round and is false now was broken by the
   // correction just applied, and the repair must be told that rather than
