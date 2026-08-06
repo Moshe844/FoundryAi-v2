@@ -214,62 +214,6 @@ test("a proven application is delivered even when its design falls short", async
   );
 });
 
-test("the accepted-shortfall evidence satisfies the real evidence schema", async () => {
-  // Twice the delivery path crashed a build whose application had been proven:
-  // once asking for an EXECUTING -> EXECUTING transition, once writing a
-  // browser-interaction payload with extra keys. Both times the tests covering
-  // it passed, because matching source text cannot see a validator reject a
-  // value at runtime. This one runs the validator production runs.
-  const { ObservationKind, normalizeEvidenceInput } = await import(
-    "../src/domain/observation-evidence.js"
-  );
-
-  const capture = (failedAspects) => ({
-    evidenceId: "mission-x-design-fidelity-shortfall",
-    missionId: "mission-x",
-    kind: ObservationKind.BROWSER_INTERACTION_RESULT,
-    captureMethod: "same-browser-same-viewport-prototype-comparison",
-    producingSubsystem: "production-mission-service",
-    timestamp: "2026-08-06T15:00:00.000Z",
-    payload: {
-      checks:
-        failedAspects.length > 0
-          ? Object.fromEntries(failedAspects.map((aspect) => [aspect, false]))
-          : { "design-fidelity": false },
-    },
-    metadata: {
-      accepted: true,
-      reason: "Its 4 safe design corrections are spent.",
-      failedAspects,
-      comparedViewports: 3,
-      integrityHash: "a".repeat(64),
-      observation: "Production design fidelity failed: typography, colors.",
-    },
-    workspaceCheckpointReference: "mission-x-035-post",
-    obligationReference: null,
-    verificationRequestReference: "mission-x-verification",
-    commandReference: "mission-x-035",
-    workUnitReference: "mission-x-035",
-    sensitiveValues: [],
-  });
-
-  // The aspect names a fidelity verdict actually produces, hyphens and all.
-  assert.doesNotThrow(() =>
-    normalizeEvidenceInput(capture(["surface-order", "typography", "colors"])),
-  );
-  // A shortfall accepted on a stalled round can carry no measured aspect, and
-  // browser-interaction checks may not be empty.
-  assert.doesNotThrow(() => normalizeEvidenceInput(capture([])));
-
-  // The shape that actually killed the build: extra payload keys are rejected.
-  const invalid = capture(["typography"]);
-  invalid.payload = { ...invalid.payload, accepted: true, reason: "spent" };
-  assert.throws(
-    () => normalizeEvidenceInput(invalid),
-    /payload must contain exactly: checks/u,
-  );
-});
-
 test("browser observation stops at the round count that still succeeds", async () => {
   // Measured across every recorded build that reached a browser: of the eight
   // that took five rounds or more, none succeeded. Of those needing four or
@@ -295,4 +239,82 @@ test("browser observation stops at the round count that still succeeds", async (
     productionRepairBudgets({ approvedPrototype: true });
   assert.ok(browserRepairCalls <= 4);
   assert.ok(designFidelityRepairCalls <= 4);
+});
+
+test("the accepted shortfall never stands in for an obligation's evidence", async () => {
+  // The real failure, and the third time the delivery path broke a build that
+  // had been proven. Verification resolves a browser-check obligation by taking
+  // the LAST browser-interaction record for the mission and treating it as the
+  // only evidence for every such obligation. The shortfall was recorded in that
+  // kind, after the observation, so it replaced a result whose ten checks were
+  // all true with one whose keys are design aspects. Every proven obligation
+  // read as unsatisfied, the verdict came back INCOMPLETE, and the build was
+  // sent back to repair having already passed.
+  const { ObservationKind, normalizeEvidenceInput } = await import(
+    "../src/domain/observation-evidence.js"
+  );
+  const { evaluateAcceptanceCondition } = await import(
+    "../src/domain/verification.js"
+  );
+
+  const shortfall = normalizeEvidenceInput({
+    evidenceId: "mission-x-design-fidelity-shortfall",
+    missionId: "mission-x",
+    kind: ObservationKind.REPAIR_FINDING,
+    captureMethod: "same-browser-same-viewport-prototype-comparison",
+    producingSubsystem: "production-mission-service",
+    timestamp: "2026-08-06T16:32:45.000Z",
+    payload: {
+      recordType: "design-fidelity-shortfall",
+      record: {
+        accepted: true,
+        reason: "Its 4 safe design corrections are spent.",
+        failedAspects: ["surface-order"],
+        comparedViewports: null,
+        integrityHash: null,
+        observation: "Production design fidelity failed: surface-order.",
+      },
+    },
+    metadata: { accepted: true, failedAspects: ["surface-order"] },
+    workspaceCheckpointReference: "mission-x-033-post",
+    obligationReference: null,
+    verificationRequestReference: "mission-x-verification",
+    commandReference: "mission-x-033",
+    workUnitReference: "mission-x-033",
+    sensitiveValues: [],
+  });
+
+  // It must not be a browser-interaction record, because that kind is what
+  // verification selects from — last one wins, for every obligation.
+  assert.notEqual(shortfall.kind, ObservationKind.BROWSER_INTERACTION_RESULT);
+
+  // The real observation, recorded before it, still satisfies the obligation
+  // even when the shortfall is the newer record.
+  const observation = normalizeEvidenceInput({
+    evidenceId: "mission-x-browser-evidence-3.interactions",
+    missionId: "mission-x",
+    kind: ObservationKind.BROWSER_INTERACTION_RESULT,
+    captureMethod: "playwright-browser-observation",
+    producingSubsystem: "runtime-preview-service",
+    timestamp: "2026-08-06T16:32:28.000Z",
+    payload: { checks: { "obligation-001": true, "obligation-002": true } },
+    metadata: {},
+    workspaceCheckpointReference: "mission-x-033-post",
+    obligationReference: null,
+    verificationRequestReference: "mission-x-verification",
+    commandReference: "mission-x-033",
+    workUnitReference: "mission-x-033",
+    sensitiveValues: [],
+  });
+
+  const verdict = evaluateAcceptanceCondition(
+    {
+      type: "browser-check-equals",
+      check: "obligation-001",
+      expected: true,
+      checkpointIndependent: false,
+    },
+    [observation, shortfall],
+  );
+  assert.equal(verdict.result, "SATISFIED");
 });

@@ -5340,33 +5340,35 @@ export function createProductionMissionService({
         evidence.capture({
           evidenceId: `${missionId}-design-fidelity-shortfall`,
           missionId,
-          kind: ObservationKind.BROWSER_INTERACTION_RESULT,
+          // Not a browser-interaction record. Verification resolves a
+          // browser-check obligation by taking the LAST browser-interaction
+          // evidence for the mission and treating it as the only evidence for
+          // every such obligation. Recording the shortfall in that kind, after
+          // the observation, therefore replaced the real result — whose checks
+          // were all true — with a record whose keys are design aspects. Every
+          // proven obligation was then read as unsatisfied, the verdict came
+          // back INCOMPLETE, and a build that had passed was sent back to
+          // repair. A finding describes something observed without standing in
+          // for an obligation's evidence.
+          kind: ObservationKind.REPAIR_FINDING,
           captureMethod: "same-browser-same-viewport-prototype-comparison",
           producingSubsystem: PRODUCTION_MISSION_SOURCE,
           timestamp: new Date().toISOString(),
-          // A browser-interaction payload carries exactly its checks; every
-          // other fact belongs in metadata, exactly as the fidelity comparison
-          // above records its own.
           payload: {
-            // Checks may not be empty, and a shortfall accepted on a stalled
-            // round can carry no measured aspect at all.
-            checks:
-              designFidelityShortfall.failedAspects.length > 0
-                ? Object.fromEntries(
-                    designFidelityShortfall.failedAspects.map((aspect) => [
-                      aspect,
-                      false,
-                    ]),
-                  )
-                : { "design-fidelity": false },
+            recordType: "design-fidelity-shortfall",
+            record: {
+              accepted: true,
+              reason: designFidelityShortfall.reason,
+              failedAspects: designFidelityShortfall.failedAspects,
+              comparedViewports:
+                designFidelityShortfall.comparedViewports ?? null,
+              integrityHash: designFidelityShortfall.integrityHash ?? null,
+              observation: designFidelityShortfall.observation ?? "",
+            },
           },
           metadata: {
             accepted: true,
-            reason: designFidelityShortfall.reason,
             failedAspects: designFidelityShortfall.failedAspects,
-            comparedViewports: designFidelityShortfall.comparedViewports,
-            integrityHash: designFidelityShortfall.integrityHash,
-            observation: designFidelityShortfall.observation ?? "",
           },
           workspaceCheckpointReference: browser.postWorkCheckpointId,
           obligationReference: null,
