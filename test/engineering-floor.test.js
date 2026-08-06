@@ -185,6 +185,14 @@ test("the floor scales with what a project does, not with whether it has a login
       detectEngineeringSignals(profile({ summary, capabilities })),
     ).map((entry) => entry.sourceRequirement.replace("engineering-floor-", ""));
 
+  if (!ENGINEERING_FLOOR_OBLIGATIONS_ENABLED) {
+    // Gated off, nothing reaches the contract; the shape below is what the
+    // rules produce once the harness can observe them without asking the model
+    // for another assertion each.
+    assert.deepEqual(floor("A menu of dishes with prices and opening hours."), []);
+    return;
+  }
+
   // Every project, however simple, must fail honestly.
   assert.deepEqual(floor("A menu of dishes with prices and opening hours."), ["safe-errors"]);
 

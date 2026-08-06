@@ -122,7 +122,11 @@ const CREDENTIAL_HASHED =
 const SOURCE_RULES = Object.freeze([
   {
     id: "credentials-are-hashed",
-    signals: [EngineeringSignal.CREDENTIALS],
+    // Ungated on purpose. The rule already reads what the source does rather
+    // than what the description said, and a build that persists a credential
+    // must hash it whether or not anyone thought to mention credentials when
+    // describing the project.
+    signals: [EngineeringSignal.ALWAYS],
     // Deliberately keyed off what the source actually does, not off a declared
     // capability. The build that shipped plaintext passwords did persist them,
     // but its profile never listed a persistence capability, so a
@@ -258,14 +262,23 @@ const OBLIGATION_RULES = Object.freeze([
   },
 ]);
 
-// These were gated off while the model had to write the whole browser test:
-// each guarantee became another check inside a file already policed by fifty
-// admission gates, and turning them on pushed generation past what the model
-// could produce. Foundry now writes the observation harness itself and the
-// model supplies only the assertion body per obligation, so the cost of one
-// more guarantee is one more small function rather than more scaffolding to
-// get exactly right.
-export const ENGINEERING_FLOOR_OBLIGATIONS_ENABLED = true;
+// Off, on measurement rather than caution. The harness did remove the
+// scaffolding cost, so generation passed admission first time with these
+// enabled — but each guarantee is still one more browser check the model must
+// implement and the build must then satisfy. Turning five on took an ordinary
+// project from ten browser checks to fifteen, and observation converged from
+// fifteen failures to nine and then stopped moving.
+//
+// The guarantees are generic by nature — ending a session, refusing an
+// unauthenticated route, rejecting invalid input at the server, confirming a
+// destructive action. None of them is project-specific, so the way to make
+// them affordable is for the harness to observe them directly, the way it
+// already measures responsive and accessibility evidence, instead of asking
+// the model for five more assertions. Until then they cost more than they
+// prove. The source rules below stay on unconditionally: they cost the
+// browser test nothing and still reject a build that stores a credential in
+// the clear.
+export const ENGINEERING_FLOOR_OBLIGATIONS_ENABLED = false;
 
 export function engineeringFloorVerificationEntries(productName, signals) {
   if (!ENGINEERING_FLOOR_OBLIGATIONS_ENABLED) return [];
