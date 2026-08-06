@@ -1451,6 +1451,31 @@ export function validateCustomerContentIntegrity(files, customerContent) {
   }
 }
 
+// Six separate gates each assumed a check is computed by a literal
+// checks["id"] = expression assignment. A test asked to compute every check in
+// its own try/catch naturally factors that into a helper, and then every one of
+// those gates rejects it — the first build to write clean code failed the same
+// gate three times and gave up. Resolve the computing expression once, in both
+// shapes, and let every gate inspect that instead.
+export function checkComputationSources(source, checkId) {
+  const escaped = checkId.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+  const direct = [
+    ...source.matchAll(
+      new RegExp(
+        `checks\\s*\\[\\s*["']${escaped}["']\\s*\\]\\s*=\\s*([^;\\n]+)`,
+        "gu",
+      ),
+    ),
+  ].map((match) => match[1]);
+  if (direct.length > 0) return direct;
+  // Helper form: the id is passed to something that assigns into checks, so the
+  // computation lives in the invocation that follows the id literal.
+  if (!/checks\s*\[\s*[A-Za-z_$][\w$]*\s*\]\s*=/u.test(source)) return [];
+  return [
+    ...source.matchAll(new RegExp(`["']${escaped}["']`, "gu")),
+  ].map((match) => source.slice(match.index, match.index + 700));
+}
+
 export function validateBrowserObservationTestSource(
   source,
   requiredBrowserCheckIds = [],
@@ -1491,11 +1516,29 @@ export function validateBrowserObservationTestSource(
         ),
       ),
     ];
-    if (assignments.length === 0) {
+    // A test asked to compute every check in its own try/catch naturally
+    // factors that into a helper — observe("obligation-001", async () => …) —
+    // and then no literal checks["obligation-001"] = assignment exists. This
+    // gate rejected exactly the shape its own instructions ask for, three
+    // identical times in a row. Accept a helper that receives the check id,
+    // provided the helper does assign into checks from a computed value.
+    const helperAssignsChecks =
+      /checks\s*\[\s*[A-Za-z_$][\w$]*\s*\]\s*=/u.test(source);
+    const helperInvocations = helperAssignsChecks
+      ? [
+          ...source.matchAll(
+            new RegExp(`["']${escapedCheckId}["']`, "gu"),
+          ),
+        ]
+      : [];
+    if (assignments.length === 0 && helperInvocations.length === 0) {
       throw new TypeError(
-        `The browser observation test must compute required check "${checkId}" from observed evidence.`,
+        `The browser observation test must compute required check "${checkId}" from observed evidence, either by assigning checks["${checkId}"] directly or by passing "${checkId}" to a helper that assigns into checks.`,
       );
     }
+    // The literal-success guard still applies to every direct assignment, and
+    // a helper cannot smuggle one past it because a helper assigning a bare
+    // literal would fail this same test for every check at once.
     if (
       assignments.some((match) =>
         /^(?:true|Boolean\s*\(\s*true\s*\))\s*$/u.test(
@@ -1507,6 +1550,15 @@ export function validateBrowserObservationTestSource(
         `The browser observation test may not certify check "${checkId}" with a literal success value.`,
       );
     }
+  }
+  if (
+    /checks\s*\[\s*[A-Za-z_$][\w$]*\s*\]\s*=\s*(?:true|Boolean\s*\(\s*true\s*\))\s*[;\n]/u.test(
+      source,
+    )
+  ) {
+    throw new TypeError(
+      "The browser observation test may not certify a check with a literal success value through a helper.",
+    );
   }
   if (responsiveCheckIds.length > 0) {
     const numericConstants = new Map(
@@ -1619,10 +1671,7 @@ export function validateBrowserObservationTestSource(
         /[.*+?^${}()|[\]\\]/gu,
         "\\$&",
       );
-      const assignment = new RegExp(
-        `checks\\s*\\[\\s*["']${escapedCheckId}["']\\s*\\]\\s*=\\s*([^;]+)`,
-        "u",
-      ).exec(source);
+      const computations = checkComputationSources(source, checkId);
       const directlyReferencesResponsiveEvidence = (expression) =>
         /(?:phone|mobile|responsive|overflow|density|height|width|viewport|interaction)/iu.test(
           expression,
@@ -1643,9 +1692,12 @@ export function validateBrowserObservationTestSource(
           },
         );
       if (
-        assignment === null ||
-        (!directlyReferencesResponsiveEvidence(assignment[1]) &&
-          !referencesMeasuredResponsiveVariable(assignment[1]))
+        computations.length === 0 ||
+        !computations.some(
+          (expression) =>
+            directlyReferencesResponsiveEvidence(expression) ||
+            referencesMeasuredResponsiveVariable(expression),
+        )
       ) {
         throw new TypeError(
           `Responsive check "${checkId}" must be computed from measured phone-layout quality evidence.`,
@@ -1654,14 +1706,7 @@ export function validateBrowserObservationTestSource(
     }
   }
   for (const checkId of accessibilityCheckIds) {
-    const escapedCheckId = checkId.replace(
-      /[.*+?^${}()|[\]\\]/gu,
-      "\\$&",
-    );
-    const assignment = new RegExp(
-      `checks\\s*\\[\\s*["']${escapedCheckId}["']\\s*\\]\\s*=\\s*([^;]+)`,
-      "u",
-    ).exec(source);
+    const computations = checkComputationSources(source, checkId);
     if (
       !/(?:keyboard\.press|\.press)\s*\(\s*["']Tab["']/u.test(source) ||
       !/(?:document\.activeElement|toBeFocused\s*\(|:focus-visible)/u.test(source)
@@ -1716,9 +1761,12 @@ export function validateBrowserObservationTestSource(
         },
       );
     if (
-      assignment === null ||
-      (!directlyReferencesAccessibilityEvidence(assignment[1]) &&
-        !referencesMeasuredAccessibilityVariable(assignment[1]))
+      computations.length === 0 ||
+      !computations.some(
+        (expression) =>
+          directlyReferencesAccessibilityEvidence(expression) ||
+          referencesMeasuredAccessibilityVariable(expression),
+      )
     ) {
       throw new TypeError(
         `Accessibility check "${checkId}" must be computed from measured labeling and focus evidence.`,
@@ -2305,6 +2353,151 @@ export function bindApprovedPrototypeFidelityIdentity(plan, approvedContract) {
   };
 }
 
+// Foundry owns the observation protocol.
+//
+// Fifty admission gates policed how the model chose to write its browser test:
+// how it initialised arrays, where it emitted the evidence marker, whether it
+// assigned checks directly or through a helper, which viewport literals it
+// used. Three separate times a model wrote correct, well-factored code and was
+// rejected for the style of it — and each gate fixed revealed the next, because
+// they all rest on pattern-matching source the model was free to write any way
+// it liked.
+//
+// The harness removes the premise. Foundry writes the scaffolding, the
+// measurements, and the marker; the model writes only the assertion bodies in
+// tests/foundry-checks.ts. Every scaffolding gate is then satisfied by
+// construction rather than by hope, and what the model supplies is the only
+// thing it is actually qualified to supply: what each obligation means.
+export function foundryObservationHarness(requiredCheckIds) {
+  const ids = [...new Set(requiredCheckIds ?? [])];
+  const idList = ids.map((id) => JSON.stringify(id)).join(", ");
+  return `import { expect, test } from "@playwright/test";
+import { obligationChecks } from "./foundry-checks";
+
+// Generated by Foundry. The observation protocol is fixed so that evidence is
+// comparable across every build; project-specific assertions live in
+// ./foundry-checks.
+test("foundry contract observation", async ({ page }) => {
+  const captureProbeErrors: string[] = [];
+  const consoleErrors: string[] = [];
+  const pageErrors: string[] = [];
+  const requiredCheckIds = [${idList}];
+  const checks: Record<string, boolean> = {};
+  const diagnostics: Record<string, Record<string, boolean | number | string | null>> = {};
+  for (const id of requiredCheckIds) checks[id] = false;
+
+  page.on("console", (message) => {
+    if (message.type() === "error") consoleErrors.push(message.text());
+  });
+  page.on("pageerror", (error) => pageErrors.push(String(error?.message ?? error)));
+
+  try {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto("/", { waitUntil: "domcontentloaded" });
+    await expect(page.locator("body")).toBeVisible();
+
+    // Phone-layout quality, measured once and shared with every check.
+    const phoneScrollWidth = await page.evaluate(() => document.documentElement.scrollWidth);
+    const phoneClientWidth = await page.evaluate(() => document.documentElement.clientWidth);
+    const phoneNoHorizontalOverflow = phoneScrollWidth <= phoneClientWidth;
+    const phoneContentHeight = await page.evaluate(() => document.body.getBoundingClientRect().height);
+    const phoneViewportHeight = await page.evaluate(() => window.innerHeight);
+    const phoneHeightWithinBudget = phoneContentHeight <= phoneViewportHeight * 8;
+    const phoneInteractionCount = await page
+      .locator("a[href], button, input, select, textarea")
+      .count();
+    const phoneInteractionDensityBounded = phoneInteractionCount <= 60;
+    const responsiveEvidence = {
+      phoneNoHorizontalOverflow,
+      phoneHeightWithinBudget,
+      phoneInteractionDensityBounded,
+    };
+
+    // Accessible keyboard focus and labelling, measured once.
+    await page.keyboard.press("Tab");
+    const focusedTag = await page.evaluate(() => document.activeElement?.tagName ?? null);
+    const keyboardFocusObservable = focusedTag !== null && focusedTag !== "BODY";
+    const labelledControlCount = await page.evaluate(() =>
+      [...document.querySelectorAll("input, select, textarea")].filter((control) => {
+        const id = control.getAttribute("id");
+        const labelled =
+          (control.getAttribute("aria-label") ?? "").trim().length > 0 ||
+          (id !== null && document.querySelector('label[for="' + id + '"]') !== null) ||
+          control.closest("label") !== null;
+        return labelled;
+      }).length,
+    );
+    const accessibleLabellingObserved = labelledControlCount >= 1;
+    const accessibilityEvidence = { keyboardFocusObservable, accessibleLabellingObserved };
+
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await expect(page.locator("body")).toBeVisible();
+
+    // Each check runs in isolation: one failure can never leave another
+    // unobserved, and every check records diagnostics whether it passes or not.
+    for (const id of requiredCheckIds) {
+      const check = obligationChecks[id];
+      if (typeof check !== "function") {
+        diagnostics[id] = { checkImplemented: false };
+        captureProbeErrors.push("No observation supplied for " + id);
+        continue;
+      }
+      try {
+        const outcome = await check({ page, responsiveEvidence, accessibilityEvidence });
+        const passed = outcome === true || (outcome !== null && typeof outcome === "object" && outcome.passed === true);
+        const detail =
+          outcome !== null && typeof outcome === "object" && outcome.diagnostics !== undefined
+            ? outcome.diagnostics
+            : {};
+        checks[id] = passed;
+        diagnostics[id] = { ...detail, observed: true };
+      } catch (error) {
+        checks[id] = false;
+        diagnostics[id] = { observed: true, threw: String(error?.message ?? error).slice(0, 300) };
+      }
+    }
+  } finally {
+    console.log(
+      "FOUNDRY_BROWSER_RESULT:" +
+        JSON.stringify({ captureProbeErrors, checks, diagnostics, consoleErrors, pageErrors }),
+    );
+  }
+});
+`;
+}
+
+// Foundry's harness is the only thing permitted to emit the evidence marker:
+// two markers would make the observation ambiguous.
+export function bindFoundryObservationHarness(plan, requiredCheckIds) {
+  if (!Array.isArray(plan?.files) || (requiredCheckIds ?? []).length === 0) {
+    return plan;
+  }
+  const traceIds = [
+    ...new Set(
+      plan.files.flatMap((file) =>
+        Array.isArray(file.contractRequirementIds) ? file.contractRequirementIds : [],
+      ),
+    ),
+  ];
+  const retained = plan.files.filter(
+    (file) =>
+      file.path === "tests/foundry-checks.ts" ||
+      !/^tests\/.*\.(?:spec|test)\.(?:js|jsx|ts|tsx)$/u.test(file.path) ||
+      !/FOUNDRY_BROWSER_RESULT/u.test(String(file.content)),
+  );
+  return {
+    ...plan,
+    files: [
+      ...retained.filter((file) => file.path !== "tests/foundry-observation.spec.ts"),
+      {
+        path: "tests/foundry-observation.spec.ts",
+        content: foundryObservationHarness(requiredCheckIds),
+        contractRequirementIds: traceIds.length > 0 ? traceIds : ["approved-design-direction"],
+      },
+    ],
+  };
+}
+
 export function bindApprovedPrototypeBrowserEvidence(plan, approvedContract) {
   const approved = approvedContract?.productBlueprint?.designSpecification?.approvedDesignContract ?? null;
   if (approved === null || !Array.isArray(plan?.files)) return plan;
@@ -2650,7 +2843,15 @@ function bundlePrompt(profile, contract, bindings, approvedContract = null, engi
     "Do not configure Playwright webServer or start another application process from the test configuration. Foundry's Runtime & Preview Service exclusively owns the already-ready application process and supplies its URL through FOUNDRY_PREVIEW_URL.",
     "Use domcontentloaded plus explicit visible UI selectors for browser navigation readiness. Do not wait for networkidle: framework prefetching and long-lived application requests make it nondeterministic.",
     "Do not use a custom Playwright reporter that can suppress test-process stdout. The FOUNDRY_BROWSER_RESULT line must reach the controlled command evidence stream.",
-    "The Playwright test must exercise every supplied browser check through the running UI. It must collect console errors and page errors and finish by writing exactly one stdout line starting FOUNDRY_BROWSER_RESULT: followed by JSON with captureProbeErrors, checks, diagnostics, consoleErrors, and pageErrors. diagnostics must map each checkId to the named boolean sub-checks used to compute it, so a false composite verdict identifies its exact failed predicate. Every checks key must be the exact checkId supplied and its boolean must reflect the actual assertion result.",
+    // Foundry generates tests/foundry-observation.spec.ts itself: the marker,
+    // the error capture, the per-check isolation, and the shared responsive and
+    // accessibility measurements. Asking the model for that scaffolding meant
+    // policing fifty rules about how it chose to write them, and rejecting
+    // correct code for its style. It supplies the assertions only.
+    "Do not write a Playwright spec file and do not emit FOUNDRY_BROWSER_RESULT. Foundry generates tests/foundry-observation.spec.ts, which owns the evidence marker, console and page error capture, per-check isolation, and the shared phone-layout and accessibility measurements. A spec file you write that emits the marker is discarded.",
+    "Write exactly one observation file, tests/foundry-checks.ts, exporting `export const obligationChecks: Record<string, (context: { page: any; responsiveEvidence: Record<string, boolean>; accessibilityEvidence: Record<string, boolean> }) => Promise<{ passed: boolean; diagnostics: Record<string, boolean | number | string | null> }>> = { ... }` with one entry keyed by each exact supplied checkId.",
+    "Each entry drives the running UI with Playwright through `context.page` and returns { passed, diagnostics }. passed must be computed from what the browser actually showed. diagnostics names the sub-observations behind that verdict, so a false verdict identifies its exact failed predicate. Do not initialize arrays, attach listeners, catch your own errors, or print anything: the harness does all of it.",
+    "For a check about phone layout use context.responsiveEvidence, and for a check about keyboard focus or labelling use context.accessibilityEvidence, rather than measuring those again. Combine them with your own project-specific observations.",
     "Do not prove error handling by intentionally requesting a nonexistent resource or an HTTP 4xx/5xx endpoint, because that creates a blocking browser console error. Exercise a visible client-side validation or recovery path that prevents the invalid request, while still observing the real error message and recovery behavior.",
     "For mutable availability such as appointment times, select an observed enabled control at runtime. Never hard-code a slot that an earlier step may have consumed or disabled.",
     "Locate an asynchronously loaded booking slot by its semantic accessible label, not by a visual class shared with Back or secondary-action buttons.",
@@ -3281,6 +3482,16 @@ export function createProductionMissionService({
               approvedContract,
             );
           }
+          // Install Foundry's observation harness before admission so every
+          // scaffolding gate is satisfied by the file Foundry wrote, not by
+          // whatever shape the model happened to choose.
+          generation = {
+            ...generation,
+            structuredOutput: bindFoundryObservationHarness(
+              generation.structuredOutput,
+              requiredBrowserCheckIds,
+            ),
+          };
           validatedFiles = validateProjectBundleForStack(
             ensureCertifiedStackScaffold(
               generation.structuredOutput.files,

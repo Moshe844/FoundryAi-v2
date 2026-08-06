@@ -3,7 +3,12 @@ import test from "node:test";
 
 import { parseBrowserResult } from "../src/domain/runtime-preview.js";
 import { runtimeSourceManifest } from "../src/work-plane/runtime-preview-service.js";
-import { browserCheckObservationFailure } from "../src/work-plane/production-mission-service.js";
+import {
+  browserCheckObservationFailure,
+  bindFoundryObservationHarness,
+  foundryObservationHarness,
+  validateBrowserObservationTestSource,
+} from "../src/work-plane/production-mission-service.js";
 
 test("browser observations retain deterministic scalar diagnostics", () => {
   const parsed = parseBrowserResult(
@@ -114,4 +119,112 @@ test("a check that was never computed is not reported as an application defect",
   assert.match(mixed, /never computed because the test stopped early/u);
   assert.match(mixed, /not observations: obligation-006/u);
   assert.match(mixed, /do not change application source on their account/u);
+});
+
+test("a helper that computes checks is accepted, but not one that fakes them", () => {
+  // Asking every check to compute in its own try/catch makes a helper the
+  // natural shape. The gate demanded a literal checks["id"] = assignment and
+  // so rejected exactly what the instructions ask for — three identical
+  // times on one build before it gave up.
+  const scaffold = `
+    const captureProbeErrors: string[] = [];
+    const consoleErrors: string[] = [];
+    const pageErrors: string[] = [];
+    const checks: Record<string, boolean> = { 'obligation-001': false };
+    const diagnostics: Record<string, Record<string, boolean>> = {};
+    async function observe(id: string, run: () => Promise<boolean>) {
+      try { checks[id] = await run(); } catch (error) { diagnostics[id] = { threw: false }; }
+    }
+  `;
+  const emit = `
+    try {
+      await observe('obligation-001', async () => (await page.locator('.card').count()) >= 1);
+    } finally {
+      console.log('FOUNDRY_BROWSER_RESULT:' + JSON.stringify({ captureProbeErrors, checks, diagnostics, consoleErrors, pageErrors }));
+    }
+  `;
+  assert.doesNotThrow(() =>
+    validateBrowserObservationTestSource(scaffold + emit, ["obligation-001"], {}),
+  );
+
+  // The same helper shape may not hand back a bare literal.
+  const faked = scaffold.replace("checks[id] = await run();", "checks[id] = true;");
+  assert.throws(
+    () => validateBrowserObservationTestSource(faked + emit, ["obligation-001"], {}),
+    /literal success value through a helper/u,
+  );
+
+  // A check that appears nowhere at all is still rejected.
+  assert.throws(
+    () => validateBrowserObservationTestSource(scaffold + emit, ["obligation-001", "obligation-002"], {}),
+    /must compute required check "obligation-002"/u,
+  );
+});
+
+test("Foundry's observation harness satisfies every scaffolding gate itself", () => {
+  // Fifty gates policed how the model wrote its browser test, and three times a
+  // model wrote correct, well-factored code and was rejected for its style.
+  // The harness removes the premise: Foundry writes the scaffolding, so those
+  // gates are satisfied by construction and the model supplies only assertions.
+  const ids = ["obligation-001", "obligation-004", "obligation-007"];
+  const harness = foundryObservationHarness(ids);
+  const checksModule = `
+    export const obligationChecks = {
+      'obligation-001': async ({ page }) => {
+        const heading = await page.getByRole('heading', { level: 1 }).count();
+        return { passed: heading >= 1, diagnostics: { headingPresent: heading >= 1 } };
+      },
+      'obligation-004': async ({ page, responsiveEvidence }) => {
+        const readable = (await page.locator('main').count()) >= 1;
+        return { passed: readable && responsiveEvidence.phoneNoHorizontalOverflow, diagnostics: { readable } };
+      },
+      'obligation-007': async ({ page, accessibilityEvidence }) => {
+        const labels = await page.locator('label').count();
+        return { passed: accessibilityEvidence.keyboardFocusObservable && labels >= 1, diagnostics: { labels: labels >= 1 } };
+      },
+    };
+  `;
+  assert.doesNotThrow(() =>
+    validateBrowserObservationTestSource([harness, checksModule].join("\n"), ids, {
+      responsiveCheckIds: ["obligation-004"],
+      accessibilityCheckIds: ["obligation-007"],
+    }),
+  );
+
+  // The harness alone still owns the protocol pieces the gates look for.
+  assert.match(harness, /const captureProbeErrors: string\[\] = \[\]/u);
+  assert.match(harness, /finally\s*\{[\s\S]*FOUNDRY_BROWSER_RESULT:/u);
+  assert.match(harness, /scrollWidth/u);
+  assert.match(harness, /clientWidth/u);
+  assert.match(harness, /keyboard\.press\("Tab"\)/u);
+  assert.match(harness, /activeElement/u);
+  // Per-check isolation: one failing check cannot leave another unobserved.
+  assert.match(harness, /try \{[\s\S]*await check\(/u);
+  assert.match(harness, /catch \(error\)[\s\S]*checks\[id\] = false/u);
+});
+
+test("only Foundry may emit the evidence marker", () => {
+  // Two markers would make the observation ambiguous, so a model-written spec
+  // that emits one is discarded while its assertions module is kept.
+  const plan = {
+    files: [
+      { path: "tests/foundry-checks.ts", content: "export const obligationChecks={};", contractRequirementIds: ["r1"] },
+      { path: "tests/mine.spec.ts", content: 'console.log("FOUNDRY_BROWSER_RESULT:"+JSON.stringify({}));', contractRequirementIds: ["r1"] },
+      { path: "app/page.tsx", content: "export default function P(){return null}", contractRequirementIds: ["r1"] },
+    ],
+  };
+  const bound = bindFoundryObservationHarness(plan, ["obligation-001"]);
+  const paths = bound.files.map((file) => file.path);
+
+  assert.ok(paths.includes("tests/foundry-observation.spec.ts"));
+  assert.ok(paths.includes("tests/foundry-checks.ts"), "the model's assertions are kept");
+  assert.ok(!paths.includes("tests/mine.spec.ts"), "a competing marker is discarded");
+  assert.ok(paths.includes("app/page.tsx"), "application source is untouched");
+  assert.equal(
+    bound.files.filter((file) => /FOUNDRY_BROWSER_RESULT/u.test(file.content)).length,
+    1,
+  );
+
+  // With no required checks there is nothing to observe, so nothing is injected.
+  assert.deepEqual(bindFoundryObservationHarness(plan, []), plan);
 });
