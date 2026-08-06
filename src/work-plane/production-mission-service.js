@@ -80,13 +80,18 @@ const MAX_BROWSER_REPAIR_CALLS = 4;
 // aspects left. A repair that stops making progress still stops, because a
 // repeated proposal is rejected before it is paid for.
 const MAX_DESIGN_FIDELITY_REPAIR_CALLS = 4;
-// Measured across every recorded build that reached a browser: of the eight
-// that took five rounds or more, none succeeded — not once. Of those needing
-// four or fewer, five did. Each further round costs about ninety seconds of
-// Playwright and a paid repair call, so rounds five through seven were pure
-// delay on a build that was already lost, and a customer watched "Testing
-// important actions" for four extra minutes to be told it failed anyway.
-const MAX_BROWSER_OBSERVATION_ATTEMPTS = 4;
+// A fixed ceiling of four was drawn from builds recorded before repairs could
+// correct every file a failure spanned. Once they could, a build converged
+// 5 → 5 → 1 outstanding checks, passed them all, and was cut off at a single
+// failing check with the ceiling reached — the same mistake the fidelity
+// budget once made, of stopping a correction that was still working.
+//
+// Progress, not a count, is the right bound. The stall detector below already
+// ends a build after two consecutive rounds that reduce nothing, which costs
+// about three minutes; that is what protects the clock. This ceiling only has
+// to stop an endlessly oscillating build, so it can afford to be generous
+// enough that a converging one finishes.
+const MAX_BROWSER_OBSERVATION_ATTEMPTS = 6;
 // A proposal rejected before it touches a file costs a model call but proves
 // nothing, so it does not spend the repair budget. This bounds how many such
 // mechanical corrections may be bought per budgeted repair.
@@ -4553,6 +4558,8 @@ export function createProductionMissionService({
       let designFidelityShortfall = null;
       let latestFidelityVerdict = null;
       let nonFidelityFailureOutstanding = true;
+      // Which checks held last round, so a regression can be named as one.
+      let previouslyPassingCheckIds = new Set();
       const browserTargets = Object.entries(bindings)
         .filter(
           ([, binding]) =>
@@ -4755,6 +4762,29 @@ export function createProductionMissionService({
               error instanceof Error
                 ? error.message
                 : "The browser result could not be parsed.",
+            );
+          }
+          // A check that was true last round and is false now was broken by the
+          // correction just applied — most often a design-fidelity repair
+          // reordering markup that a workflow check depended on. Saying so
+          // turns a repeated "this check is false" into the one fact that
+          // explains it, and stops the next repair diagnosing a defect that
+          // did not exist a round ago.
+          if (browserResult !== undefined) {
+            const nowFalse = requiredBrowserChecks.filter(
+              (checkId) =>
+                browserResult.checks[checkId] !== true &&
+                previouslyPassingCheckIds.has(checkId),
+            );
+            if (nowFalse.length > 0) {
+              observationFailures.unshift(
+                `The correction applied since the last observation broke ${nowFalse.length} check(s) that were passing: ${nowFalse.join(", ")}. Restore them while keeping the change that fixed the previous failure; do not treat these as pre-existing defects.`,
+              );
+            }
+            previouslyPassingCheckIds = new Set(
+              requiredBrowserChecks.filter(
+                (checkId) => browserResult.checks[checkId] === true,
+              ),
             );
           }
           // Fidelity is the only observation whose failure may be reported

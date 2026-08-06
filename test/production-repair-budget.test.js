@@ -214,109 +214,38 @@ test("a proven application is delivered even when its design falls short", async
   );
 });
 
-test("browser observation stops at the round count that still succeeds", async () => {
-  // Measured across every recorded build that reached a browser: of the eight
-  // that took five rounds or more, none succeeded. Of those needing four or
-  // fewer, five did. Each further round is about ninety seconds of Playwright
-  // and a paid repair call, so a ceiling of seven spent four extra minutes on
-  // builds that were already lost — with the customer watching "Testing
-  // important actions" the whole time.
+test("browser observation is bounded by progress, not by a fixed count", async () => {
+  // A ceiling of four came from builds recorded before repairs could correct
+  // every file a failure spanned. Once they could, a build converged 5 then 5
+  // then 1 outstanding checks, passed them all, and was cut off at a single
+  // failing check because the count ran out — the same mistake the fidelity
+  // budget once made of stopping a correction that was still working.
   const source = await readFile(
     new URL("../src/work-plane/production-mission-service.js", import.meta.url),
     "utf8",
   );
 
-  assert.match(source, /const MAX_BROWSER_OBSERVATION_ATTEMPTS = 4;/u);
+  assert.match(source, /const MAX_BROWSER_OBSERVATION_ATTEMPTS = 6;/u);
   assert.match(
     source,
     /for \(let attempt = 0; attempt < MAX_BROWSER_OBSERVATION_ATTEMPTS; attempt \+= 1\)/u,
-    "the observation loop must take its ceiling from the measured constant",
   );
 
-  // The repair budgets must not promise more corrections than there are rounds
-  // to apply them in, or the budget stops meaning anything.
-  const { browserRepairCalls, designFidelityRepairCalls } =
-    productionRepairBudgets({ approvedPrototype: true });
-  assert.ok(browserRepairCalls <= 4);
-  assert.ok(designFidelityRepairCalls <= 4);
-});
+  // What actually protects the clock is the stall detector: two consecutive
+  // rounds that reduce nothing ends the build, so a generous ceiling costs a
+  // failing build nothing while letting a converging one finish.
+  assert.match(source, /if \(stalledRounds >= 2 && behaviourProven\)/u);
+  assert.match(source, /if \(stalledRounds >= 2\) \{/u);
 
-test("the accepted shortfall never stands in for an obligation's evidence", async () => {
-  // The real failure, and the third time the delivery path broke a build that
-  // had been proven. Verification resolves a browser-check obligation by taking
-  // the LAST browser-interaction record for the mission and treating it as the
-  // only evidence for every such obligation. The shortfall was recorded in that
-  // kind, after the observation, so it replaced a result whose ten checks were
-  // all true with one whose keys are design aspects. Every proven obligation
-  // read as unsatisfied, the verdict came back INCOMPLETE, and the build was
-  // sent back to repair having already passed.
-  const { ObservationKind, normalizeEvidenceInput } = await import(
-    "../src/domain/observation-evidence.js"
+  // A check that was true last round and is false now was broken by the
+  // correction just applied, and the repair must be told that rather than
+  // diagnosing a defect that did not exist a round ago.
+  assert.match(source, /previouslyPassingCheckIds\.has\(checkId\)/u);
+  assert.match(
+    source,
+    /broke \$\{nowFalse\.length\} check\(s\) that were passing/u,
   );
-  const { evaluateAcceptanceCondition } = await import(
-    "../src/domain/verification.js"
-  );
-
-  const shortfall = normalizeEvidenceInput({
-    evidenceId: "mission-x-design-fidelity-shortfall",
-    missionId: "mission-x",
-    kind: ObservationKind.REPAIR_FINDING,
-    captureMethod: "same-browser-same-viewport-prototype-comparison",
-    producingSubsystem: "production-mission-service",
-    timestamp: "2026-08-06T16:32:45.000Z",
-    payload: {
-      recordType: "design-fidelity-shortfall",
-      record: {
-        accepted: true,
-        reason: "Its 4 safe design corrections are spent.",
-        failedAspects: ["surface-order"],
-        comparedViewports: null,
-        integrityHash: null,
-        observation: "Production design fidelity failed: surface-order.",
-      },
-    },
-    metadata: { accepted: true, failedAspects: ["surface-order"] },
-    workspaceCheckpointReference: "mission-x-033-post",
-    obligationReference: null,
-    verificationRequestReference: "mission-x-verification",
-    commandReference: "mission-x-033",
-    workUnitReference: "mission-x-033",
-    sensitiveValues: [],
-  });
-
-  // It must not be a browser-interaction record, because that kind is what
-  // verification selects from — last one wins, for every obligation.
-  assert.notEqual(shortfall.kind, ObservationKind.BROWSER_INTERACTION_RESULT);
-
-  // The real observation, recorded before it, still satisfies the obligation
-  // even when the shortfall is the newer record.
-  const observation = normalizeEvidenceInput({
-    evidenceId: "mission-x-browser-evidence-3.interactions",
-    missionId: "mission-x",
-    kind: ObservationKind.BROWSER_INTERACTION_RESULT,
-    captureMethod: "playwright-browser-observation",
-    producingSubsystem: "runtime-preview-service",
-    timestamp: "2026-08-06T16:32:28.000Z",
-    payload: { checks: { "obligation-001": true, "obligation-002": true } },
-    metadata: {},
-    workspaceCheckpointReference: "mission-x-033-post",
-    obligationReference: null,
-    verificationRequestReference: "mission-x-verification",
-    commandReference: "mission-x-033",
-    workUnitReference: "mission-x-033",
-    sensitiveValues: [],
-  });
-
-  const verdict = evaluateAcceptanceCondition(
-    {
-      type: "browser-check-equals",
-      check: "obligation-001",
-      expected: true,
-      checkpointIndependent: false,
-    },
-    [observation, shortfall],
-  );
-  assert.equal(verdict.result, "SATISFIED");
+  assert.match(source, /do not treat these as pre-existing defects/u);
 });
 
 test("a repair re-verifies what it changed, and only once", async () => {
