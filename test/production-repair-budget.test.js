@@ -387,3 +387,76 @@ test("a rejected repair names which protocol rule it broke", async () => {
     ]),
   );
 });
+
+test("a repair that cannot write a patch is asked for whole files instead", async () => {
+  // Two consecutive builds died here with four minutes of correct work already
+  // done: three unusable patches end a mission, and neither death was a wrong
+  // diagnosis — the search/replace format defeated the model. Every oldText
+  // must still match the current content exactly once, and when it does not
+  // there is nothing to apply. The last attempt of a round now asks for the
+  // corrected file instead, which cannot fail to apply.
+  const { patchFromWholeFileRepair, validateBrowserRepairProposal } =
+    await import("../src/work-plane/production-mission-service.js");
+
+  const currentFiles = [
+    { path: "app/page.tsx", content: "export default function P(){return <main/>}" },
+  ];
+  const wholeFile = {
+    files: [
+      {
+        path: "app/page.tsx",
+        content: "export default function P(){return <main><h1>Stock</h1></main>}",
+      },
+    ],
+  };
+
+  // A whole-file proposal becomes the patch shape the rest of the loop
+  // understands: one replacement of the entire file.
+  const asPatch = patchFromWholeFileRepair(wholeFile, currentFiles);
+  assert.deepEqual(asPatch.files, [
+    {
+      path: "app/page.tsx",
+      replacements: [
+        {
+          oldText: "export default function P(){return <main/>}",
+          newText: "export default function P(){return <main><h1>Stock</h1></main>}",
+        },
+      ],
+    },
+  ]);
+
+  // And it passes the same admission every patch passes — nothing is relaxed.
+  const accepted = validateBrowserRepairProposal({
+    structuredOutput: asPatch,
+    currentFiles,
+    requiredBrowserCheckIds: [],
+  });
+  assert.match(accepted.files[0].content, /<h1>Stock<\/h1>/u);
+
+  // A whole file that is unchanged is still refused, so the fallback cannot be
+  // used to spend an attempt on nothing.
+  assert.throws(
+    () =>
+      validateBrowserRepairProposal({
+        structuredOutput: patchFromWholeFileRepair(
+          { files: [{ path: "app/page.tsx", content: currentFiles[0].content }] },
+          currentFiles,
+        ),
+        currentFiles,
+        requiredBrowserCheckIds: [],
+      }),
+    /do not change the current file/u,
+  );
+
+  // The loop reaches for it on the final attempt of a round, not the first:
+  // whole files cost more tokens, so they are the fallback and not the default.
+  const source = await readFile(
+    new URL("../src/work-plane/production-mission-service.js", import.meta.url),
+    "utf8",
+  );
+  assert.match(
+    source,
+    /if \(proposalAttempt === MAX_REPAIR_PROPOSALS_PER_ROUND - 1\) \{\s*\n\s*wholeFileFallback = true;/u,
+  );
+  assert.match(source, /await requestBrowserRepair\(\s*\n?\s*semanticRejection,\s*\n?\s*wholeFileFallback,/u);
+});

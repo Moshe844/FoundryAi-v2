@@ -636,6 +636,57 @@ const browserRepairPatchSchema = Object.freeze({
   },
 });
 
+// Search/replace is the efficient way to correct a file and the fragile one:
+// every oldText must still match the current content exactly once. Two
+// consecutive builds died with four minutes of good work done because the
+// model could not produce an applicable patch three times — not because its
+// diagnosis was wrong, but because the format defeated it. When that happens
+// the repair is asked for the corrected file instead. Whole files cost more
+// tokens, which is why they are the fallback and not the default.
+const wholeFileRepairSchema = Object.freeze({
+  type: "object",
+  additionalProperties: false,
+  required: ["files"],
+  properties: {
+    files: {
+      type: "array",
+      minItems: 1,
+      maxItems: MAX_REPAIR_FILES_PER_PROPOSAL,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["path", "content"],
+        properties: {
+          path: { type: "string" },
+          content: { type: "string", minLength: 1 },
+        },
+      },
+    },
+  },
+});
+
+// A whole-file proposal is turned into the patch shape the rest of the loop
+// already understands: one replacement of the entire current file.
+export function patchFromWholeFileRepair(structuredOutput, currentFiles) {
+  const files = structuredOutput?.files;
+  if (!Array.isArray(files)) return structuredOutput;
+  return {
+    ...structuredOutput,
+    files: files.map((file) => {
+      const current = currentFiles.find(
+        (candidate) => candidate.path === file?.path,
+      );
+      if (current === undefined || typeof file?.content !== "string") {
+        return { path: file?.path, replacements: [] };
+      }
+      return {
+        path: file.path,
+        replacements: [{ oldText: current.content, newText: file.content }],
+      };
+    }),
+  };
+}
+
 function repairPatchSchemaScopedToPaths(schema, paths) {
   const files = schema.properties.files;
   return Object.freeze({
@@ -5100,7 +5151,7 @@ export function createProductionMissionService({
             );
           });
         });
-        async function requestBrowserRepair(semanticRejection) {
+        async function requestBrowserRepair(semanticRejection, wholeFile = false) {
           const repairSequence =
             models
               .listCalls(missionId)
@@ -5111,12 +5162,15 @@ export function createProductionMissionService({
             browserTargets.length > 0
               ? browserTargets
               : generationTargetIds;
+          const proposalShape = wholeFile
+            ? wholeFileRepairSchema
+            : browserRepairPatchSchema;
           const scopedBrowserRepairPatchSchema = sourceOnlyBrowserRepair
             ? repairPatchSchemaScopedToPaths(
-                browserRepairPatchSchema,
+                proposalShape,
                 eligibleRepairFiles.map((file) => file.path),
               )
-            : browserRepairPatchSchema;
+            : proposalShape;
           const browserRepairSchema = contractTraceSchema(
             scopedBrowserRepairPatchSchema,
             approvedContract !== null,
@@ -5128,7 +5182,9 @@ export function createProductionMissionService({
           purpose: [
             "The real Playwright verification observation did not satisfy its evidence protocol or Requirement Contract.",
             `Deterministic initial repair classification: ${failureClassification.scope}. Hypothesis: ${failureClassification.hypothesis}`,
-            `Return exact search/replace edits as a "files" array over existing project source, configuration, Playwright test, or Playwright configuration files. Name every file the observed failure requires — up to ${MAX_REPAIR_FILES_PER_PROPOSAL} — in this one proposal, and name each file at most once. Each oldText must occur exactly once in that file; keep edits narrowly scoped and use as few replacements as possible.`,
+            wholeFile
+              ? `Earlier attempts could not produce an applicable search/replace patch, so return the complete corrected content of each file instead. Give a "files" array of {path, content} over existing project source, configuration, Playwright test, or Playwright configuration files — up to ${MAX_REPAIR_FILES_PER_PROPOSAL}, each named at most once. content replaces that file entirely, so it must be the whole file, complete and valid, with the defect fixed and everything else preserved exactly.`
+              : `Return exact search/replace edits as a "files" array over existing project source, configuration, Playwright test, or Playwright configuration files. Name every file the observed failure requires — up to ${MAX_REPAIR_FILES_PER_PROPOSAL} — in this one proposal, and name each file at most once. Each oldText must occur exactly once in that file; keep edits narrowly scoped and use as few replacements as possible.`,
             "A failure whose causes span several files must be corrected in one proposal. Correcting part of it and leaving the rest for a later round wastes the repair budget and risks breaking what already passes.",
             "Choose application source when the running behavior is wrong. Choose Playwright test/configuration only when the observation implementation is wrong. Correct invalid selectors, synchronization, or observation code while preserving every contract assertion.",
             "When a visible create, update, or delete workflow returns a generic HTTP 500, inspect the exact API route used by that interaction together with its SQL and persistence schema. Do not repeatedly change database initialization without checking route statements, parameter binding, and SQL string-literal quoting.",
@@ -5225,7 +5281,9 @@ export function createProductionMissionService({
           expectedStructuredOutputSchema: browserRepairSchema,
           structuredOutputValidator(output) {
             validateBrowserRepairProposal({
-              structuredOutput: output,
+              structuredOutput: wholeFile
+                ? patchFromWholeFileRepair(output, eligibleRepairFiles)
+                : output,
               currentFiles: eligibleRepairFiles,
               requiredBrowserCheckIds: requiredBrowserChecks,
               browserQualityRequirements: {
@@ -5259,11 +5317,19 @@ export function createProductionMissionService({
             : { structuredOutput: replayableRepair.structuredOutput };
         let acceptedRepair = null;
         let semanticRejection = null;
+        // After two rejected patches the format is the obstacle, not the
+        // diagnosis, so the last attempt asks for whole files instead. Two
+        // consecutive builds died here with four minutes of correct work
+        // already done, because three unusable patches end a mission.
+        let wholeFileFallback = false;
         for (
           let proposalAttempt = 0;
-          proposalAttempt < 3 && acceptedRepair === null;
+          proposalAttempt < MAX_REPAIR_PROPOSALS_PER_ROUND && acceptedRepair === null;
           proposalAttempt += 1
         ) {
+          if (proposalAttempt === MAX_REPAIR_PROPOSALS_PER_ROUND - 1) {
+            wholeFileFallback = true;
+          }
           if (repair === null) {
             // The budget exists to stop a repair that keeps reasoning wrongly,
             // and it counted every call — including ones rejected before they
@@ -5293,7 +5359,19 @@ export function createProductionMissionService({
               );
             }
             try {
-              repair = await requestBrowserRepair(semanticRejection);
+              const proposed = await requestBrowserRepair(
+                semanticRejection,
+                wholeFileFallback,
+              );
+              repair = wholeFileFallback
+                ? {
+                    ...proposed,
+                    structuredOutput: patchFromWholeFileRepair(
+                      proposed.structuredOutput,
+                      eligibleRepairFiles,
+                    ),
+                  }
+                : proposed;
             } catch (error) {
               // Model Gateway also runs this proposal's semantic validator, and
               // it classifies that rejection as terminal because re-buying the
