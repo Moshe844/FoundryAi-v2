@@ -327,3 +327,63 @@ test("a repair re-verifies what it changed, and only once", async () => {
   assert.equal(changed(testOnly), false, "a test-only repair needs no build");
   assert.equal(changed(mixed), true, "a mixed repair still needs the build");
 });
+
+test("a rejected repair names which protocol rule it broke", async () => {
+  // Six conditions once shared one sentence — "violated the structured
+  // observation protocol" — naming no condition, no file and no line. Three
+  // proposals died against it in a row and the mission ended after a single
+  // observation, four minutes in, with the application's real failures never
+  // touched. This is the same defect as every other mute gate fixed today, in
+  // the one message that had not been reached.
+  const { validateBrowserRepairProposal } = await import(
+    "../src/work-plane/production-mission-service.js"
+  );
+  const propose = (path, content, replacements) =>
+    validateBrowserRepairProposal({
+      structuredOutput: { files: [{ path, replacements }] },
+      currentFiles: [{ path, content }],
+      requiredBrowserCheckIds: [],
+    });
+
+  // An edit that empties the file says so, and names the file.
+  assert.throws(
+    () =>
+      propose("app/page.tsx", "export default function P(){return null}", [
+        { oldText: "export default function P(){return null}", newText: "" },
+      ]),
+    /would leave app\/page\.tsx empty/u,
+  );
+
+  // A repair that unbalances the source reports the position, not a category.
+  assert.throws(
+    () =>
+      propose("app/page.tsx", "export default function P(){return null}", [
+        { oldText: "return null}", newText: "return null" },
+      ]),
+    /has unbalanced delimiters: the "\{" opened at line 1 column \d+ is never closed/u,
+  );
+
+  // Each Playwright configuration rule states itself and why it exists.
+  const config = 'export default { use: { baseURL: process.env.FOUNDRY_PREVIEW_URL }, projects: [{ use: { channel: "chrome" } }] };';
+  assert.throws(
+    () =>
+      propose("playwright.config.ts", config, [
+        { oldText: "process.env.FOUNDRY_PREVIEW_URL", newText: '"http://localhost:3000"' },
+      ]),
+    /must read its base URL from FOUNDRY_PREVIEW_URL/u,
+  );
+  assert.throws(
+    () =>
+      propose("playwright.config.ts", config, [
+        { oldText: 'projects:', newText: 'webServer: { command: "npm start" }, projects:' },
+      ]),
+    /may not declare webServer/u,
+  );
+
+  // A valid repair to the same file is still accepted.
+  assert.doesNotThrow(() =>
+    propose("playwright.config.ts", config, [
+      { oldText: 'channel: "chrome"', newText: 'channel: "chrome", headless: true' },
+    ]),
+  );
+});

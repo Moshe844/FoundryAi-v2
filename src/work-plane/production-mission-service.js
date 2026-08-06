@@ -2142,20 +2142,39 @@ function validateSingleRepairPatch({
     );
   const repairsJavaScript =
     /\.(?:cjs|js|jsx|mjs|ts|tsx)$/u.test(structuredOutput.path);
-  if (
-    repairedContent.trim() === "" ||
-    (repairsJavaScript &&
-      !hasBalancedJavaScriptDelimiters(repairedContent)) ||
-    (repairsPlaywrightConfig &&
-      (!repairedContent.includes("FOUNDRY_PREVIEW_URL") ||
-        !/\bchannel\s*:\s*["']chrome["']/u.test(repairedContent) ||
-        /\bwebServer\s*:/u.test(repairedContent) ||
-        /\breporter\s*:\s*["'](?:\.{1,2}\/|[A-Za-z]:[\\/])/u.test(
-          repairedContent,
-        )))
-  ) {
+  // Six conditions once shared one sentence — "violated the structured
+  // observation protocol" — which named no condition, no file and no line.
+  // Three proposals died against it in a row and the mission ended after a
+  // single observation, four minutes in, with the application's real failures
+  // never touched. Each condition now says what it is.
+  const protocolViolation = (() => {
+    if (repairedContent.trim() === "") {
+      return `the repair would leave ${structuredOutput.path} empty`;
+    }
+    if (repairsJavaScript) {
+      const unbalanced = unbalancedJavaScriptDelimiter(repairedContent);
+      if (unbalanced !== null) {
+        return `the repaired ${structuredOutput.path} has unbalanced delimiters: ${unbalanced}`;
+      }
+    }
+    if (!repairsPlaywrightConfig) return null;
+    if (!repairedContent.includes("FOUNDRY_PREVIEW_URL")) {
+      return "the Playwright configuration must read its base URL from FOUNDRY_PREVIEW_URL; Foundry owns the running application and the configuration may not start a second one";
+    }
+    if (!/\bchannel\s*:\s*["']chrome["']/u.test(repairedContent)) {
+      return 'the Playwright configuration must select the installed system Chrome with channel: "chrome"';
+    }
+    if (/\bwebServer\s*:/u.test(repairedContent)) {
+      return "the Playwright configuration may not declare webServer: Foundry already owns the ready application process";
+    }
+    if (/\breporter\s*:\s*["'](?:\.{1,2}\/|[A-Za-z]:[\\/])/u.test(repairedContent)) {
+      return "the Playwright reporter may not be a filesystem path; use a built-in reporter name";
+    }
+    return null;
+  })();
+  if (protocolViolation !== null) {
     throw new Error(
-      "The browser repair violated the structured observation protocol.",
+      `The browser repair violated the structured observation protocol: ${protocolViolation}.`,
     );
   }
   if (repairsTestSource) {
