@@ -80,6 +80,13 @@ const MAX_BROWSER_REPAIR_CALLS = 4;
 // aspects left. A repair that stops making progress still stops, because a
 // repeated proposal is rejected before it is paid for.
 const MAX_DESIGN_FIDELITY_REPAIR_CALLS = 4;
+// Measured across every recorded build that reached a browser: of the eight
+// that took five rounds or more, none succeeded — not once. Of those needing
+// four or fewer, five did. Each further round costs about ninety seconds of
+// Playwright and a paid repair call, so rounds five through seven were pure
+// delay on a build that was already lost, and a customer watched "Testing
+// important actions" for four extra minutes to be told it failed anyway.
+const MAX_BROWSER_OBSERVATION_ATTEMPTS = 4;
 // A proposal rejected before it touches a file costs a model call but proves
 // nothing, so it does not spend the repair budget. This bounds how many such
 // mechanical corrections may be bought per budgeted repair.
@@ -4529,7 +4536,7 @@ export function createProductionMissionService({
       // fidelity gate is skipped for that build by design.
       const approvedPrototypeContract = comparablePrototypeDesign(approvedContract);
       let browser;
-      for (let attempt = 0; attempt < 7; attempt += 1) {
+      for (let attempt = 0; attempt < MAX_BROWSER_OBSERVATION_ATTEMPTS; attempt += 1) {
         // Fidelity only runs once the browser checks pass, so this must reset
         // each round. Carrying it forward counted a previous round's aspects
         // against a round that never measured them, and halted a build that

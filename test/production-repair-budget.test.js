@@ -269,3 +269,30 @@ test("the accepted-shortfall evidence satisfies the real evidence schema", async
     /payload must contain exactly: checks/u,
   );
 });
+
+test("browser observation stops at the round count that still succeeds", async () => {
+  // Measured across every recorded build that reached a browser: of the eight
+  // that took five rounds or more, none succeeded. Of those needing four or
+  // fewer, five did. Each further round is about ninety seconds of Playwright
+  // and a paid repair call, so a ceiling of seven spent four extra minutes on
+  // builds that were already lost — with the customer watching "Testing
+  // important actions" the whole time.
+  const source = await readFile(
+    new URL("../src/work-plane/production-mission-service.js", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(source, /const MAX_BROWSER_OBSERVATION_ATTEMPTS = 4;/u);
+  assert.match(
+    source,
+    /for \(let attempt = 0; attempt < MAX_BROWSER_OBSERVATION_ATTEMPTS; attempt \+= 1\)/u,
+    "the observation loop must take its ceiling from the measured constant",
+  );
+
+  // The repair budgets must not promise more corrections than there are rounds
+  // to apply them in, or the budget stops meaning anything.
+  const { browserRepairCalls, designFidelityRepairCalls } =
+    productionRepairBudgets({ approvedPrototype: true });
+  assert.ok(browserRepairCalls <= 4);
+  assert.ok(designFidelityRepairCalls <= 4);
+});
