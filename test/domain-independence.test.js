@@ -1434,7 +1434,7 @@ test("browser repair admission rejects repeated or inapplicable replacements bef
       structuredOutput: valid,
       currentFiles,
       requiredBrowserCheckIds: ["check-visible"],
-    }).content.includes("Array.from"),
+    }).files[0].content.includes("Array.from"),
     true,
   );
   assert.throws(

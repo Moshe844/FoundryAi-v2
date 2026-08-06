@@ -38,6 +38,61 @@ import {
 
 const IDENTIFIER_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,127})$/;
 
+// Restoring a checkpoint moves whole directory trees. On Windows a directory
+// cannot be renamed while any process still holds a handle inside it, and the
+// runtime this restore follows is a dev server whose grandchildren keep handles
+// on their build cache for a moment after the parent process reports closed.
+// The operating system releases them shortly and unprompted, so the rename is
+// not wrong — only early. Failing the mission on it discarded a build that had
+// already generated, compiled, and run.
+const TRANSIENT_FILESYSTEM_CODES = new Set([
+  "EPERM",
+  "EACCES",
+  "EBUSY",
+  "ENOTEMPTY",
+  "EEXIST",
+]);
+const TRANSIENT_RETRY_DELAYS_MS = Object.freeze([
+  10, 25, 50, 100, 200, 400, 800, 1_500, 3_000,
+]);
+
+function sleepSync(milliseconds) {
+  // These are synchronous filesystem transactions; there is no point in the
+  // call stack where control may be yielded to the event loop.
+  Atomics.wait(
+    new Int32Array(new SharedArrayBuffer(4)),
+    0,
+    0,
+    milliseconds,
+  );
+}
+
+function throughTransientLocks(operation) {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return operation();
+    } catch (error) {
+      if (
+        !TRANSIENT_FILESYSTEM_CODES.has(error?.code) ||
+        attempt >= TRANSIENT_RETRY_DELAYS_MS.length
+      ) {
+        throw error;
+      }
+      sleepSync(TRANSIENT_RETRY_DELAYS_MS[attempt]);
+    }
+  }
+}
+
+function renameThroughTransientLocks(source, target) {
+  return throughTransientLocks(() => renameSync(source, target));
+}
+
+function removeThroughTransientLocks(target) {
+  return throughTransientLocks(() =>
+    rmSync(target, { recursive: true, force: true }),
+  );
+}
+
 function sha256(content) {
   return createHash("sha256").update(content).digest("hex");
 }
@@ -456,19 +511,27 @@ export function createWorkspaceStore({ workspaceDirectory }) {
       safeTransientDirectories.push(name);
     }
     const backup = resolve(areaFor(workspace.workspaceId), `restore-backup-${token}`);
-    renameSync(liveRoot, backup);
-    renameSync(stagedRoot, liveRoot);
+    renameThroughTransientLocks(liveRoot, backup);
+    try {
+      renameThroughTransientLocks(stagedRoot, liveRoot);
+    } catch (error) {
+      // The live root is already moved aside. Leaving it there would strand the
+      // workspace at a path nothing knows about, so put it back before the
+      // failure propagates.
+      renameThroughTransientLocks(backup, liveRoot);
+      throw error;
+    }
     const preservedDirectories = [];
     for (const name of safeTransientDirectories) {
       const source = resolve(backup, name);
-      renameSync(source, resolve(liveRoot, name));
+      renameThroughTransientLocks(source, resolve(liveRoot, name));
       preservedDirectories.push(name);
     }
     let finalized = false;
     return Object.freeze({
       commit() {
         if (!finalized) {
-          rmSync(backup, { recursive: true, force: true });
+          removeThroughTransientLocks(backup);
           finalized = true;
         }
       },
@@ -477,11 +540,11 @@ export function createWorkspaceStore({ workspaceDirectory }) {
           for (const name of preservedDirectories) {
             const source = resolve(liveRoot, name);
             if (existsSync(source)) {
-              renameSync(source, resolve(backup, name));
+              renameThroughTransientLocks(source, resolve(backup, name));
             }
           }
-          rmSync(liveRoot, { recursive: true, force: true });
-          renameSync(backup, liveRoot);
+          removeThroughTransientLocks(liveRoot);
+          renameThroughTransientLocks(backup, liveRoot);
           finalized = true;
         }
       },
@@ -499,18 +562,18 @@ export function createWorkspaceStore({ workspaceDirectory }) {
       stagingDirectory,
       `release-${workspace.workspaceId}-${randomUUID()}`,
     );
-    renameSync(area, quarantine);
+    renameThroughTransientLocks(area, quarantine);
     let finalized = false;
     return Object.freeze({
       commit() {
         if (!finalized) {
-          rmSync(quarantine, { recursive: true, force: true });
+          removeThroughTransientLocks(quarantine);
           finalized = true;
         }
       },
       rollback() {
         if (!finalized) {
-          renameSync(quarantine, area);
+          renameThroughTransientLocks(quarantine, area);
           finalized = true;
         }
       },

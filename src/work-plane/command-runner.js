@@ -136,6 +136,46 @@ export function terminateProcessTree(child) {
   }
 }
 
+// taskkill /T returns once it has signalled the tree, not once the tree is
+// gone. A worker that is still exiting keeps its file handles, so anything that
+// renames or deletes the working directory next must wait for the processes
+// themselves to disappear rather than for the signal to be delivered.
+export async function awaitProcessTreeExit(
+  pid,
+  { timeoutMs = 10_000, pollIntervalMs = 100 } = {},
+) {
+  if (!Number.isSafeInteger(pid) || pid <= 0) return true;
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    if (!processTreeAlive(pid)) return true;
+    if (Date.now() >= deadline) return false;
+    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+  }
+}
+
+function processTreeAlive(pid) {
+  if (process.platform !== "win32") {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  try {
+    const listed = execFileSync(
+      "tasklist.exe",
+      ["/FI", `PID eq ${pid}`, "/NH", "/FO", "CSV"],
+      { encoding: "utf8", windowsHide: true, timeout: 5_000 },
+    );
+    return listed.includes(`"${pid}"`);
+  } catch {
+    // Unable to ask; treat as gone rather than blocking the pipeline on an
+    // inspection failure. The retrying rename below is the real safeguard.
+    return false;
+  }
+}
+
 function appendBounded(state, chunk, outputLimitBytes) {
   const bytes = Buffer.from(chunk);
   const remaining = Math.max(0, outputLimitBytes - state.size);

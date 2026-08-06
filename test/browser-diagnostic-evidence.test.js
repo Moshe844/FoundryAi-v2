@@ -4,10 +4,14 @@ import test from "node:test";
 import { parseBrowserResult } from "../src/domain/runtime-preview.js";
 import { runtimeSourceManifest } from "../src/work-plane/runtime-preview-service.js";
 import {
+  ProductionRepairScope,
   browserCheckObservationFailure,
   bindFoundryObservationHarness,
+  deepestRepairScope,
   foundryObservationHarness,
+  repairPatchFiles,
   validateBrowserObservationTestSource,
+  validateBrowserRepairProposal,
 } from "../src/work-plane/production-mission-service.js";
 
 test("browser observations retain deterministic scalar diagnostics", () => {
@@ -201,6 +205,118 @@ test("Foundry's observation harness satisfies every scaffolding gate itself", ()
   // Per-check isolation: one failing check cannot leave another unobserved.
   assert.match(harness, /try \{[\s\S]*await check\(/u);
   assert.match(harness, /catch \(error: unknown\)[\s\S]*checks\[id\] = false/u);
+});
+
+test("one repair corrects a failure whose causes span several files", () => {
+  // The real defect: a fidelity verdict failed typography, colors, navigation
+  // and surface order at once. Typography and color are declared in the
+  // stylesheet; the navigation landmark and surface order are written in the
+  // page. A patch that could name one file corrected the page, left the
+  // approved font and palette untouched, and spent the next paid round undoing
+  // the check its markup edit had broken — so the budget ran out with the
+  // design still wrong.
+  const currentFiles = [
+    {
+      path: "app/globals.css",
+      content: "body{font-family:ui-rounded;color:#333333}",
+    },
+    {
+      path: "app/page.tsx",
+      content:
+        "export default function Page(){return <main><h1>Stock</h1></main>}",
+    },
+  ];
+  const accepted = validateBrowserRepairProposal({
+    structuredOutput: {
+      files: [
+        {
+          path: "app/globals.css",
+          replacements: [
+            { oldText: "ui-rounded", newText: "'Trebuchet MS'" },
+            { oldText: "#333333", newText: "#263244" },
+          ],
+        },
+        {
+          path: "app/page.tsx",
+          replacements: [
+            { oldText: "<main>", newText: "<nav aria-label='Filters'/><main>" },
+          ],
+        },
+      ],
+    },
+    currentFiles,
+    requiredBrowserCheckIds: [],
+  });
+
+  assert.deepEqual(
+    accepted.files.map((file) => file.path),
+    ["app/globals.css", "app/page.tsx"],
+  );
+  assert.match(accepted.files[0].content, /Trebuchet MS/u);
+  assert.match(accepted.files[0].content, /#263244/u);
+  assert.match(accepted.files[1].content, /<nav/u);
+
+  // Both files are still ordinary source, so the repair reruns the source
+  // pipeline rather than the dependency one.
+  assert.equal(
+    deepestRepairScope(["BROWSER_TEST_REPAIR", "SOURCE_CODE_REPAIR"]),
+    ProductionRepairScope.SOURCE_CODE,
+  );
+  assert.equal(
+    deepestRepairScope(["SOURCE_CODE_REPAIR", "DEPENDENCY_REPAIR"]),
+    ProductionRepairScope.DEPENDENCY,
+  );
+
+  // Naming one file twice would apply both edits against the same starting
+  // content and silently discard the first.
+  assert.throws(
+    () =>
+      validateBrowserRepairProposal({
+        structuredOutput: {
+          files: [
+            {
+              path: "app/globals.css",
+              replacements: [{ oldText: "ui-rounded", newText: "serif" }],
+            },
+            {
+              path: "app/globals.css",
+              replacements: [{ oldText: "#333333", newText: "#263244" }],
+            },
+          ],
+        },
+        currentFiles,
+        requiredBrowserCheckIds: [],
+      }),
+    /named the same file twice/u,
+  );
+
+  // A repeated hypothesis is still refused across the whole file set, in any
+  // order, so the budget cannot be spent re-proposing one correction.
+  const proposal = {
+    files: [
+      {
+        path: "app/page.tsx",
+        replacements: [{ oldText: "<main>", newText: "<nav/><main>" }],
+      },
+    ],
+  };
+  assert.throws(
+    () =>
+      validateBrowserRepairProposal({
+        structuredOutput: proposal,
+        currentFiles,
+        requiredBrowserCheckIds: [],
+        priorStructuredOutputs: [proposal],
+      }),
+    /repeats an existing hypothesis/u,
+  );
+
+  // Proposals recorded before this change named a single path; every reader
+  // still sees them.
+  assert.deepEqual(
+    repairPatchFiles({ path: "app/page.tsx", replacements: [] }),
+    [{ path: "app/page.tsx", replacements: [] }],
+  );
 });
 
 test("only Foundry may emit the evidence marker", () => {

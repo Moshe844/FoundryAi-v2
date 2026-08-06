@@ -351,6 +351,25 @@ export function repairScopeForPath(path) {
   return ProductionRepairScope.SOURCE_CODE;
 }
 
+// A multi-file repair reruns the pipeline its widest-reaching file demands, so
+// changing a stylesheet next to a dependency manifest still reinstalls.
+const REPAIR_SCOPE_DEPTH = Object.freeze([
+  ProductionRepairScope.BROWSER_TEST,
+  ProductionRepairScope.CONFIGURATION,
+  ProductionRepairScope.SOURCE_CODE,
+  ProductionRepairScope.DEPENDENCY,
+]);
+
+export function deepestRepairScope(scopes) {
+  let deepest = ProductionRepairScope.BROWSER_TEST;
+  for (const scope of scopes) {
+    if (REPAIR_SCOPE_DEPTH.indexOf(scope) > REPAIR_SCOPE_DEPTH.indexOf(deepest)) {
+      deepest = scope;
+    }
+  }
+  return deepest;
+}
+
 export function classifyProductionFailure({
   stage,
   stdout = "",
@@ -482,27 +501,80 @@ const projectBundleSchema = Object.freeze({
   },
 });
 
+// A design-fidelity failure is normally spread across the file that holds the
+// markup and the file that holds the styles: typography and color live in the
+// stylesheet, surface order and navigation landmarks live in the page. A patch
+// that could name only one file could never satisfy both, so the loop spent its
+// whole budget alternating — correcting the page, leaving the approved font and
+// palette untouched, then paying another round to undo what the page edit broke.
+// A repair may now name several files at once and is still bounded: few files,
+// exact search/replace text, and the eligible-file allowlist below.
+export const MAX_REPAIR_FILES_PER_PROPOSAL = 4;
+
 const browserRepairPatchSchema = Object.freeze({
   type: "object",
   additionalProperties: false,
-  required: ["path", "replacements"],
+  required: ["files"],
   properties: {
-    path: { type: "string" },
-    replacements: {
+    files: {
       type: "array",
       minItems: 1,
+      maxItems: MAX_REPAIR_FILES_PER_PROPOSAL,
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["oldText", "newText"],
+        required: ["path", "replacements"],
         properties: {
-          oldText: { type: "string", minLength: 1 },
-          newText: { type: "string" },
+          path: { type: "string" },
+          replacements: {
+            type: "array",
+            minItems: 1,
+            items: {
+              type: "object",
+              additionalProperties: false,
+              required: ["oldText", "newText"],
+              properties: {
+                oldText: { type: "string", minLength: 1 },
+                newText: { type: "string" },
+              },
+            },
+          },
         },
       },
     },
   },
 });
+
+function repairPatchSchemaScopedToPaths(schema, paths) {
+  const files = schema.properties.files;
+  return Object.freeze({
+    ...schema,
+    properties: Object.freeze({
+      ...schema.properties,
+      files: Object.freeze({
+        ...files,
+        items: Object.freeze({
+          ...files.items,
+          properties: Object.freeze({
+            ...files.items.properties,
+            path: Object.freeze({
+              type: "string",
+              enum: Object.freeze([...paths]),
+            }),
+          }),
+        }),
+      }),
+    }),
+  });
+}
+
+// Callers hold a proposal that may name one file or several; every reader of a
+// repair wants the same list either way.
+export function repairPatchFiles(structuredOutput) {
+  const files = structuredOutput?.files;
+  if (Array.isArray(files)) return files;
+  return typeof structuredOutput?.path === "string" ? [structuredOutput] : [];
+}
 
 function contractTraceSchema(schema, enabled) {
   if (!enabled) return schema;
@@ -1876,23 +1948,64 @@ export function validateBrowserRepairProposal({
   priorStructuredOutputs = [],
   allowPriorReplay = false,
 }) {
+  const patches = repairPatchFiles(structuredOutput);
+  if (patches.length === 0) {
+    throw new Error(
+      "The browser repair proposed no file edits.",
+    );
+  }
+  const patchedPaths = patches.map((patch) => patch?.path);
+  if (new Set(patchedPaths).size !== patchedPaths.length) {
+    // Two edits to one file would each be applied against the same starting
+    // content, so the second would silently discard the first.
+    throw new Error(
+      "The browser repair named the same file twice; combine its replacements into one entry.",
+    );
+  }
+  const hypothesis = (output) =>
+    JSON.stringify(
+      repairPatchFiles(output)
+        .map((patch) => [patch?.path, patch?.replacements])
+        .sort((left, right) => String(left[0]).localeCompare(String(right[0]))),
+    );
+  const duplicateHypothesis = priorStructuredOutputs.some(
+    (output) => hypothesis(output) === hypothesis(structuredOutput),
+  );
+  if (duplicateHypothesis && !allowPriorReplay) {
+    throw new Error(
+      "The proposed repair repeats an existing hypothesis without new evidence.",
+    );
+  }
+  const accepted = patches.map((patch) =>
+    validateSingleRepairPatch({
+      patch,
+      currentFiles,
+      requiredBrowserCheckIds,
+      browserQualityRequirements,
+    }),
+  );
+  return Object.freeze({
+    files: Object.freeze(accepted),
+    repairsTestSource: accepted.some((file) => file.repairsTestSource),
+    repairsPlaywrightConfig: accepted.some(
+      (file) => file.repairsPlaywrightConfig,
+    ),
+  });
+}
+
+function validateSingleRepairPatch({
+  patch,
+  currentFiles,
+  requiredBrowserCheckIds,
+  browserQualityRequirements,
+}) {
+  const structuredOutput = patch;
   const currentFile = currentFiles.find(
     (file) => file.path === structuredOutput?.path,
   );
   if (currentFile === undefined) {
     throw new Error(
       "The browser repair attempted to change a file outside the current generated project.",
-    );
-  }
-  const duplicateHypothesis = priorStructuredOutputs.some(
-    (output) =>
-      output?.path === structuredOutput.path &&
-      JSON.stringify(output?.replacements) ===
-        JSON.stringify(structuredOutput.replacements),
-  );
-  if (duplicateHypothesis && !allowPriorReplay) {
-    throw new Error(
-      "The proposed repair repeats an existing hypothesis without new evidence.",
     );
   }
   const repairedContent = applyExactReplacements(
@@ -3187,10 +3300,15 @@ export function createProductionMissionService({
         .sort((left, right) => left.localeCompare(right)) ?? [];
     const scopes = {};
     for (const call of repairCalls) {
-      const path = call.structuredOutput?.path;
-      if (typeof path !== "string") continue;
-      const scope = repairScopeForPath(path);
-      scopes[scope] = (scopes[scope] ?? 0) + 1;
+      const paths =
+        typeof call.structuredOutput?.path === "string"
+          ? [call.structuredOutput.path]
+          : repairPatchFiles(call.structuredOutput).map((patch) => patch?.path);
+      for (const path of paths) {
+        if (typeof path !== "string") continue;
+        const scope = repairScopeForPath(path);
+        scopes[scope] = (scopes[scope] ?? 0) + 1;
+      }
     }
     return Object.freeze({
       verifiedObligationIds: Object.freeze(verifiedObligationIds),
@@ -4643,20 +4761,26 @@ export function createProductionMissionService({
         const latestPriorRepair = priorRepairCalls[0];
         const replayableRepair = [latestPriorRepair].find((call) => {
           if (call === undefined) return false;
-          const output = call.structuredOutput;
-          const current = repairFiles.find(
-            (file) => file.path === output?.path,
-          );
-          if (
-            current === undefined ||
-            !Array.isArray(output?.replacements)
-          ) {
-            return false;
-          }
-          return canReplayExactReplacements(
-            current.content,
-            output.replacements,
-          );
+          const patches = repairPatchFiles(call.structuredOutput);
+          if (patches.length === 0) return false;
+          // Every file of the proposal must still apply; replaying half of a
+          // multi-file correction would leave the project in a state neither
+          // the prior nor the next repair reasoned about.
+          return patches.every((patch) => {
+            const current = repairFiles.find(
+              (file) => file.path === patch?.path,
+            );
+            if (
+              current === undefined ||
+              !Array.isArray(patch?.replacements)
+            ) {
+              return false;
+            }
+            return canReplayExactReplacements(
+              current.content,
+              patch.replacements,
+            );
+          });
         });
         async function requestBrowserRepair(semanticRejection) {
           const repairSequence =
@@ -4670,16 +4794,10 @@ export function createProductionMissionService({
               ? browserTargets
               : generationTargetIds;
           const scopedBrowserRepairPatchSchema = sourceOnlyBrowserRepair
-            ? {
-                ...browserRepairPatchSchema,
-                properties: {
-                  ...browserRepairPatchSchema.properties,
-                  path: {
-                    type: "string",
-                    enum: eligibleRepairFiles.map((file) => file.path),
-                  },
-                },
-              }
+            ? repairPatchSchemaScopedToPaths(
+                browserRepairPatchSchema,
+                eligibleRepairFiles.map((file) => file.path),
+              )
             : browserRepairPatchSchema;
           const browserRepairSchema = contractTraceSchema(
             scopedBrowserRepairPatchSchema,
@@ -4692,7 +4810,8 @@ export function createProductionMissionService({
           purpose: [
             "The real Playwright verification observation did not satisfy its evidence protocol or Requirement Contract.",
             `Deterministic initial repair classification: ${failureClassification.scope}. Hypothesis: ${failureClassification.hypothesis}`,
-            "Return exact search/replace edits for exactly one existing project source, configuration, Playwright test, or Playwright configuration file. Each oldText must occur exactly once in the current file; keep edits narrowly scoped and use as few replacements as possible.",
+            `Return exact search/replace edits as a "files" array over existing project source, configuration, Playwright test, or Playwright configuration files. Name every file the observed failure requires — up to ${MAX_REPAIR_FILES_PER_PROPOSAL} — in this one proposal, and name each file at most once. Each oldText must occur exactly once in that file; keep edits narrowly scoped and use as few replacements as possible.`,
+            "A failure whose causes span several files must be corrected in one proposal. Correcting part of it and leaving the rest for a later round wastes the repair budget and risks breaking what already passes.",
             "Choose application source when the running behavior is wrong. Choose Playwright test/configuration only when the observation implementation is wrong. Correct invalid selectors, synchronization, or observation code while preserving every contract assertion.",
             "When a visible create, update, or delete workflow returns a generic HTTP 500, inspect the exact API route used by that interaction together with its SQL and persistence schema. Do not repeatedly change database initialization without checking route statements, parameter binding, and SQL string-literal quoting.",
             ...(sourceOnlyBrowserRepair
@@ -4710,6 +4829,11 @@ export function createProductionMissionService({
               ? [
                   "This is a design-fidelity repair. Treat the immutable approved prototype, its exact failed aspects, and its desktop/tablet/mobile evidence as authority.",
                   "Change only the application source or isolated styles implicated by the failed fidelity aspects. Preserve every already-working workflow, API behavior, test assertion, and accessible interaction.",
+                  // Typography and color are stylesheet facts; surface order and
+                  // navigation landmarks are markup facts. Correcting one file
+                  // per round left the other half of the verdict untouched.
+                  "Fidelity aspects usually span both the markup and the stylesheet: typography, color and spacing are corrected where the styles are declared, while surface order and navigation landmarks are corrected where the markup is written. Include every such file in this one proposal.",
+                  "The browser checks listed below are currently observed. A markup change made for fidelity — adding a landmark, reordering surfaces, renaming a region — must keep each of them true; adjust the surrounding structure so the approved design and the observed behavior hold together.",
                   "Do not solve a scoped styling or composition mismatch by replacing the application, rewriting functional logic, changing the approved contract, or weakening the comparator.",
                   // Naming the failed aspects without supplying the approved
                   // values gave the repair nothing to edit toward: it was told
@@ -4750,9 +4874,10 @@ export function createProductionMissionService({
             `Prior evidence-backed browser repairs:\n${JSON.stringify(
               priorRepairCalls.map((call) => ({
                 requestId: call.requestId,
-                path: call.structuredOutput?.path,
-                replacementCount:
-                  call.structuredOutput?.replacements?.length ?? 0,
+                files: repairPatchFiles(call.structuredOutput).map((patch) => ({
+                  path: patch?.path,
+                  replacementCount: patch?.replacements?.length ?? 0,
+                })),
               })),
             )}`,
             "Do not repeat a prior replacement that left the same observation failing. Diagnose the remaining cause from the current test and exact evidence.",
@@ -4888,24 +5013,29 @@ export function createProductionMissionService({
             `Three browser repair proposals were rejected before pipeline execution: ${semanticRejection}`,
           );
         }
-        const repairScope = repairScopeForPath(
-          acceptedRepair.path,
+        // The scope that drives which procedures must be rerun is the deepest
+        // one the proposal touched: a patch that changes a dependency manifest
+        // alongside a stylesheet still needs the dependency pipeline.
+        const repairScope = deepestRepairScope(
+          acceptedRepair.files.map((file) => repairScopeForPath(file.path)),
         );
-        const changed = await work(
-          WorkUnitAction.REPLACE_FILE,
-          {
-            path: acceptedRepair.path,
-            content: acceptedRepair.content,
-          },
-          browserTargets.length > 0
-            ? browserTargets
-            : generationTargetIds,
-          `repair-${repairScope}-${acceptedRepair.path}`,
-        );
-        if (changed.status !== WorkUnitStatus.SUCCEEDED) {
-          throw new Error(
-            "The evidence-backed scoped repair could not be applied.",
+        for (const file of acceptedRepair.files) {
+          const changed = await work(
+            WorkUnitAction.REPLACE_FILE,
+            {
+              path: file.path,
+              content: file.content,
+            },
+            browserTargets.length > 0
+              ? browserTargets
+              : generationTargetIds,
+            `repair-${repairScopeForPath(file.path)}-${file.path}`,
           );
+          if (changed.status !== WorkUnitStatus.SUCCEEDED) {
+            throw new Error(
+              "The evidence-backed scoped repair could not be applied.",
+            );
+          }
         }
         const changesApplicationArtifact =
           !acceptedRepair.repairsTestSource &&

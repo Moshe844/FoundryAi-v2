@@ -20,6 +20,7 @@ import {
   projectRuntimeHistory,
 } from "../domain/runtime-preview.js";
 import {
+  awaitProcessTreeExit,
   controlledProcedureArguments,
   createSafeCommandEnvironment,
   resolveControlledExecutable,
@@ -755,6 +756,12 @@ export function createRuntimePreviewService({
         new Promise((resolve) => state.child.once("close", resolve)),
         new Promise((resolve) => setTimeout(resolve, 5_000)),
       ]);
+      // The dev server spawns its own workers, and "close" on the parent says
+      // nothing about them. On Windows a worker that is still exiting keeps a
+      // handle on the build cache inside the workspace, and the checkpoint
+      // restore that follows this stop cannot rename a directory anyone holds.
+      // Wait for the tree to actually disappear before returning.
+      await awaitProcessTreeExit(state.child.pid);
     } else if (
       Number.isSafeInteger(prior.processId) &&
       prior.processId > 0 &&
