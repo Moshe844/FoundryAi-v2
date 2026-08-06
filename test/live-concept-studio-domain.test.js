@@ -262,3 +262,27 @@ test("a refused concept is told what overflowed and by how much", async () => {
   assert.match(generation, /opened at 390px, 768px and 1280px wide and is refused if anything overflows/u);
   assert.match(generation, /min-width:0/u);
 });
+
+test("the studio's own screen accepts the choice the server admitted", async () => {
+  // The server admits a session once it can offer a choice — two proven
+  // directions — but the screen still required three. A READY studio therefore
+  // rendered its concepts with the continue button reading "Building live
+  // concepts…", so a direction could be selected and the customer had no way
+  // to go on. The two rules must agree.
+  const screen = await readFile(
+    new URL("../apps/web/app/components/project-discovery.tsx", import.meta.url),
+    "utf8",
+  );
+  const server = await readFile(
+    new URL("../apps/web/local-api/server.mjs", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(
+    screen,
+    /verificationStatus === "PASSED",\s*\n\s*\)\.length >= 2;/u,
+    "the screen must continue on the same minimum the server admits",
+  );
+  assert.match(server, /if \(admitted\.length < 2\) \{/u);
+  assert.doesNotMatch(screen, /\)\.length >= 3;/u);
+});

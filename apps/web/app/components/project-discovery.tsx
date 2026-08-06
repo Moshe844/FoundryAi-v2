@@ -160,11 +160,15 @@ export function ProjectDiscovery({
   const stageRef = useRef<HTMLDivElement>(null);
   const proposal = understanding.proposal;
   const interactionBusy = busy || missionRunning;
+  // The studio admits a session once it can offer a choice, which is two
+  // proven directions. Requiring three here left a READY studio showing its
+  // concepts with the button still reading "Building live concepts…", so the
+  // customer could select a direction and had no way to continue.
   const conceptStudioReady =
     conceptStudio?.status === "READY" &&
     conceptStudio.concepts.filter(
       (concept) => concept.verificationStatus === "PASSED",
-    ).length >= 3;
+    ).length >= 2;
   const effectiveSelected = Object.fromEntries(
     proposal.recommendations.map((recommendation) => [
       recommendation.id,
