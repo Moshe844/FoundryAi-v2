@@ -1008,7 +1008,7 @@ export function validateContractRequirementTrace(requirementIds, contractInput, 
   return freeze([...trace]);
 }
 
-export function createModelTaskContract({ approvedContract, routingRequirements, taskObjective, allowedScope, forbiddenChanges, relevantRequirementIds, currentCheckpoint, expectedOutputSchema }) {
+export function createModelTaskContract({ approvedContract, routingRequirements, taskObjective, allowedScope, forbiddenChanges, relevantRequirementIds, currentCheckpoint, expectedOutputSchema, designDirected = true }) {
   const contract = normalizeApprovedProjectContract(approvedContract);
   const catalogue = approvedContractRequirementCatalogue(contract);
   const byId = new Map(catalogue.implementationRequirements.map((item) => [item.requirementId, item]));
@@ -1031,15 +1031,22 @@ export function createModelTaskContract({ approvedContract, routingRequirements,
       finalInterpretedIntent: contract.finalInterpretedIntent,
       audiences: contract.audiences,
       workflows: contract.workflows,
-      selectedDesignDirection: contract.selectedDesignDirection,
+      // The design payload is the largest part of this contract and the part a
+      // tooling repair can neither read nor change. The hash still travels, so
+      // a task that must copy it verbatim still can.
       selectedDesignDirectionHash: approvedDesignDirectionHash(contract),
-      designExecutionBrief: designExecutionBrief(contract),
+      ...(designDirected
+        ? {
+            selectedDesignDirection: contract.selectedDesignDirection,
+            designExecutionBrief: designExecutionBrief(contract),
+            productBlueprint: contract.productBlueprint ?? null,
+          }
+        : {}),
       acceptedRecommendations: contract.acceptedRecommendations,
       rejectedRecommendations: contract.rejectedRecommendations,
       customerDecisions: contract.customerDecisions,
       foundryDecisions: contract.foundryDecisions,
       decisionSelections: contract.decisionSelections ?? [],
-      productBlueprint: contract.productBlueprint ?? null,
       assumptions: contract.assumptions,
       explicitExclusions: contract.explicitExclusions,
       explicitExclusionIds: catalogue.exclusionRequirements.map((requirement) => requirement.requirementId),
@@ -1057,8 +1064,20 @@ export function createModelTaskContract({ approvedContract, routingRequirements,
   });
 }
 
-export function contractBoundModelPrompt(taskContract, instructions) {
+export function contractBoundModelPrompt(taskContract, instructions, { designDirected = true } = {}) {
   if (!Array.isArray(instructions) || instructions.length === 0) fail("Model task instructions must be a non-empty array.");
+  // A task that cannot change the design does not need to be told how to build
+  // one. These paragraphs went to every call including a lint repair, which
+  // shipped roughly twenty-six thousand tokens of design direction to correct
+  // an ESLint complaint. Repairs were three quarters of a day's token spend.
+  if (!designDirected) {
+    return [
+      "MODEL TASK CONTRACT — BINDING",
+      JSON.stringify(taskContract),
+      "This task corrects a tooling failure in an already-approved project. Do not restructure the application, change its design, or alter any approved behaviour or verification obligation; fix only the reported defect.",
+      ...instructions,
+    ].join("\n\n");
+  }
   return [
     "MODEL TASK CONTRACT — BINDING",
     JSON.stringify(taskContract),

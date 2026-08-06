@@ -602,12 +602,25 @@ export function createAiProviderRegistry({
       const outputRate = selectedModel.costProfile.outputPerMillionTokensUsd;
       const inputTokens = result.usage?.inputTokens ?? 0;
       const outputTokens = result.usage?.outputTokens ?? 0;
+      // These rates are a static table Foundry carries, not a figure the
+      // provider returned. A day's work reported twelve dollars against sixty
+      // actually billed, because the table was wrong and nothing said it was a
+      // guess. Tokens come from the provider and are true; the money does not,
+      // so it travels labelled with the rates it assumed and never alone.
       return cloneAiValue({
         ...result,
         usage: {
           ...result.usage,
           costUsd:
             (inputTokens * inputRate + outputTokens * outputRate) / 1_000_000,
+          costIsEstimate: true,
+          costBasis: {
+            modelId: selectedModelId,
+            inputPerMillionTokensUsd: inputRate,
+            outputPerMillionTokensUsd: outputRate,
+            source: "foundry-model-governance-policy",
+            note: "Assumed rates, not billed amounts. Verify against the provider's own billing before relying on this figure.",
+          },
         },
       });
     },

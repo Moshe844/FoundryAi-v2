@@ -3716,6 +3716,7 @@ export function createProductionMissionService({
           relevantRequirementIds,
           currentCheckpoint,
           expectedOutputSchema: input.expectedStructuredOutputSchema,
+          designDirected: task.designDirected !== false,
         });
         const contractContext = {
           kind: "approved-project-contract",
@@ -3734,9 +3735,11 @@ export function createProductionMissionService({
         );
         return models.request({
           ...input,
-          purpose: contractBoundModelPrompt(modelTaskContract, [
-            input.purpose,
-          ]),
+          purpose: contractBoundModelPrompt(
+            modelTaskContract,
+            [input.purpose],
+            { designDirected: task.designDirected !== false },
+          ),
           contextReferences,
           depthLevel: Math.max(
             input.depthLevel ?? 1,
@@ -4303,6 +4306,11 @@ export function createProductionMissionService({
           }, {
             relevantRequirementIds: repairRequirementIds,
             taskObjective: `Repair the observed ${procedureName} failure while preserving the approved project contract.`,
+            // A type error, a lint complaint or a failed build is a tooling
+            // defect in an approved project. It cannot change the design, so
+            // it does not carry one: these calls were shipping about
+            // twenty-six thousand tokens of design direction each.
+            designDirected: false,
           });
           } catch (error) {
             const message = String(error?.message ?? error);

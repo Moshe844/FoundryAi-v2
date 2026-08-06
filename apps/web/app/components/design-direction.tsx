@@ -508,7 +508,10 @@ export function DesignDirection({
 
       <details className="concept-advanced-evidence">
         <summary>Advanced generation evidence</summary>
-        <p>{studio.generation.inputTokens + studio.generation.outputTokens} tokens · ${studio.generation.costUsd.toFixed(4)} estimated model cost</p>
+        <p>
+          {studio.generation.inputTokens.toLocaleString()} in · {studio.generation.outputTokens.toLocaleString()} out tokens
+          {" — Foundry estimates $"}{studio.generation.costUsd.toFixed(2)}{" from assumed rates, not your provider's bill. Check the provider for the real figure."}
+        </p>
         <p>Every displayed concept passed runtime, browser-error, overflow, responsive, accessibility, isolation, and differentiation admission.</p>
       </details>
     </section>
