@@ -4755,13 +4755,12 @@ export function createProductionMissionService({
             observation: browserFailure,
             reason,
           });
-          orchestrator.transition({
-            missionId,
-            eventId: `${missionId}-design-fidelity-shortfall-accepted`,
-            causationId: browser.workUnitId,
-            to: MissionState.EXECUTING,
-            reason: `Every approved workflow was observed working in a real browser. ${reason} The project is delivered with its design shortfall recorded against the approved prototype: ${(latestFidelityVerdict?.failedAspects ?? []).join(", ") || "unmeasured"}.`,
-          });
+          // No state transition belongs here: the mission is already EXECUTING
+          // and stays there until verification. Asking the orchestrator to move
+          // EXECUTING → EXECUTING is rejected, which killed a build whose
+          // application had in fact been proven and was about to be delivered.
+          // The decision is recorded as evidence below and named in the
+          // VERIFYING transition, which is where it belongs.
           observationVerified = true;
         };
         // A converging repair earns its remaining attempts; a stalled one only

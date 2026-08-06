@@ -190,6 +190,21 @@ test("a proven application is delivered even when its design falls short", async
   );
   assert.match(stallGate, /acceptWithShortfall\(/u);
 
+  // Acceptance must not move the mission's state. It is already EXECUTING and
+  // stays there until verification; asking the orchestrator for
+  // EXECUTING -> EXECUTING is rejected outright, and that killed a build whose
+  // application had been proven and was about to be delivered.
+  const acceptance = source.slice(
+    source.indexOf("const acceptWithShortfall ="),
+    source.indexOf("previousOutstandingFailures = outstandingFailures"),
+  );
+  assert.doesNotMatch(
+    acceptance,
+    /orchestrator\.transition\(/u,
+    "accepting a shortfall must not transition the mission's state",
+  );
+  assert.match(acceptance, /observationVerified = true/u);
+
   // The shortfall must be recorded as evidence and named in the verdict, so a
   // delivered project is never silently passed off as fully matching.
   assert.match(source, /\$\{missionId\}-design-fidelity-shortfall/u);
