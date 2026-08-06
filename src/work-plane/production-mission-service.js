@@ -4270,6 +4270,13 @@ export function createProductionMissionService({
         return started;
       }
       let session = await startRuntime();
+      // The attempt loop restarts the runtime after every repair, including the
+      // repair that follows its final attempt. Falling out of the loop then
+      // left a pre-repair observation paired with a post-repair runtime, and
+      // the integrity check rejected the pair with "checkpoint differs from the
+      // running artifact" — a confusing way to say verification never passed.
+      let observationVerified = false;
+      let lastObservationFailure;
       const browserTargets = Object.entries(bindings)
         .filter(
           ([, binding]) =>
@@ -4465,7 +4472,9 @@ export function createProductionMissionService({
               ? undefined
               : observationFailures.join("\n");
         }
+        lastObservationFailure = browserFailure;
         if (browserFailure === undefined && browserResult !== undefined) {
+          observationVerified = true;
           break;
         }
         const failureEvidence = browserEvidence;
@@ -4890,6 +4899,23 @@ export function createProductionMissionService({
           }
         }
         session = await startRuntime();
+      }
+      if (!observationVerified) {
+        // Report why verification never passed, rather than capturing an
+        // observation the runtime no longer matches.
+        orchestrator.transition({
+          missionId,
+          eventId: `${missionId}-browser-attempts-exhausted`,
+          causationId: browser.workUnitId,
+          to: MissionState.EXHAUSTED,
+          reason:
+            "Browser verification did not pass within its attempt budget; the last observation and every attempted correction are preserved.",
+        });
+        throw new Error(
+          `Browser verification did not pass within its attempt budget. Last observation failure:\n${
+            lastObservationFailure ?? "the browser result could not be parsed."
+          }`,
+        );
       }
       runtime.captureBrowserVerification({
         missionId,
