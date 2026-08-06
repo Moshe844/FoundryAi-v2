@@ -315,6 +315,26 @@ export function DesignDirection({
     () => studio?.concepts.filter((concept) => concept.verificationStatus === "PASSED") ?? [],
     [studio?.concepts],
   );
+  // Everything the waiting line needs. A retry has produced a concept record
+  // that did not pass; a slot with neither is still on its first attempt.
+  const retrying = (studio?.concepts ?? []).filter(
+    (concept) => concept.verificationStatus !== "PASSED",
+  ).length;
+  const stillGenerating = Math.max(0, 3 - admitted.length - retrying);
+
+  // Waiting looks like failure when nothing on screen moves, and for the two
+  // to four minutes before the first admission nothing genuinely does. The
+  // clock always does.
+  const generating = studio === null || studio.status === "GENERATING";
+  const [startedAt] = useState(() => Date.now());
+  const [elapsedMs, setElapsedMs] = useState(0);
+  useEffect(() => {
+    if (!generating) return;
+    const tick = window.setInterval(() => setElapsedMs(Date.now() - startedAt), 1_000);
+    return () => window.clearInterval(tick);
+  }, [generating, startedAt]);
+  const elapsedLabel = `${Math.floor(elapsedMs / 60_000)}m ${String(Math.floor((elapsedMs % 60_000) / 1_000)).padStart(2, "0")}s`;
+
   const recommended = admitted.find((concept) => concept.contract.conceptId === studio?.recommendedConceptId) ?? admitted[0];
   const opened = admitted.find((concept) => concept.contract.conceptId === openedId) ?? null;
 
@@ -367,46 +387,27 @@ export function DesignDirection({
           Each direction is generated as isolated HTML, CSS, and interaction code, then opened in a real browser at mobile, tablet, and desktop sizes. Broken concepts stay hidden.
         </p>
         <div className="concept-generation-progress">
-          <span style={{ width: `${Math.max(12, admitted.length * 33)}%` }} />
+          <span style={{ width: `${Math.max(8, admitted.length * 33)}%` }} />
         </div>
-        {/* A concept is published the moment it is admitted, so name the ones
-            already proven and say what the remaining slots are doing. Showing
-            only a bar left finished, browser-admitted directions invisible
-            behind a spinner while a third retried. */}
-        <ol className="concept-generation-steps">
-          {[0, 1, 2].map((slot) => {
-            const concept = admitted[slot];
-            const rejected = (studio?.concepts ?? []).filter(
-              (entry) => entry.verificationStatus !== "PASSED",
-            )[slot - admitted.length];
-            return (
-              <li key={slot} className={concept === undefined ? "pending" : "done"}>
-                {concept !== undefined ? (
-                  <>
-                    <span aria-hidden="true">✓</span>{" "}
-                    {concept.contract.conceptName} — built and opened at three sizes
-                  </>
-                ) : rejected !== undefined ? (
-                  <>
-                    <span aria-hidden="true">↻</span> Retrying a direction that did not
-                    pass its browser check
-                  </>
-                ) : (
-                  <>
-                    <span aria-hidden="true">⋯</span> Generating and opening in a real
-                    browser
-                  </>
-                )}
-              </li>
-            );
-          })}
-        </ol>
-        <p className="t-caption ink-tertiary">
-          {admitted.length} of 3 admitted
-          {admitted.length >= 2
-            ? " — enough to choose from; waiting for the last one"
-            : ""}
+        {/* One line, and something in it always moves. Three fixed rows all
+            reading "Generating and opening in a real browser" told the truth —
+            all three were generating — and looked frozen for the two to four
+            minutes before anything is admitted. The elapsed count ticks every
+            second, so waiting never reads as stuck, and the counts change the
+            moment a concept is admitted or a retry begins. */}
+        <p className="t-caption ink-tertiary concept-generation-line">
+          <span className="concept-generation-elapsed">{elapsedLabel}</span>
+          {" · "}
+          {admitted.length > 0 ? `${admitted.length} admitted` : "none admitted yet"}
+          {retrying > 0 ? ` · ${retrying} retrying` : ""}
+          {stillGenerating > 0 ? ` · ${stillGenerating} generating` : ""}
+          {admitted.length >= 2 ? " · enough to choose from" : ""}
         </p>
+        {admitted.length > 0 && (
+          <p className="t-caption ink-secondary">
+            Ready: {admitted.map((entry) => entry.contract.conceptName).join(", ")}
+          </p>
+        )}
         {studio === null && requestError?.scope === "generate" && (
           <div className="banner banner-fault" role="alert">
             <p>{requestError.message}</p>

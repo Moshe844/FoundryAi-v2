@@ -241,12 +241,9 @@
 }
 .concept-generation-progress span { display: block; height: 100%; border-radius: inherit; background: var(--accent-line); transition: width 250ms ease; }
 
-/* Each generation slot, named as it is admitted. */
-.concept-generation-steps { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 6px; }
-.concept-generation-steps li { font-size: 13px; line-height: 1.5; color: var(--ink-secondary); display: flex; gap: 8px; align-items: baseline; }
-.concept-generation-steps li.done { color: var(--ink-primary); }
-.concept-generation-steps li.pending { color: var(--ink-tertiary); }
-.concept-generation-steps li span { flex: none; width: 1em; }
+/* One waiting line, with a clock that always moves. */
+.concept-generation-line { margin-top: 12px; font-variant-numeric: tabular-nums; }
+.concept-generation-elapsed { color: var(--ink-primary); font-weight: 600; }
 
 @media (max-width: 900px) {
   .live-concept-grid { grid-template-columns: 1fr; }
