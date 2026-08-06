@@ -180,6 +180,36 @@ function relevanceIssues(alternatives, { family, supportedPrimitives }) {
  *            issues: ReadonlyArray<object>, axisCoverage: object,
  *            regenerationDirective: string|null}}
  */
+// Composition is the axis a customer actually sees. Every other axis — colour,
+// typography, density, button treatment — restyles the same page. A warehouse
+// tracker was offered three directions built on two primitives between them,
+// all of them variations of a table with filters, and the choice was cosmetic.
+// Fifteen primitives exist and only the two marketing ones are ever ruled out,
+// so a set that reuses a composition is not offering a choice.
+function sharedCompositionIssues(alternatives) {
+  const used = alternatives
+    .map((alternative) => ({
+      id: alternative.id ?? alternative.name,
+      primitive: alternative.creativeDNA?.compositionPrimitive,
+    }))
+    .filter((entry) => typeof entry.primitive === "string");
+  if (used.length < 2) return [];
+  const byPrimitive = new Map();
+  for (const entry of used) {
+    byPrimitive.set(entry.primitive, [
+      ...(byPrimitive.get(entry.primitive) ?? []),
+      entry.id,
+    ]);
+  }
+  return [...byPrimitive.entries()]
+    .filter(([, ids]) => ids.length > 1)
+    .map(([primitive, ids]) => ({
+      code: "shared-composition",
+      message: `${ids.join(" and ")} are all built as a ${String(primitive).replaceAll("-", " ")}, so the choice between them is cosmetic. Every direction must use a different composition primitive: that is the structure the customer sees, not its palette or type scale.`,
+      directionIds: ids,
+    }));
+}
+
 export function assessCreativeDirectionSet(alternatives, options = {}) {
   const { family = "application", supportedPrimitives, minimumDistinctness = 55 } = options;
   const list = Array.isArray(alternatives) ? alternatives : [];
@@ -293,6 +323,7 @@ export function assessCreativeDirectionSet(alternatives, options = {}) {
   }
 
   issues.push(...relevanceIssues(list, { family, supportedPrimitives }));
+  issues.push(...sharedCompositionIssues(list));
 
   const distinctnessScore =
     comparisons === 0 ? 0 : Math.round((totalRatio / comparisons) * 100);

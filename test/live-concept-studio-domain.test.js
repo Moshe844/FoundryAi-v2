@@ -286,3 +286,63 @@ test("the studio's own screen accepts the choice the server admitted", async () 
   assert.match(server, /if \(admitted\.length < 2\) \{/u);
   assert.doesNotMatch(screen, /\)\.length >= 3;/u);
 });
+
+test("three directions may not share a composition", async () => {
+  // A warehouse tracker was offered three directions built on two primitives
+  // between them, every one a table with filters. The prompt asked for
+  // different colour, typography and density — which restyles the same page —
+  // and never said the composition itself had to differ. Fifteen primitives
+  // exist and only the two marketing ones are ever ruled out.
+  const { assessCreativeDirectionSet } = await import(
+    "../src/domain/creative-direction-quality.js"
+  );
+  const direction = (name, primitive, overrides = {}) => ({
+    id: name.toLowerCase().replaceAll(" ", "-"),
+    name,
+    rationale: `${name} suits this warehouse team's daily stock maintenance work.`,
+    tradeoff: `${name} trades some density for clarity in the primary flow.`,
+    creativeDNA: { compositionPrimitive: primitive },
+    visualSystem: {
+      layoutType: primitive,
+      navigationType: overrides.nav ?? "top-bar",
+      typographyCategory: overrides.type ?? "grotesque-neutral",
+      density: overrides.density ?? "balanced",
+      ...overrides.system,
+    },
+  });
+
+  const sameComposition = [
+    direction("Operations Table", "table-operations", { nav: "top-bar" }),
+    direction("Stock Ledger", "table-operations", { nav: "side-rail", type: "humanist-warm" }),
+    direction("Guided Flow", "guided-flow", { density: "airy" }),
+  ];
+  const shared = assessCreativeDirectionSet(sameComposition);
+  const issue = shared.issues.find((entry) => entry.code === "shared-composition");
+  assert.ok(issue, "two directions sharing a composition must be rejected");
+  assert.match(issue.message, /the choice between them is cosmetic/u);
+  assert.deepEqual(issue.directionIds.sort(), ["operations-table", "stock-ledger"]);
+  assert.equal(shared.publishable, false);
+
+  // Three genuinely different compositions raise no such issue.
+  const distinct = [
+    direction("Operations Table", "table-operations"),
+    direction("Aisle Map", "map-led", { nav: "side-rail", type: "humanist-warm" }),
+    direction("Stock Story", "narrative-scroll", { density: "airy", type: "editorial-serif" }),
+  ];
+  assert.equal(
+    assessCreativeDirectionSet(distinct).issues.filter(
+      (entry) => entry.code === "shared-composition",
+    ).length,
+    0,
+  );
+
+  // And the generator is told this before it writes, with the wider vocabulary
+  // named so it does not default to three task layouts.
+  const prompt = await readFile(
+    new URL("../src/understanding-plane/project-understanding-service.js", import.meta.url),
+    "utf8",
+  );
+  assert.match(prompt, /different creativeDNA\.compositionPrimitive/u);
+  assert.match(prompt, /map-led, narrative-scroll, editorial-spread/u);
+  assert.match(prompt, /choosing three obvious task layouts wastes the choice/u);
+});
