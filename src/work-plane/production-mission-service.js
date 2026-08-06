@@ -80,6 +80,10 @@ const MAX_BROWSER_REPAIR_CALLS = 4;
 // aspects left. A repair that stops making progress still stops, because a
 // repeated proposal is rejected before it is paid for.
 const MAX_DESIGN_FIDELITY_REPAIR_CALLS = 4;
+// A proposal rejected before it touches a file costs a model call but proves
+// nothing, so it does not spend the repair budget. This bounds how many such
+// mechanical corrections may be bought per budgeted repair.
+const MAX_REPAIR_PROPOSALS_PER_ROUND = 3;
 const MAX_RUNTIME_RESTARTS = 2;
 
 export function productionRepairBudgets({ approvedPrototype = false } = {}) {
@@ -1891,9 +1895,18 @@ export function verificationTargetsForProcedure(
   return targets.length > 0 ? targets : fallbackTargetIds;
 }
 
-function applyExactReplacements(content, replacements) {
+function excerptForRejection(text) {
+  const single = String(text).replace(/\s+/gu, " ").trim();
+  return single.length > 120 ? `${single.slice(0, 120)}…` : single;
+}
+
+function applyExactReplacements(content, replacements, path = null) {
   let result = content;
   let applied = 0;
+  // Naming only the count left the retry guessing which of its edits was wrong,
+  // so it re-proposed the same unusable text and spent another attempt. Say
+  // exactly which oldText failed and whether it was absent or ambiguous.
+  const unmatched = [];
   for (const replacement of replacements) {
     const first = result.indexOf(replacement.oldText);
     const last = result.lastIndexOf(replacement.oldText);
@@ -1903,16 +1916,25 @@ function applyExactReplacements(content, replacements) {
         replacement.newText +
         result.slice(first + replacement.oldText.length);
       applied += 1;
+      continue;
     }
+    unmatched.push(
+      `${first < 0 ? "never appears" : "appears more than once"} — oldText: "${excerptForRejection(replacement.oldText)}"`,
+    );
   }
+  const where = path === null ? "" : ` in ${path}`;
   if (applied !== replacements.length) {
     throw new Error(
-      "Every model repair replacement must match exactly once; the patch was rejected atomically.",
+      [
+        `Every model repair replacement must match exactly once; the patch was rejected atomically. ${unmatched.length} of ${replacements.length} replacements${where} could not be applied:`,
+        ...unmatched.map((detail) => `  - ${detail}`),
+        "Copy oldText verbatim from the current file shown to you, including its exact whitespace, and extend it with surrounding text until it is unique.",
+      ].join("\n"),
     );
   }
   if (result === content) {
     throw new Error(
-      "The model repair replacements do not change the current file.",
+      `The model repair replacements do not change the current file${where}: every newText is identical to the oldText it replaces. Propose the corrected text, not the text already present.`,
     );
   }
   return result;
@@ -2011,6 +2033,7 @@ function validateSingleRepairPatch({
   const repairedContent = applyExactReplacements(
     currentFile.content,
     structuredOutput.replacements,
+    structuredOutput.path,
   );
   const repairsTestSource =
     /^tests\/.*\.(?:spec|test)\.(?:js|jsx|ts|tsx)$/u.test(
@@ -4947,14 +4970,31 @@ export function createProductionMissionService({
           proposalAttempt += 1
         ) {
           if (repair === null) {
+            // The budget exists to stop a repair that keeps reasoning wrongly,
+            // and it counted every call — including ones rejected before they
+            // touched a file because an oldText no longer matched or the
+            // replacements were a no-op. Those are mechanical patch mistakes,
+            // not failed hypotheses, and on the last measured build two of the
+            // four paid fidelity attempts went to them, so the design was still
+            // wrong when the budget ran out. Count what was actually applied and
+            // re-observed; the proposal loop around this still bounds how many
+            // times a malformed patch may be corrected.
+            const repairCallsSoFar = models
+              .listCalls(missionId)
+              .filter((call) => call.requestId.startsWith(repairPrefix));
+            const appliedRepairs = repairCallsSoFar.filter(
+              (call) => call.status === "SUCCEEDED",
+            ).length;
             if (
-              models
-                .listCalls(missionId)
-                .filter((call) => call.requestId.startsWith(repairPrefix))
-                .length >= MAX_BROWSER_REPAIR_CALLS
+              appliedRepairs >= repairPolicy.maxCalls ||
+              // Rejected proposals no longer end the round, so they need their
+              // own ceiling: a model that cannot produce an applicable patch
+              // must not be bought from indefinitely.
+              repairCallsSoFar.length >=
+                repairPolicy.maxCalls * MAX_REPAIR_PROPOSALS_PER_ROUND
             ) {
               throw new Error(
-                `Browser verification exhausted its ${MAX_BROWSER_REPAIR_CALLS} paid correction proposals without an admissible one, and stopped rather than buying another.`,
+                `${repairPolicy.designFidelity ? "Design fidelity" : "Browser verification"} exhausted its ${repairPolicy.maxCalls} paid correction proposals without an admissible one, and stopped rather than buying another.`,
               );
             }
             try {
