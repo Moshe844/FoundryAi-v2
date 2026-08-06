@@ -4278,6 +4278,9 @@ export function createProductionMissionService({
       let observationVerified = false;
       let lastObservationFailure;
       let priorRepairBreakage;
+      let previousOutstandingFailures;
+      let stalledRounds = 0;
+      let latestFidelityFailureCount = 0;
       const browserTargets = Object.entries(bindings)
         .filter(
           ([, binding]) =>
@@ -4421,6 +4424,7 @@ export function createProductionMissionService({
                   } else if (existingFidelityEvidence.metadata?.integrityHash !== fidelity.integrityHash) {
                     throw new Error("Persisted prototype fidelity evidence does not match the replayed comparison.");
                   }
+                  latestFidelityFailureCount = fidelity.passed ? 0 : fidelity.failedAspects.length;
                   if (!fidelity.passed) {
                     // Naming the failed aspects without their measurements gave
                     // the repair nothing to aim at: it was told "composition,
@@ -4478,6 +4482,37 @@ export function createProductionMissionService({
         if (browserFailure === undefined && browserResult !== undefined) {
           observationVerified = true;
           break;
+        }
+        // A converging repair earns its remaining attempts; a stalled one only
+        // spends them. Two rounds in a row without fewer outstanding failures
+        // means the repairs have run out of ideas, and every further round is
+        // ninety seconds and a paid model call buying nothing. Stopping here
+        // turns a silent eleven-minute failure into an honest short one.
+        const outstandingFailures =
+          (browserResult === undefined
+            ? requiredBrowserChecks.length
+            : Object.values(browserResult.checks).filter((passed) => passed !== true).length) +
+          latestFidelityFailureCount;
+        if (
+          previousOutstandingFailures !== undefined &&
+          outstandingFailures >= previousOutstandingFailures
+        ) {
+          stalledRounds += 1;
+        } else {
+          stalledRounds = 0;
+        }
+        previousOutstandingFailures = outstandingFailures;
+        if (stalledRounds >= 2) {
+          orchestrator.transition({
+            missionId,
+            eventId: `${missionId}-browser-repair-stalled`,
+            causationId: browser.workUnitId,
+            to: MissionState.EXHAUSTED,
+            reason: `Corrections stopped reducing the outstanding failures after ${attempt + 1} observations; the remaining attempts were not spent.`,
+          });
+          throw new Error(
+            `Corrections stopped making progress: ${outstandingFailures} outstanding failure(s) unchanged across consecutive observations. Last observation failure:\n${browserFailure}`,
+          );
         }
         const failureEvidence = browserEvidence;
         if (failureEvidence === undefined) {

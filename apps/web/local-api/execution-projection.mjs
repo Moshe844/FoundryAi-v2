@@ -80,6 +80,29 @@ function timingProjection(events) {
   };
 }
 
+// "Testing important actions" showed the same words at the first observation
+// and the seventh. A build that passes spends under a minute there; one that is
+// grinding through corrections can spend eleven, and looked identical the whole
+// time. Report which round is running and what is still outstanding, so a long
+// stage reads as work in progress rather than a frozen screen.
+function observationProjection(events) {
+  const started = events.filter((record) =>
+    /browser-verification-runtime-\d+-attempt-\d+\.started$/u.test(record.eventId ?? ""),
+  );
+  if (started.length === 0) return null;
+  // Corrections between rounds are the reason a long observation stage is long,
+  // so counting them tells the customer the difference between "still working"
+  // and "stuck".
+  const corrections = events.filter((record) =>
+    /-(?:browser-repair|design-fidelity-repair)-\d+\.model\.fact$/u.test(record.eventId ?? ""),
+  ).length;
+  return Object.freeze({
+    round: started.length,
+    maximumRounds: 7,
+    corrections,
+  });
+}
+
 function repairProjection(events) {
   const repairStart = events.findLastIndex(
     (record) =>
@@ -257,6 +280,7 @@ export function projectExecutionProjection({
       interrupted: state === "REPAIRING",
       includesDataPhase: hasPersistence,
     },
+    observation: observationProjection(events),
     repair: repairProjection(events),
     runtime: runtimeProjection(events),
     workspace: workspaceProjection(events, profile),

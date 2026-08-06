@@ -776,6 +776,13 @@ export type Mission = Readonly<{
       interrupted: boolean;
       includesDataPhase: boolean;
     }>;
+    // Null until the first browser observation runs. Round and correction
+    // counts are what distinguish a build still working from one stuck.
+    observation: Readonly<{
+      round: number;
+      maximumRounds: number;
+      corrections: number;
+    }> | null;
     repair: Readonly<{
       state:
         | "automatic"

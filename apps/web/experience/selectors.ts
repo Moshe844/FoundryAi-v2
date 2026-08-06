@@ -163,9 +163,18 @@ export function customerPhase(mission: Mission): CustomerPhaseView {
         };
       }
       if (currentPhaseIndex >= 7) {
+        // This read identically at the first observation and the seventh. A
+        // passing build spends under a minute here; one correcting itself can
+        // spend eleven, and looked frozen the entire time.
+        const observation = mission.executionProjection.observation;
         return {
           label: "Testing",
-          status: "Testing important actions",
+          status:
+            observation === null || observation === undefined || observation.round <= 1
+              ? "Testing important actions"
+              : observation.corrections > 0
+                ? `Testing important actions — round ${observation.round}, correcting what didn't hold`
+                : `Testing important actions — round ${observation.round}`,
           pill: "pill-building",
           action: "Watch",
           spineIndex: currentPhaseIndex,

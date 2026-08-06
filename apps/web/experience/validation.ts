@@ -889,6 +889,13 @@ export function validateMission(value: unknown, path = "mission"): Mission {
       projection.phase,
       `${path}.executionProjection.phase`,
     );
+    const rawObservation =
+      projection.observation === null || projection.observation === undefined
+        ? null
+        : object(
+            projection.observation,
+            `${path}.executionProjection.observation`,
+          );
     const rawRepair =
       projection.repair === null
         ? null
@@ -936,6 +943,23 @@ export function validateMission(value: unknown, path = "mission"): Mission {
           `${path}.executionProjection.phase.includesDataPhase`,
         ),
       },
+      observation:
+        rawObservation === null || rawObservation === undefined
+          ? null
+          : {
+              round: integer(
+                rawObservation.round,
+                `${path}.executionProjection.observation.round`,
+              ),
+              maximumRounds: integer(
+                rawObservation.maximumRounds,
+                `${path}.executionProjection.observation.maximumRounds`,
+              ),
+              corrections: integer(
+                rawObservation.corrections,
+                `${path}.executionProjection.observation.corrections`,
+              ),
+            },
       repair:
         rawRepair === null
           ? null
