@@ -5222,24 +5222,43 @@ export function createProductionMissionService({
             );
           }
         }
-        const changesApplicationArtifact =
-          !acceptedRepair.repairsTestSource &&
-          !acceptedRepair.repairsPlaywrightConfig;
+        // Ask what the proposal actually changed, not what it did not. A
+        // multi-file repair may correct a Playwright spec and a stylesheet
+        // together, and reading "some file was a test" as "nothing shipped
+        // changed" skipped verification on a real source edit. The build is
+        // required when any shipped artifact moved.
+        const changesApplicationArtifact = acceptedRepair.files.some(
+          (file) => !file.repairsTestSource && !file.repairsPlaywrightConfig,
+        );
         if (changesApplicationArtifact) {
-          const requiredProcedures =
-            repairScope === ProductionRepairScope.DEPENDENCY
+          // next build type-checks and lints the project itself, so running
+          // tsc --noEmit and eslint immediately before it repeated that work on
+          // every correction. Measured on one twelve-minute build: about a
+          // hundred and forty-five seconds went to re-verifying repairs, most
+          // of it duplicated. The build's own output still names the file and
+          // line, so nothing diagnosable is lost.
+          //
+          // A procedure an obligation is actually bound to is different: its
+          // verdict reads that procedure's own evidence, and skipping it would
+          // leave the obligation resolving from a run that predates this
+          // repair. Those are kept.
+          const boundToOwnObligation = (procedureName) =>
+            Object.values(bindings).includes(
+              { typeCheck: "type-check", lint: "lint" }[procedureName],
+            );
+          const requiredProcedures = [
+            ...(repairScope === ProductionRepairScope.DEPENDENCY
               ? [
                   ["dependencyLock", 600_000],
                   ["install", 600_000],
-                  ["typeCheck", 300_000],
-                  ["lint", 300_000],
-                  ["productionBuild", 600_000],
                 ]
-              : [
-                  ["typeCheck", 300_000],
-                  ["lint", 300_000],
-                  ["productionBuild", 600_000],
-                ];
+              : []),
+            ...(boundToOwnObligation("typeCheck")
+              ? [["typeCheck", 300_000]]
+              : []),
+            ...(boundToOwnObligation("lint") ? [["lint", 300_000]] : []),
+            ["productionBuild", 600_000],
+          ];
           // A repair that breaks the type-check, lint, or build has made a
           // correctable mistake in its own patch, not proved the project
           // unbuildable. Ending the mission here threw away every remaining

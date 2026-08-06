@@ -318,3 +318,52 @@ test("the accepted shortfall never stands in for an obligation's evidence", asyn
   );
   assert.equal(verdict.result, "SATISFIED");
 });
+
+test("a repair re-verifies what it changed, and only once", async () => {
+  // Measured on a twelve-minute build: browser verification was 93 seconds
+  // across all four rounds, while re-verifying repairs took about 145. Every
+  // correction ran tsc --noEmit, then eslint, then next build — and next build
+  // type-checks and lints the project itself.
+  const source = await readFile(
+    new URL("../src/work-plane/production-mission-service.js", import.meta.url),
+    "utf8",
+  );
+
+  // Ask what changed, not what did not. A multi-file repair may correct a
+  // Playwright spec and a stylesheet together, and reading "some file was a
+  // test" as "nothing shipped changed" skipped verification on a real edit.
+  assert.match(
+    source,
+    /const changesApplicationArtifact = acceptedRepair\.files\.some\(\s*\n\s*\(file\) => !file\.repairsTestSource && !file\.repairsPlaywrightConfig,\s*\n\s*\);/u,
+    "the build must be required when any shipped artifact changed",
+  );
+
+  // Type-check and lint run again only when an obligation reads their own
+  // evidence, since skipping those would leave a verdict resolving from a run
+  // that predates the repair.
+  const block = source.slice(
+    source.indexOf("const boundToOwnObligation ="),
+    source.indexOf("let brokenByRepair"),
+  );
+  assert.match(block, /boundToOwnObligation\("typeCheck"\)/u);
+  assert.match(block, /boundToOwnObligation\("lint"\)/u);
+  assert.match(block, /\["productionBuild", 600_000\],\s*\n\s*\];/u);
+
+  // A repair touching only Playwright files skips the pipeline entirely: since
+  // tests are excluded from the build, they cannot affect it.
+  const testOnly = {
+    files: [
+      { path: "tests/foundry-checks.ts", repairsTestSource: true, repairsPlaywrightConfig: false },
+    ],
+  };
+  const mixed = {
+    files: [
+      { path: "tests/foundry-checks.ts", repairsTestSource: true, repairsPlaywrightConfig: false },
+      { path: "app/globals.css", repairsTestSource: false, repairsPlaywrightConfig: false },
+    ],
+  };
+  const changed = (repair) =>
+    repair.files.some((file) => !file.repairsTestSource && !file.repairsPlaywrightConfig);
+  assert.equal(changed(testOnly), false, "a test-only repair needs no build");
+  assert.equal(changed(mixed), true, "a mixed repair still needs the build");
+});
