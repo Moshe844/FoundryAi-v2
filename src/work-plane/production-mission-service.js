@@ -2618,11 +2618,44 @@ test("foundry contract observation", async ({ page }) => {
       .locator("a[href], button, input, select, textarea")
       .count();
     const phoneInteractionDensityBounded = phoneInteractionCount <= 60;
+
+    // 390 is the widest common phone, so measuring only there passed a build
+    // that overflowed by three pixels at 360 — the most common Android width —
+    // and by more at 320. The narrow end is where a layout actually breaks, so
+    // it is measured too, and the offending elements are named.
+    await page.setViewportSize({ width: 320, height: 844 });
+    const narrowOverflow = await page.evaluate(() => {
+      const viewport = document.documentElement.clientWidth;
+      const offenders = [...document.querySelectorAll("body *")]
+        .map((element) => ({ element, box: element.getBoundingClientRect() }))
+        .filter(({ box }) => box.width > 0 && box.height > 0 && box.right > viewport + 1)
+        .sort((left, right) => right.box.right - left.box.right)
+        .slice(0, 3)
+        .map(({ element, box }) =>
+          (element.id ? "#" + element.id : element.tagName.toLowerCase()) +
+          " reaches " + Math.round(box.right) + "px",
+        );
+      return {
+        excess: document.documentElement.scrollWidth - viewport,
+        offenders: offenders.join("; "),
+      };
+    });
+    const narrowNoHorizontalOverflow = narrowOverflow.excess <= 0;
+    await page.setViewportSize({ width: 390, height: 844 });
+
     const responsiveEvidence = {
       phoneNoHorizontalOverflow,
+      narrowNoHorizontalOverflow,
       phoneHeightWithinBudget,
       phoneInteractionDensityBounded,
     };
+    if (!narrowNoHorizontalOverflow) {
+      captureProbeErrors.push(
+        "At a 320px viewport the page is " + narrowOverflow.excess +
+        "px too wide. Widest offenders: " + (narrowOverflow.offenders || "unidentified") +
+        ". Constrain them with max-width:100%, wrapping, or min-width:0 on flex and grid children.",
+      );
+    }
 
     // Accessible keyboard focus and labelling, measured once.
     await page.keyboard.press("Tab");

@@ -452,3 +452,34 @@ test("a Playwright test cannot break the production build", async () => {
   );
   assert.match(source, /Take expect from the supplied context rather than importing it/u);
 });
+
+test("the responsive probe measures the narrow end, where layouts break", async () => {
+  // A delivered build passed its responsive obligation and still overflowed by
+  // three pixels at 360 — the most common Android width — because 390 is the
+  // widest common phone and the only width measured. The narrow end is where a
+  // layout actually breaks.
+  const harness = foundryObservationHarness(["obligation-001"]);
+
+  assert.match(harness, /setViewportSize\(\{ width: 320, height: 844 \}\)/u);
+  assert.match(harness, /narrowNoHorizontalOverflow/u);
+  // It must return to the comparison viewport, or every later measurement and
+  // the prototype fidelity comparison would be taken at the wrong width.
+  assert.match(
+    harness,
+    /width: 320[\s\S]*setViewportSize\(\{ width: 390, height: 844 \}\)/u,
+  );
+
+  // The harness enforces it itself: a capture probe error is blocking, so this
+  // does not depend on the model's own check referencing the evidence.
+  assert.match(
+    harness,
+    /if \(!narrowNoHorizontalOverflow\) \{[\s\S]*captureProbeErrors\.push\(/u,
+  );
+  // And the message names the amount and the offenders, so a repair can act.
+  assert.match(harness, /px too wide/u);
+  assert.match(harness, /Widest offenders/u);
+  assert.match(harness, /min-width:0 on flex and grid children/u);
+
+  // Both widths remain available to a project-specific check.
+  assert.match(harness, /phoneNoHorizontalOverflow,\s*\n\s*narrowNoHorizontalOverflow,/u);
+});

@@ -137,6 +137,36 @@ const SOURCE_RULES = Object.freeze([
       "Stored credentials must be irreversibly hashed before persistence. Use node:crypto scryptSync (or pbkdf2Sync) with a per-record random salt, and compare with timingSafeEqual; never write a password, passphrase, or access token into storage as given.",
   },
   {
+    id: "destructive-actions-are-confirmed",
+    // A delivered build wired a Remove control straight to a DELETE request:
+    // one click and the record was gone, with no prompt and no undo. It was
+    // contract-correct — that run's obligation happened to read "staff can
+    // remove discontinued items", where the same request on an earlier run had
+    // produced "after a clear confirmation step". A safety property must not
+    // depend on which words the understanding phase chose, so this is read from
+    // the source like the credential rule, and costs the browser test nothing.
+    signals: [EngineeringSignal.ALWAYS],
+    violated: (source) => {
+      const issuesDelete =
+        /method\s*:\s*["'`]DELETE["'`]/iu.test(source) ||
+        /["'`]DELETE["'`]\s*,/u.test(source);
+      if (!issuesDelete) return false;
+      // Any deliberate second step counts: a native confirm, a dialog, or the
+      // state that holds a pending removal until it is approved.
+      const hasConfirmationStep =
+        /\bconfirm\s*\(/u.test(source) ||
+        /role\s*=\s*["'`]?(?:alert)?dialog/u.test(source) ||
+        /aria-modal/u.test(source) ||
+        /<dialog\b/u.test(source) ||
+        /\b(?:confirm|confirming|pendingDelete|pendingRemoval|removing|toDelete|toRemove|awaitingConfirm)\w*\b/iu.test(
+          source,
+        );
+      return !hasConfirmationStep;
+    },
+    message:
+      "An action that permanently removes a record must require an explicit confirmation before it takes effect. Do not wire a delete request directly to a control's click handler: hold the pending removal in state and require a second, clearly-labelled approval — or offer an undo — before the request is sent.",
+  },
+  {
     id: "sql-is-parameterized",
     signals: [EngineeringSignal.PERSISTENCE],
     violated: (source) =>

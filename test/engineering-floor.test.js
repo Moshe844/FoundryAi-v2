@@ -225,3 +225,48 @@ test("the floor scales with what a project does, not with whether it has a login
   assert.ok(!brochure.includes("session-end"));
   assert.ok(!brochure.includes("protected-access"));
 });
+
+test("a record cannot be destroyed without an explicit confirmation", () => {
+  // A delivered build wired a Remove control straight to a DELETE request:
+  // one click and the record was gone. It was contract-correct — that run's
+  // obligation read "staff can remove discontinued items", where the same
+  // request on an earlier run produced "after a clear confirmation step". A
+  // safety property must not depend on which words the understanding phase
+  // chose, so this is read from the source and costs the browser test nothing.
+  const signals = detectEngineeringSignals(
+    profile({ summary: "Staff remove discontinued items.", capabilities: ["web-application", "sqlite-persistence"] }),
+  );
+
+  const unconfirmed = files(
+    "<button aria-label={`Remove ${item.name}`} onClick={()=>send('DELETE',{id:item.id})}>Remove</button>",
+  );
+  assert.throws(
+    () => validateEngineeringFloor(unconfirmed, signals),
+    /destructive-actions-are-confirmed/u,
+  );
+
+  // Any deliberate second step satisfies it, in the shapes a real project uses.
+  for (const confirmed of [
+    "<button onClick={()=>{ if (confirm('Remove ' + item.name + '?')) send('DELETE',{id:item.id}) }}>Remove</button>",
+    "const [removing,setRemoving]=useState(null); <button onClick={()=>setRemoving(item)}>Remove</button>{removing&&<div role='dialog' aria-modal='true'><button onClick={()=>send('DELETE',{id:removing.id})}>Confirm</button></div>}",
+    "const [pendingDelete,setPendingDelete]=useState(null); async function reallyDelete(){ await fetch('/api/items',{method:'DELETE'}) }",
+  ]) {
+    assert.doesNotThrow(
+      () => validateEngineeringFloor(files(confirmed), signals),
+      confirmed.slice(0, 60),
+    );
+  }
+
+  // A project that never deletes anything is not asked to confirm one, and the
+  // rule applies whether or not the description mentioned removal.
+  assert.doesNotThrow(() =>
+    validateEngineeringFloor(files("export default function P(){return <main><h1>Menu</h1></main>}"), signals),
+  );
+  const noMentionOfRemoval = detectEngineeringSignals(
+    profile({ summary: "A dashboard of current stock levels." }),
+  );
+  assert.throws(
+    () => validateEngineeringFloor(unconfirmed, noMentionOfRemoval),
+    /destructive-actions-are-confirmed/u,
+  );
+});
