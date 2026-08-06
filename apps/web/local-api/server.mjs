@@ -727,9 +727,19 @@ function startConceptGenerationJob({ missionId, understanding, sourceProjectDesi
         attemptFailures,
         generation,
       });
-      if (firstError !== null) throw firstError;
       const admitted = session.concepts.filter((concept) => concept.verificationStatus === "PASSED");
-      if (admitted.length !== 3) throw new TypeError("Three admitted concepts were not produced.");
+      // Three directions are what Foundry aims for, not what a choice requires.
+      // One concept tripping a prototype safety rule used to discard the two
+      // that had been generated, browser-admitted at three viewports, and were
+      // ready to choose between — the customer was shown a paused studio and a
+      // CSP message about a concept they never asked for. Offer what was
+      // actually proven; only a studio that cannot offer a choice has failed.
+      if (admitted.length < 2) {
+        throw firstError ??
+          new TypeError(
+            `Only ${admitted.length} concept${admitted.length === 1 ? "" : "s"} passed browser admission, which is not a choice.`,
+          );
+      }
       const differentiation = verifyStudioDifferentiation(admitted, verified);
       if (differentiation.status !== "PASSED") throw new TypeError(differentiation.finding);
       const recommended = admitted.find((concept) => concept.recommended) ?? admitted[0];

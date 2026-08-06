@@ -369,7 +369,7 @@ export function DesignDirection({
         <div className="concept-generation-progress">
           <span style={{ width: `${Math.max(12, admitted.length * 33)}%` }} />
         </div>
-        <p className="t-caption ink-tertiary">{admitted.length} of 3 concepts admitted</p>
+        <p className="t-caption ink-tertiary">{admitted.length} of 3 concepts admitted so far</p>
         {studio === null && requestError?.scope === "generate" && (
           <div className="banner banner-fault" role="alert">
             <p>{requestError.message}</p>
@@ -384,7 +384,7 @@ export function DesignDirection({
     return (
       <section className="design-quality-blocker" role="alert">
         <p className="t-label">Live Concept Studio paused</p>
-        <h2 className="t-title-l">Foundry did not produce three safe concepts.</h2>
+        <h2 className="t-title-l">Foundry could not produce a safe choice of concepts.</h2>
         <p className="t-body-m">{studio.error ?? "The interrupted concept session can be resumed from its immutable artifacts."}</p>
         <button type="button" className="btn btn-primary" onClick={requestConcepts}>Try concept generation again</button>
       </section>

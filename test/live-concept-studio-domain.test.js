@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
@@ -195,4 +196,35 @@ test("legacy visual-direction metadata cannot activate prototype fidelity gates"
 
   assert.equal(brief.renderContract, null);
   assert.equal(brief.approvedDesignContract, null);
+});
+
+test("a studio offers the concepts it proved rather than failing over one it did not", async () => {
+  // The real failure: two concepts were generated, browser-admitted at phone,
+  // tablet and desktop, and ready to choose between. A third tripped the
+  // prototype CSP, and the studio discarded all of it — the customer saw a
+  // paused session and a stylesheet error about a concept they never asked
+  // for. Three directions are what Foundry aims for, not what a choice needs.
+  const server = await readFile(
+    new URL("../apps/web/local-api/server.mjs", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(
+    server,
+    /if \(admitted\.length < 2\) \{/u,
+    "a studio must fail only when it cannot offer a choice",
+  );
+  assert.doesNotMatch(
+    server,
+    /admitted\.length !== 3/u,
+    "requiring exactly three concepts discards proven work",
+  );
+  // A single concept's failure must no longer end the session before the
+  // admitted ones are counted.
+  const completion = server.slice(
+    server.indexOf("const admitted = session.concepts.filter"),
+    server.indexOf("const differentiation = verifyStudioDifferentiation"),
+  );
+  assert.doesNotMatch(completion, /^\s*if \(firstError !== null\) throw firstError;/mu);
+  assert.match(completion, /throw firstError \?\?/u, "the cause is still reported when there is no choice");
 });
