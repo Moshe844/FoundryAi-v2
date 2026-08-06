@@ -27,6 +27,7 @@ import {
   projectRequirementContract,
   normalizeCustomerFollowUpAnswers,
 } from "../../../src/index.js";
+import { terminateProcessTree } from "../../../src/work-plane/command-runner.js";
 import { projectDecisionHistory } from "./decision-history.mjs";
 import { projectDiscoveryConversation } from "./discovery-conversation.mjs";
 import { projectExecutionProjection } from "./execution-projection.mjs";
@@ -2179,6 +2180,17 @@ async function shutdown() {
     } catch {}
   }
   await prototypeRuntimes.stopAll({ reason: "local-api-shutdown" });
+  // A mission worker spawns the preview server for the project it built, and
+  // on Windows that grandchild is not in the worker's process group: asking
+  // the worker to stop and then exiting orphaned the preview, which kept its
+  // port and its Next.js server for as long as the machine stayed on.
+  // Seventeen of them from three days of missions were still running. Take the
+  // whole tree down, not the process at the top of it.
+  for (const job of activeJobs.values()) {
+    try {
+      terminateProcessTree(job.child);
+    } catch {}
+  }
   server.close(() => process.exit(0));
 }
 

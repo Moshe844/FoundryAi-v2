@@ -827,11 +827,29 @@ export function createRuntimePreviewService({
     return record;
   }
 
+  // A preview server outlives the mission that started it unless something
+  // ends it, and nothing did when Foundry itself went away. Seventeen of them
+  // from three days of missions were still running, each holding a port and a
+  // Next.js server, having survived every restart. A child that is only ever
+  // stopped on the happy path is not stopped at all.
+  function stopEveryRuntime() {
+    for (const [sessionId, state] of processes) {
+      if (state?.exited === true) continue;
+      try {
+        terminateProcessTree(state.child);
+      } catch {
+        // Shutdown is best effort; one unkillable child must not strand the rest.
+      }
+      processes.delete(sessionId);
+    }
+  }
+
   return Object.freeze({
     start,
     observeHealth,
     captureBrowserVerification,
     stop,
+    stopEveryRuntime,
     getSession: latestSession,
     listSessions: history,
     getPreviewUrl(missionId, sessionId) {

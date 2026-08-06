@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -66,4 +67,37 @@ test("waiting on a process tree returns immediately for one already gone", async
   // A malformed pid is not something to wait for either.
   assert.equal(await awaitProcessTreeExit(undefined), true);
   assert.equal(await awaitProcessTreeExit(-1), true);
+});
+
+test("Foundry takes its preview servers down with it", async () => {
+  // Seventeen preview servers from three days of missions were still running,
+  // each holding a port and a Next.js process, having survived every restart.
+  // A mission worker spawns the preview for the project it built, and on
+  // Windows that grandchild is not in the worker's process group: asking the
+  // worker to stop and then exiting orphaned the preview for as long as the
+  // machine stayed on.
+  const server = await readFile(
+    new URL("../apps/web/local-api/server.mjs", import.meta.url),
+    "utf8",
+  );
+  const shutdown = server.slice(
+    server.indexOf("async function shutdown()"),
+    server.indexOf("process.once(\"SIGINT\""),
+  );
+
+  // Asking politely is kept — a worker that can exit cleanly should — but the
+  // tree comes down either way.
+  assert.match(shutdown, /job\.child\.send\(\{ type: "stop" \}\)/u);
+  assert.match(shutdown, /terminateProcessTree\(job\.child\)/u);
+  assert.match(shutdown, /prototypeRuntimes\.stopAll/u);
+  assert.match(server, /import \{ terminateProcessTree \}/u);
+
+  // And the runtime service can reap everything it started, for a worker that
+  // is shutting down rather than finishing a single mission.
+  const runtime = await readFile(
+    new URL("../src/work-plane/runtime-preview-service.js", import.meta.url),
+    "utf8",
+  );
+  assert.match(runtime, /function stopEveryRuntime\(\)/u);
+  assert.match(runtime, /stopEveryRuntime,/u, "it must be exported to be callable");
 });
