@@ -4277,6 +4277,7 @@ export function createProductionMissionService({
       // running artifact" — a confusing way to say verification never passed.
       let observationVerified = false;
       let lastObservationFailure;
+      let priorRepairBreakage;
       const browserTargets = Object.entries(bindings)
         .filter(
           ([, binding]) =>
@@ -4473,6 +4474,7 @@ export function createProductionMissionService({
               : observationFailures.join("\n");
         }
         lastObservationFailure = browserFailure;
+        if (browserFailure === undefined) priorRepairBreakage = undefined;
         if (browserFailure === undefined && browserResult !== undefined) {
           observationVerified = true;
           break;
@@ -4650,6 +4652,7 @@ export function createProductionMissionService({
                   "The persisted browser evidence proves the running application behavior failed an approved check. This repair must target application source; changing Playwright tests or configuration is not permitted for this failure.",
                 ]
               : []),
+            ...(priorRepairBreakage === undefined ? [] : [priorRepairBreakage]),
             // The floor was stated at generation but not here, so a repair
             // working on a floor obligation — ending a session, refusing an
             // unauthenticated route — had no idea what it was required to
@@ -4874,6 +4877,13 @@ export function createProductionMissionService({
                   ["lint", 300_000],
                   ["productionBuild", 600_000],
                 ];
+          // A repair that breaks the type-check, lint, or build has made a
+          // correctable mistake in its own patch, not proved the project
+          // unbuildable. Ending the mission here threw away every remaining
+          // attempt over a TypeScript error the next repair could fix if it
+          // were simply told. Feed the exact output back and let the bounded
+          // loop continue; the paid repair budget still stops it.
+          let brokenByRepair;
           for (const [procedureName, timeoutMs] of requiredProcedures) {
             const procedureTargets = verificationTargetsForProcedure(
               bindings,
@@ -4892,10 +4902,32 @@ export function createProductionMissionService({
               `scoped-${repairScope}-${procedureName}`,
             );
             if (result.status !== WorkUnitStatus.SUCCEEDED) {
-              throw new Error(
-                `${procedureName} failed after ${repairScope}; its evidence is recorded and no broader pipeline was repeated.`,
-              );
+              const evidenceRecord = commandEvidence(evidence, result.workUnitId);
+              brokenByRepair = [
+                `The correction you just applied broke ${procedureName}. It must be fixed before the browser observation can run again.`,
+                `${procedureName} output:\n${[
+                  evidenceRecord?.payload.stdout,
+                  evidenceRecord?.payload.stderr,
+                ]
+                  .filter((text) => typeof text === "string" && text.trim() !== "")
+                  .join("\n")
+                  .slice(-4000)}`,
+                "Correct the defect your change introduced. Do not revert the observation fix it was making unless that fix is what broke the build.",
+              ].join("\n");
+              break;
             }
+          }
+          if (brokenByRepair !== undefined) {
+            await restoreBrowserCheckpoint({
+              checkpointId: browser.preWorkCheckpointId,
+              evidenceId: `${browser.workUnitId}-repair-rollback-evidence`,
+              eventId: `${browser.workUnitId}-repair-rollback`,
+              causationId: `${browser.workUnitId}-repair-rollback-command`,
+            });
+            lastObservationFailure = brokenByRepair;
+            priorRepairBreakage = brokenByRepair;
+            session = await startRuntime();
+            continue;
           }
         }
         session = await startRuntime();
