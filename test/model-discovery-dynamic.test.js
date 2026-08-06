@@ -484,9 +484,17 @@ test("Gemini follows the provider's live Interactions-only signal without a mode
     "catalog-entry-selected-at-runtime",
   );
   assert.equal(requests[1].body.response_format.schema.type, "object");
+  // Every field the provider reports is recorded, not just two. Cached input
+  // is billed at a different rate than fresh input and a reasoning model's
+  // thinking is billed as output, so a ledger holding only input and output
+  // cannot explain a bill — which is exactly how a day recorded as twelve
+  // dollars turned out to have been sixty.
   assert.deepEqual(result.usage, {
     inputTokens: 21,
     outputTokens: 5,
+    cachedInputTokens: 0,
+    reasoningTokens: 0,
+    providerTotalTokens: 26,
     costUsd: 0,
   });
 });

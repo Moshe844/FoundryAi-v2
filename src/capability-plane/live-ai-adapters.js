@@ -96,10 +96,26 @@ async function jsonRequest(providerId, url, options = {}) {
   return body;
 }
 
-function usage(inputTokens, outputTokens) {
+const whole = (value) => (Number.isSafeInteger(value) && value >= 0 ? value : 0);
+
+// Providers report more than two numbers and Foundry kept two, so its own
+// ledger could not answer why a day it recorded as twelve dollars was billed
+// as sixty. Cached input is charged at a different rate than fresh input, and
+// a reasoning model's thinking is billed as output whether or not it appears
+// in the text. Recording every field the provider returns — including the
+// total it computed itself — makes the next discrepancy answerable from the
+// ledger instead of from a dashboard screenshot.
+function usage(inputTokens, outputTokens, details = {}) {
+  const input = whole(inputTokens);
+  const output = whole(outputTokens);
   return {
-    inputTokens: Number.isSafeInteger(inputTokens) ? inputTokens : 0,
-    outputTokens: Number.isSafeInteger(outputTokens) ? outputTokens : 0,
+    inputTokens: input,
+    outputTokens: output,
+    cachedInputTokens: whole(details.cachedInputTokens),
+    reasoningTokens: whole(details.reasoningTokens),
+    // The provider's own total, when it gives one. A gap between this and
+    // input + output is a category Foundry is not yet counting.
+    providerTotalTokens: whole(details.totalTokens) || input + output,
     costUsd: 0,
   };
 }
@@ -727,7 +743,11 @@ export function createLiveAiAdapters({
         }
         return cloneAiValue({
           output: parseJson(ProviderId.OPENAI, openAiText(body)),
-          usage: usage(body.usage?.input_tokens, body.usage?.output_tokens),
+          usage: usage(body.usage?.input_tokens, body.usage?.output_tokens, {
+            cachedInputTokens: body.usage?.input_tokens_details?.cached_tokens,
+            reasoningTokens: body.usage?.output_tokens_details?.reasoning_tokens,
+            totalTokens: body.usage?.total_tokens,
+          }),
         });
       },
     },
@@ -809,7 +829,23 @@ export function createLiveAiAdapters({
           .join("");
         return cloneAiValue({
           output: parseJson(ProviderId.ANTHROPIC, text),
-          usage: usage(body.usage?.input_tokens, body.usage?.output_tokens),
+          // Anthropic reports cache reads and writes as their own fields
+          // rather than as a detail of input_tokens, and they are billed
+          // separately, so input_tokens alone understates what was charged.
+          usage: usage(
+            (body.usage?.input_tokens ?? 0) +
+              (body.usage?.cache_read_input_tokens ?? 0) +
+              (body.usage?.cache_creation_input_tokens ?? 0),
+            body.usage?.output_tokens,
+            {
+              cachedInputTokens: body.usage?.cache_read_input_tokens,
+              totalTokens:
+                (body.usage?.input_tokens ?? 0) +
+                (body.usage?.cache_read_input_tokens ?? 0) +
+                (body.usage?.cache_creation_input_tokens ?? 0) +
+                (body.usage?.output_tokens ?? 0),
+            },
+          ),
         });
       },
     },
@@ -909,6 +945,11 @@ export function createLiveAiAdapters({
           usage: usage(
             body.usageMetadata?.promptTokenCount,
             body.usageMetadata?.candidatesTokenCount,
+            {
+              cachedInputTokens: body.usageMetadata?.cachedContentTokenCount,
+              reasoningTokens: body.usageMetadata?.thoughtsTokenCount,
+              totalTokens: body.usageMetadata?.totalTokenCount,
+            },
           ),
         });
       },
