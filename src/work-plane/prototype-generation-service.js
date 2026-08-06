@@ -41,6 +41,25 @@ const UNSAFE_SOURCE = Object.freeze([
   { pattern: /\.style(?:\.|\s*=)/u, reason: "DOM inline styling blocked by the prototype CSP" },
 ]);
 
+// What to do instead, per rule. A refusal that only names the rule leaves the
+// regeneration to guess, and it guesses the same thing.
+const UNSAFE_REMEDY = Object.freeze({
+  "inline styling blocked by the prototype CSP":
+    "Move those declarations into styles.css and apply them with a class.",
+  "DOM inline styling blocked by the prototype CSP":
+    "Toggle a class or a data attribute instead of assigning to element.style, and express the states in styles.css.",
+  "external URL":
+    "Use no absolute or protocol-relative URLs. For imagery use CSS gradients, shapes, or inline SVG markup; link within the prototype with relative paths only.",
+  "unsafe embedded or executable URL":
+    "Remove the data:, blob: or javascript: URL. Draw with CSS or inline SVG elements rather than encoding an asset.",
+  "external script": "Remove the script tag; the prototype loads concept.js only.",
+  "external form action": "Leave the form action empty and handle submission locally in concept.js.",
+  "network API": "The prototype has no network. Hold sample data in a local constant in concept.js.",
+  "dynamic code execution": "Write the behaviour directly instead of building it from a string.",
+  "secret-bearing environment access": "The prototype has no environment or cookies; use local constants.",
+  "parent-window control": "The prototype is origin-isolated and may not reach its host page.",
+});
+
 function fail(message) {
   throw new TypeError(`Prototype generation: ${message}`);
 }
@@ -65,10 +84,24 @@ function validateGeneratedOutput(value, contract) {
       typeof file.content !== "string" ||
       file.content === ""
     ) fail(`files[${index}] is invalid.`);
+    // The match holds the exact offending text and its position, and both were
+    // discarded. Four concepts in one session were refused with only "contains
+    // unsafe inline styling", each regeneration reproducing the same defect
+    // because nothing told it where to look; the studio then had too few
+    // directions to offer a choice and the mission stopped before a build.
     for (const unsafe of UNSAFE_SOURCE) {
-      if (unsafe.pattern.test(file.content)) {
-        fail(`files[${index}] contains unsafe ${unsafe.reason}; prototype network and host access are forbidden.`);
-      }
+      const match = unsafe.pattern.exec(file.content);
+      if (match === null) continue;
+      const before = file.content.slice(0, match.index);
+      const line = before.split("\n").length;
+      const column = match.index - (before.lastIndexOf("\n") + 1) + 1;
+      const excerpt = file.content
+        .slice(Math.max(0, match.index - 40), match.index + match[0].length + 60)
+        .replace(/\s+/gu, " ")
+        .trim();
+      fail(
+        `files[${index}] (${file.path}) contains unsafe ${unsafe.reason} at line ${line} column ${column}: "${match[0].slice(0, 60)}" — in: ${excerpt}. ${UNSAFE_REMEDY[unsafe.reason] ?? "Remove it; the prototype runs origin-isolated with no network or host access."}`,
+      );
     }
     return { path: file.path, content: file.content };
   });

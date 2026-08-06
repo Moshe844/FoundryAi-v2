@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -390,4 +391,32 @@ test("a production timeout does not demote the model that generates prototypes",
     ).has("no-stage"),
     true,
   );
+});
+
+test("an unsafe prototype is told where the violation is and what to do", async () => {
+  // Four concepts in one session were refused with only "files[0] contains
+  // unsafe inline styling", each regeneration reproducing the same defect
+  // because nothing said where to look. The studio was then left with too few
+  // directions to offer a choice and the mission stopped before a build began.
+  const { createPrototypeGenerationService } = await import(
+    "../src/work-plane/prototype-generation-service.js"
+  );
+  assert.equal(typeof createPrototypeGenerationService, "function");
+
+  const source = await readFile(
+    new URL("../src/work-plane/prototype-generation-service.js", import.meta.url),
+    "utf8",
+  );
+
+  // The match already holds the offending text and its position; both are now
+  // reported, with the file it is in.
+  assert.match(source, /const match = unsafe\.pattern\.exec\(file\.content\);/u);
+  assert.match(source, /at line \$\{line\} column \$\{column\}/u);
+  assert.match(source, /\$\{file\.path\}/u);
+
+  // And each rule says what to do instead, rather than only what is refused.
+  assert.match(source, /Move those declarations into styles\.css/u);
+  assert.match(source, /CSS gradients, shapes, or inline SVG/u);
+  assert.match(source, /Toggle a class or a data attribute/u);
+  assert.match(source, /UNSAFE_REMEDY\[unsafe\.reason\]/u);
 });
