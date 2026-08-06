@@ -39,7 +39,7 @@ const SIGNAL_PATTERNS = Object.freeze({
   [EngineeringSignal.CREDENTIALS]:
     /\b(?:password\w*|passphrase\w*|credential\w*|sign[- ]?in\w*|signin\w*|log[- ]?in\w*|login\w*|sign[- ]?up\w*|signup\w*|authenticat\w*|account creation|api key\w*|access token\w*)\b/iu,
   [EngineeringSignal.USER_INPUT]:
-    /\b(?:form\w*|submit\w*|enter\w*|input\w*|create\w*|register\w*|book\w*|order\w*|request\w*|message\w*|comment\w*|review\w*|apply|applies)\b/iu,
+    /\b(?:form\w*|submit\w*|enter\w*|input\w*|create\w*|register\w*|book\w*|order\w*|request\w*|message\w*|comment\w*|review\w*|apply|applies|add|adds|adding|update\w*|edit\w*|save\w*|post\w*|record\w*|log\w*|assign\w*|schedul\w*|reserv\w*|rate\w*|vote\w*|search\w*|filter\w*)\b/iu,
   [EngineeringSignal.DESTRUCTIVE]:
     /\b(?:delete\w*|remove\w*|archive\w*|cancel\w*|revoke\w*|deactivate\w*|discard\w*)\b/iu,
   [EngineeringSignal.UPLOAD]:
@@ -81,6 +81,23 @@ export function detectEngineeringSignals(profile, projectDesign = null) {
     )
   ) {
     signals.add(EngineeringSignal.PERSISTENCE);
+  }
+  // Anything that carries credentials, a payment, an upload, or a record the
+  // customer creates is user input by definition, whatever words the
+  // description happened to use. Relying on vocabulary alone left products
+  // that plainly accept input with no server-validation obligation, which is
+  // precisely the gap that made this floor look like an authentication
+  // feature rather than a general one.
+  for (const implying of [
+    EngineeringSignal.CREDENTIALS,
+    EngineeringSignal.PAYMENT,
+    EngineeringSignal.UPLOAD,
+    EngineeringSignal.DESTRUCTIVE,
+  ]) {
+    if (signals.has(implying)) signals.add(EngineeringSignal.USER_INPUT);
+  }
+  if (signals.has(EngineeringSignal.PERSISTENCE)) {
+    signals.add(EngineeringSignal.USER_INPUT);
   }
   return signals;
 }
@@ -241,15 +258,14 @@ const OBLIGATION_RULES = Object.freeze([
   },
 ]);
 
-// Every behavioural guarantee becomes another check the model-written browser
-// test must compute, and that test already has to satisfy fifty separate
-// admission gates. Adding four at once pushed it past what the generator could
-// write, and builds started failing before they reached verification at all.
-// The source rules above cost the test nothing and stay on unconditionally —
-// the plaintext-credential defect is still caught. These are gated until
-// Foundry generates the observation harness itself, at which point the test's
-// size stops being the constraint.
-export const ENGINEERING_FLOOR_OBLIGATIONS_ENABLED = false;
+// These were gated off while the model had to write the whole browser test:
+// each guarantee became another check inside a file already policed by fifty
+// admission gates, and turning them on pushed generation past what the model
+// could produce. Foundry now writes the observation harness itself and the
+// model supplies only the assertion body per obligation, so the cost of one
+// more guarantee is one more small function rather than more scaffolding to
+// get exactly right.
+export const ENGINEERING_FLOOR_OBLIGATIONS_ENABLED = true;
 
 export function engineeringFloorVerificationEntries(productName, signals) {
   if (!ENGINEERING_FLOOR_OBLIGATIONS_ENABLED) return [];

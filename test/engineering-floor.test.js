@@ -172,3 +172,48 @@ test("the source floor is always stated to the generator, gated or not", () => {
     "a behaviour must be stated only while it is also verified",
   );
 });
+
+test("the floor scales with what a project does, not with whether it has a login", () => {
+  // The obligations must not read as an authentication feature. A read-only
+  // page earns one guarantee; a product that takes input, deletes things, and
+  // holds credentials earns several. Vocabulary alone left a checkout and a
+  // stock tracker with no server-validation obligation, so input-bearing
+  // signals now imply user input outright.
+  const floor = (summary, capabilities = ["web-application"]) =>
+    engineeringFloorVerificationEntries(
+      "Project",
+      detectEngineeringSignals(profile({ summary, capabilities })),
+    ).map((entry) => entry.sourceRequirement.replace("engineering-floor-", ""));
+
+  // Every project, however simple, must fail honestly.
+  assert.deepEqual(floor("A menu of dishes with prices and opening hours."), ["safe-errors"]);
+
+  // Anything that accepts input must reject it server-side, whatever words
+  // the description used for "input".
+  for (const summary of [
+    "Staff add stock items and update quantities.",
+    "Customers pay by card at checkout.",
+    "Colleagues write and edit shared reference pages.",
+    "Visitors post suggestions and browse what others submitted.",
+    "An artist uploads photos of their work.",
+  ]) {
+    assert.ok(
+      floor(summary, ["web-application", "sqlite-persistence"]).includes("server-validation"),
+      `server-validation missing for: ${summary}`,
+    );
+  }
+
+  // Removing data requires confirmation, in any product.
+  assert.ok(
+    floor("Staff remove discontinued items.", ["web-application", "sqlite-persistence"])
+      .includes("destructive-confirmation"),
+  );
+
+  // The two credential guarantees appear only where credentials do.
+  const auth = floor("Admins sign in with a password.");
+  assert.ok(auth.includes("session-end"));
+  assert.ok(auth.includes("protected-access"));
+  const brochure = floor("A gallery of finished work with a contact form.");
+  assert.ok(!brochure.includes("session-end"));
+  assert.ok(!brochure.includes("protected-access"));
+});
