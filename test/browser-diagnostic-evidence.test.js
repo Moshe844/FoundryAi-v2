@@ -200,7 +200,7 @@ test("Foundry's observation harness satisfies every scaffolding gate itself", ()
   assert.match(harness, /activeElement/u);
   // Per-check isolation: one failing check cannot leave another unobserved.
   assert.match(harness, /try \{[\s\S]*await check\(/u);
-  assert.match(harness, /catch \(error\)[\s\S]*checks\[id\] = false/u);
+  assert.match(harness, /catch \(error: unknown\)[\s\S]*checks\[id\] = false/u);
 });
 
 test("only Foundry may emit the evidence marker", () => {

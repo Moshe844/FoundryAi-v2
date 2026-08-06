@@ -2451,9 +2451,12 @@ test("foundry contract observation", async ({ page }) => {
             : {};
         checks[id] = passed;
         diagnostics[id] = { ...detail, observed: true };
-      } catch (error) {
+      } catch (error: unknown) {
         checks[id] = false;
-        diagnostics[id] = { observed: true, threw: String(error?.message ?? error).slice(0, 300) };
+        diagnostics[id] = {
+          observed: true,
+          threw: (error instanceof Error ? error.message : String(error)).slice(0, 300),
+        };
       }
     }
   } finally {
@@ -2852,6 +2855,11 @@ function bundlePrompt(profile, contract, bindings, approvedContract = null, engi
     "Write exactly one observation file, tests/foundry-checks.ts, exporting `export const obligationChecks: Record<string, (context: { page: any; responsiveEvidence: Record<string, boolean>; accessibilityEvidence: Record<string, boolean> }) => Promise<{ passed: boolean; diagnostics: Record<string, boolean | number | string | null> }>> = { ... }` with one entry keyed by each exact supplied checkId.",
     "Each entry drives the running UI with Playwright through `context.page` and returns { passed, diagnostics }. passed must be computed from what the browser actually showed. diagnostics names the sub-observations behind that verdict, so a false verdict identifies its exact failed predicate. Do not initialize arrays, attach listeners, catch your own errors, or print anything: the harness does all of it.",
     "For a check about phone layout use context.responsiveEvidence, and for a check about keyboard focus or labelling use context.accessibilityEvidence, rather than measuring those again. Combine them with your own project-specific observations.",
+    // The project type-checks under noImplicitAny, and an unannotated callback
+    // parameter inside a page.evaluate or an array callback is the one error
+    // that kept reaching the repair loop for something a type annotation
+    // prevents outright.
+    "tests/foundry-checks.ts is type-checked with noImplicitAny. Annotate every parameter you introduce, including callback parameters inside page.evaluate, map, filter, and find — write (element: Element) or (entry: string) rather than (e). Inside page.evaluate the callback runs in the browser, so annotate its parameters and any DOM values you read.",
     "Do not prove error handling by intentionally requesting a nonexistent resource or an HTTP 4xx/5xx endpoint, because that creates a blocking browser console error. Exercise a visible client-side validation or recovery path that prevents the invalid request, while still observing the real error message and recovery behavior.",
     "For mutable availability such as appointment times, select an observed enabled control at runtime. Never hard-code a slot that an earlier step may have consumed or disabled.",
     "Locate an asynchronously loaded booking slot by its semantic accessible label, not by a visual class shared with Back or secondary-action buttons.",
