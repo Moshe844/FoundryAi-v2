@@ -94,10 +94,13 @@ const control = openMissionControl({
   environmentVariables: configuredEnvironment,
   aiDiscoveryAdapters: liveAdapters.discoveryAdapters,
   modelProviders: liveAdapters.executionAdapters,
-  // Two bounded attempts so a single structured-output validation miss during
-  // understanding retries with the exact failure fed back, instead of pushing
-  // the customer to a manual retry.
-  maxModelProviderAttempts: 2,
+  // Bounded attempts so a structured-output or design-quality validation miss
+  // during understanding retries with the exact failure fed back, instead of
+  // pushing the customer to a manual retry. Three rather than two: exhausting
+  // them ends the mission in INTAKE having produced nothing at all, which is a
+  // far worse outcome than one more request, and the quality gates now reject
+  // on grounds a single retry does not always land.
+  maxModelProviderAttempts: 3,
   requireProductBlueprintApproval: true,
 });
 const activeJobs = new Map();
