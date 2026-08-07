@@ -1,5 +1,6 @@
 import { ModelTaskClass } from "../domain/execution.js";
 import { normalizeConceptPrototypeContract } from "../domain/live-concept-studio.js";
+import { typographicCraftIssues } from "../domain/typographic-craft.js";
 import { ModelExecutionStage } from "./model-gateway.js";
 
 export const CONCEPT_GENERATION_OUTPUT_SCHEMA = Object.freeze({
@@ -126,6 +127,9 @@ function validateGeneratedOutput(value, contract) {
     css !== undefined &&
     !/(?:@media|@container|grid-template-columns\s*:\s*repeat\s*\(\s*auto-(?:fit|fill)|flex-wrap\s*:\s*wrap)/iu.test(css)
   ) fail("styles.css must contain a real responsive transformation.");
+  if (css !== undefined) {
+    for (const issue of typographicCraftIssues(css)) fail(issue);
+  }
   return Object.freeze({
     files: Object.freeze(files.map((file) => Object.freeze(file))),
     generationSummary: value.generationSummary.trim().slice(0, 1_000),
@@ -139,6 +143,11 @@ function prompt(contract, admissionFeedback = []) {
     "Use semantic HTML, isolated CSS, and only lightweight local JavaScript interaction.",
     "Implement the project-specific surfaces, sequence, navigation, hierarchy, typography, spacing, colors, imagery treatment, motion constraints, responsive behavior, accessibility rules, and deliberate exclusions.",
     "Use clearly fictional sample content under the sampleContentPolicy. Never invent customer facts.",
+    // Concepts kept arriving with one typeface doing every job, which is what
+    // made otherwise sound compositions read as homemade. State the split.
+    "TYPOGRAPHY: run two faces with separate jobs. The display face carries the typeVoice and is used only for headings, pull quotes and large numerals. The interface face carries every control, label, input, placeholder, table cell, badge and helper text, and must be a stack built for small screen text: ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, Helvetica, Arial, sans-serif — or ui-monospace, SFMono-Regular, \"Cascadia Mono\", Menlo, monospace when the typeVoice is mono-technical. Never set a serif, cursive or display family on a button, input, select, textarea, label or small.",
+    "Build a real type scale rather than arbitrary sizes: pick a base of 15-17px for body and interface text, and derive headings from it with clear steps. Set line-height near 1.5 for body text and 1.0-1.15 for display sizes, and give large display type negative letter-spacing while leaving small text alone.",
+    "Craft the surface as well as the layout: keep one consistent corner-radius language, one consistent border colour, and enough contrast that body text sits at 4.5:1 or better against its background. Prefer generous vertical rhythm over decoration.",
     "Do not use network requests, external URLs or scripts, environment variables, cookies, parent-window control, database code, authentication, payments, package dependencies, or build tooling.",
     "Keep every style in styles.css. Do not use style attributes or JavaScript element.style mutations; interactions must toggle classes, data attributes, or accessible state because the runtime CSP blocks inline styling.",
     "Forbidden literal patterns in every returned file include data:, blob:, javascript:, http://, https://, protocol-relative host URLs, style= attributes, and .style DOM access. Do not add data stylesheets, data images, preload shims, CSS imports, SVG data URIs, or placeholder network URLs; use local CSS gradients and semantic HTML instead.",

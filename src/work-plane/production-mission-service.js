@@ -197,6 +197,37 @@ export function foundryOwnedTestPath(path) {
   );
 }
 
+// True when `next build` will itself fail on a type error and on a lint error,
+// which is the default for the certified Next 15 stack. When it holds, running
+// tsc and eslint as separate gate steps finds nothing the build will not find
+// a minute later, and the gate re-runs after every repair.
+export function buildEnforcesTypesAndLint(files) {
+  const byPath = new Map(
+    (files ?? []).map((file) => [
+      String(file.path).replaceAll("\\", "/"),
+      String(file.content),
+    ]),
+  );
+  const nextConfig = [...byPath.entries()].find(([path]) =>
+    /^next\.config\.(?:cjs|js|mjs|ts)$/u.test(path),
+  )?.[1];
+  // Either escape hatch means the build stops enforcing that check, so the
+  // standalone command is the only thing still covering it.
+  if (
+    nextConfig !== undefined &&
+    /\b(?:ignoreBuildErrors|ignoreDuringBuilds)\s*:\s*true\b/u.test(nextConfig)
+  ) {
+    return false;
+  }
+  // Without an eslint config next build has no lint step to inherit.
+  const hasEslintConfig = [...byPath.keys()].some((path) =>
+    /^(?:eslint\.config\.(?:cjs|js|mjs|ts)|\.eslintrc(?:\.(?:cjs|js|json|mjs|yml|yaml))?)$/u.test(
+      path,
+    ),
+  );
+  return hasEslintConfig;
+}
+
 export function productionBrowserRepairPolicy(observationFailure) {
   const designFidelity =
     typeof observationFailure === "string" &&
@@ -4104,6 +4135,19 @@ export function createProductionMissionService({
         const targets = Object.entries(bindings)
           .filter(([, binding]) => binding === mode)
           .map(([obligationId]) => obligationId);
+        // The certified stack is Next 15, where `next build` type-checks and
+        // lints as part of building, and nothing in the scaffold turns either
+        // off. Running tsc and eslint first only re-reports what the build is
+        // about to find -- for about a hundred seconds, on every pass of the
+        // gate, and the gate re-runs after every repair. Keep them only where
+        // an obligation is actually bound to that command as its evidence.
+        if (
+          (procedureName === "typeCheck" || procedureName === "lint") &&
+          targets.length === 0 &&
+          buildEnforcesTypesAndLint(validatedFiles)
+        ) {
+          continue;
+        }
         let result;
         for (let attempt = 0; attempt < 7; attempt += 1) {
           result = await work(

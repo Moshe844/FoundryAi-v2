@@ -146,22 +146,34 @@ export async function awaitProcessTreeExit(
 ) {
   if (!Number.isSafeInteger(pid) || pid <= 0) return true;
   const deadline = Date.now() + timeoutMs;
+  let nextTaskListAt = 0;
   for (;;) {
-    if (!processTreeAlive(pid)) return true;
+    const now = Date.now();
+    const mayConsultTaskList = now >= nextTaskListAt;
+    if (mayConsultTaskList) nextTaskListAt = now + 1_000;
+    if (!processTreeAlive(pid, { mayConsultTaskList })) return true;
     if (Date.now() >= deadline) return false;
     await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
   }
 }
 
-function processTreeAlive(pid) {
-  if (process.platform !== "win32") {
-    try {
-      process.kill(pid, 0);
-      return true;
-    } catch {
-      return false;
-    }
+function processTreeAlive(pid, { mayConsultTaskList = true } = {}) {
+  // Cheap first, on every platform: a signal-0 kill is a syscall, where the
+  // tasklist.exe below is a process spawn costing a few hundred milliseconds.
+  // Polling this loop was spending most of its time inspecting rather than
+  // waiting, which is why taking a preview server down read as twenty seconds.
+  try {
+    process.kill(pid, 0);
+  } catch (error) {
+    if (error?.code === "ESRCH") return false;
+    // EPERM means it exists and is not ours to signal.
+    if (error?.code !== "EPERM") return false;
   }
+  if (process.platform !== "win32") return true;
+  // Windows can keep answering for a handle whose process has already exited,
+  // so confirm with tasklist -- but only when the caller says it is worth the
+  // spawn, which the poll loop rations to roughly once a second.
+  if (!mayConsultTaskList) return true;
   try {
     const listed = execFileSync(
       "tasklist.exe",
