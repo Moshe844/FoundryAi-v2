@@ -15,6 +15,36 @@ import {
 
 const IDENTIFIER_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,127})$/;
 
+// The work plane records an accepted design shortfall as a finding: a build
+// delivered with every behavioural obligation proven but the approved design
+// not reproduced in some measured aspect. The verdict must carry it, so it is
+// read back here from the mission's own evidence.
+function acceptedDesignShortfall(evidence, missionId) {
+  const record = (evidence.findByMission(missionId) ?? [])
+    .filter(
+      (candidate) =>
+        candidate.payload?.recordType === "design-fidelity-shortfall" &&
+        candidate.payload?.record?.accepted === true,
+    )
+    .at(-1);
+  if (record === undefined) return null;
+  const failedAspects = (record.payload.record.failedAspects ?? []).filter(
+    (aspect) => typeof aspect === "string" && aspect.trim() !== "",
+  );
+  // A shortfall was accepted, so something fell short. If the aspect names did
+  // not survive, say so rather than reporting a clean verdict.
+  return {
+    comparedViewports: record.payload.record.comparedViewports ?? null,
+    failedAspects:
+      failedAspects.length > 0 ? failedAspects : ["unnamed design aspects"],
+    reason:
+      typeof record.payload.record.reason === "string" &&
+      record.payload.record.reason.trim() !== ""
+        ? record.payload.record.reason
+        : "The approved design was not fully reproduced.",
+  };
+}
+
 function assertIdentifier(value, label) {
   if (typeof value !== "string" || !IDENTIFIER_PATTERN.test(value)) {
     throw new VerificationValidationError(`${label} is malformed.`);
@@ -243,6 +273,12 @@ export function createVerificationAuthority({
         verificationTimestamp,
         workspaceCheckpointReference: checkpoint,
         obligationVerdicts,
+        // Read from the mission's own evidence rather than accepted from the
+        // caller, so a delivered shortfall cannot be omitted by whoever asks
+        // for the verdict. Before this, the record existed and nothing read it:
+        // a build that missed the approved design on three aspects was reported
+        // as fourteen of fourteen satisfied, with the shortfall nowhere.
+        designShortfall: acceptedDesignShortfall(evidence, missionId),
       });
       ledger.appendCompletionVerdict({
         missionId,

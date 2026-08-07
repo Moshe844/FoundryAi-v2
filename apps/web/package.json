@@ -10,7 +10,7 @@
     "dev:web": "vinext dev",
     "build": "vinext build",
     "start": "vinext start",
-    "test": "npm run build && node --test tests/rendered-html.test.mjs tests/phase-a-foundation.test.mjs tests/phase-b-experience.test.mjs tests/phase-c-experience.test.mjs tests/phase-d-experience.test.mjs tests/phase-e-experience.test.mjs tests/phase-f-experience.test.mjs tests/proposal-conversation.test.mjs tests/phase-g-certification.test.mjs tests/phase-3-conversation.test.mjs tests/phase-4-design-intelligence.test.mjs",
+    "test": "npm run build && node --test tests/rendered-html.test.mjs tests/phase-a-foundation.test.mjs tests/phase-b-experience.test.mjs tests/phase-c-experience.test.mjs tests/phase-d-experience.test.mjs tests/phase-e-experience.test.mjs tests/phase-f-experience.test.mjs tests/proposal-conversation.test.mjs tests/phase-g-certification.test.mjs tests/phase-3-conversation.test.mjs tests/phase-4-design-intelligence.test.mjs && tsx --test tests/truthful-completion.test.mjs",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate"

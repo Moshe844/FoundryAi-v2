@@ -43,6 +43,7 @@ const HASH_PATTERN = /^[a-f0-9]{64}$/;
 const VERDICT_KEYS = [
   "contractVersion",
   "deficiencies",
+  "designShortfall",
   "integrityHash",
   "missionId",
   "obligationVerdicts",
@@ -52,6 +53,7 @@ const VERDICT_KEYS = [
   "verificationTimestamp",
   "workspaceCheckpointReference",
 ];
+const DESIGN_SHORTFALL_KEYS = ["comparedViewports", "failedAspects", "reason"];
 const OBLIGATION_VERDICT_KEYS = [
   "deficiency",
   "evidenceReferences",
@@ -576,6 +578,47 @@ export function computeCompletionVerdictIntegrityHash(verdictWithoutHash) {
   return hash(verdictWithoutHash);
 }
 
+// A build may be delivered with an accepted design shortfall: every behavioural
+// obligation proven, but the approved design not reproduced in some measured
+// aspect. That fact used to live only in an unattached evidence record, so a
+// build whose approved design was missed on surface-order, hierarchy and
+// navigation recorded SATISFIED for all fourteen obligations and nothing else,
+// and the customer was told fourteen of fourteen. Delivering imperfect work is
+// allowed; describing it as unqualified success is not. The shortfall travels
+// on the verdict, inside the integrity hash, so no reader can miss it.
+export function normalizeDesignShortfall(value, label = "designShortfall") {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== "object" || Array.isArray(value)) {
+    throw new CompletionVerdictIntegrityError(`${label} must be an object or null.`);
+  }
+  assertExactKeys(value, DESIGN_SHORTFALL_KEYS, label);
+  if (
+    !Array.isArray(value.failedAspects) ||
+    value.failedAspects.length === 0 ||
+    value.failedAspects.some(
+      (aspect) => typeof aspect !== "string" || aspect.trim() === "",
+    )
+  ) {
+    throw new CompletionVerdictIntegrityError(
+      `${label}.failedAspects must list at least one named aspect. A shortfall with nothing named is not a disclosure.`,
+    );
+  }
+  assertNonEmptyString(value.reason, `${label}.reason`);
+  if (
+    value.comparedViewports !== null &&
+    !Number.isSafeInteger(value.comparedViewports)
+  ) {
+    throw new CompletionVerdictIntegrityError(
+      `${label}.comparedViewports must be an integer or null.`,
+    );
+  }
+  return deepFreeze({
+    comparedViewports: value.comparedViewports ?? null,
+    failedAspects: [...value.failedAspects],
+    reason: value.reason,
+  });
+}
+
 export function createCompletionVerdict({
   verdictId,
   missionId,
@@ -583,6 +626,7 @@ export function createCompletionVerdict({
   verificationTimestamp,
   workspaceCheckpointReference,
   obligationVerdicts,
+  designShortfall = null,
 }) {
   const deficiencies = obligationVerdicts
     .filter((verdict) => verdict.result === ObligationVerdictResult.NOT_SATISFIED)
@@ -609,6 +653,12 @@ export function createCompletionVerdict({
       ? CompletionResult.COMPLETE
       : CompletionResult.INCOMPLETE,
     deficiencies,
+    // overallResult stays a statement about the obligations, because the
+    // SUCCEEDED transition is gated on it: making a shortfall INCOMPLETE sent
+    // proven builds back to repair and destroyed them. The shortfall is
+    // disclosed alongside it instead, and the customer-facing claim is required
+    // to reflect it.
+    designShortfall: normalizeDesignShortfall(designShortfall),
     unverifiableConditions,
   };
   return deepFreeze({
@@ -648,6 +698,10 @@ export function validateCompletionVerdict(verdict, { missionId, contract }) {
       "Completion Verdict obligation verdicts must be an array.",
     );
   }
+  normalizeDesignShortfall(
+    verdict.designShortfall,
+    "completionVerdict.designShortfall",
+  );
 
   const activeIds = contract.obligations.map((item) => item.obligationId).sort();
   const verdictIds = verdict.obligationVerdicts

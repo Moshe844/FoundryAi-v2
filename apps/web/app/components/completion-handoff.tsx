@@ -26,6 +26,11 @@ export function CompletionHandoff({
     : completion.verifiedOutcomes.slice(0, VISIBLE_PROOFS);
   const remaining =
     completion.totalCount.value - completion.provedCount.value;
+  // A build can prove every obligation and still not be the page the customer
+  // approved. That combination has its own headline, because "0 of 14 promises
+  // didn't hold" describes it as well as "complete" does — which is to say, not
+  // at all.
+  const designShortfall = completion.designShortfall.value;
 
   return (
     <section className="act completion-workspace">
@@ -45,7 +50,9 @@ export function CompletionHandoff({
           <h1 className="t-display-xl" aria-live="polite">
             {completion.complete.value
               ? "The build is complete, and every contract check passed."
-              : `It’s close, but ${remaining} of ${completion.totalCount.value} promises didn’t hold. I won’t call it done.`}
+              : remaining === 0 && designShortfall !== null
+                ? `Every workflow passed, but I didn’t reproduce the design you approved. ${designShortfall.failedAspects.length} ${designShortfall.failedAspects.length === 1 ? "aspect differs" : "aspects differ"}. I won’t call it done.`
+                : `It’s close, but ${remaining} of ${completion.totalCount.value} promises didn’t hold. I won’t call it done.`}
           </h1>
           <p className="t-body-l lead measure">
             Here’s the handover: what I built, what the evidence proves, the
@@ -67,6 +74,13 @@ export function CompletionHandoff({
               {completion.provedCount.value} of {completion.totalCount.value}{" "}
               contract checks verified
             </li>
+            {designShortfall !== null && (
+              <li>
+                <span aria-hidden="true">!</span>
+                Approved design not reproduced:{" "}
+                {designShortfall.failedAspects.join(", ")}
+              </li>
+            )}
             {completion.browserEvidencePresent.value && (
               <li>
                 <span aria-hidden="true">✓</span>
@@ -85,7 +99,9 @@ export function CompletionHandoff({
                   ? "Verified preview · Final launch content still needs your input."
                   : completion.complete.value
                     ? null
-                  : "Draft preview · One or more promises still need evidence."
+                    : remaining === 0 && designShortfall !== null
+                      ? "Workflows verified · This does not match the design you approved."
+                      : "Draft preview · One or more promises still need evidence."
               }
               preview={experience.preview}
               fullWidth
@@ -119,6 +135,29 @@ export function CompletionHandoff({
                       </li>
                     ))}
                   </ul>
+                </dd>
+              </div>
+            )}
+
+            {designShortfall !== null && (
+              <div className="field-row">
+                <dt>Where this differs from the design you approved</dt>
+                <dd>
+                  <p className="t-body-m">
+                    The workflows below were proven against the running
+                    application. The design was not fully reproduced, and I
+                    stopped correcting it rather than risk the working build:
+                  </p>
+                  <ul className="unproved stack-list">
+                    {designShortfall.failedAspects.map((aspect) => (
+                      <li key={aspect} className="t-body-m">
+                        {aspect}
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="t-body-m ink-secondary">
+                    {designShortfall.reason}
+                  </p>
                 </dd>
               </div>
             )}

@@ -207,6 +207,20 @@ function workspaceProjection(events, profile) {
   };
 }
 
+function designShortfallProjection(events) {
+  const verdict = events
+    .map((record) => record.completionVerdict)
+    .filter(Boolean)
+    .at(-1);
+  const shortfall = verdict?.designShortfall;
+  if (!shortfall || (shortfall.failedAspects ?? []).length === 0) return null;
+  return {
+    failedAspects: [...shortfall.failedAspects],
+    comparedViewports: shortfall.comparedViewports ?? null,
+    reason: shortfall.reason,
+  };
+}
+
 function verificationProjection(events, contract, profile) {
   const verdict =
     events
@@ -285,5 +299,11 @@ export function projectExecutionProjection({
     runtime: runtimeProjection(events),
     workspace: workspaceProjection(events, profile),
     verification: verificationProjection(events, contract, profile),
+    // Carried beside the obligations rather than inside them: a delivered
+    // design shortfall is not an obligation that failed, it is a statement that
+    // the approved design was not reproduced. Left out of the projection, the
+    // customer was shown "fourteen of fourteen" for a build that missed the
+    // design on three measured aspects.
+    designShortfall: designShortfallProjection(events),
   };
 }

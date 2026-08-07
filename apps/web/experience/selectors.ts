@@ -1153,10 +1153,17 @@ function completion(mission: Mission): CompletionSummary {
   const verdictAvailable =
     verification.length > 0 &&
     verification.some((outcome) => outcome.result !== "PENDING");
+  // A build delivered without reproducing the approved design is not complete,
+  // whatever its obligations say. Every obligation can be SATISFIED while the
+  // page the customer approved was never built: that combination reported
+  // "fourteen of fourteen" on a build that missed surface-order, hierarchy and
+  // navigation, and said nothing about any of it.
+  const designShortfall = mission.executionProjection.designShortfall ?? null;
   const complete =
     mission.state === "SUCCEEDED" &&
     verdictAvailable &&
-    unverified.length === 0;
+    unverified.length === 0 &&
+    designShortfall === null;
   const customerVerificationDetail = (
     result: Mission["executionProjection"]["verification"][number]["result"],
   ): string => {
@@ -1251,6 +1258,11 @@ function completion(mission: Mission): CompletionSummary {
       ),
       "browser-evidence",
       "mission.executionProjection.verification.evidenceReferences",
+    ),
+    designShortfall: sourced(
+      designShortfall,
+      "completion-verdict",
+      "mission.executionProjection.designShortfall",
     ),
     provedCount: sourced(
       verified.length,

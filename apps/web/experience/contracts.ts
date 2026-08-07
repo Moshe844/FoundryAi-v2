@@ -284,9 +284,21 @@ export type SuggestedNextStep = Readonly<{
   description: Sourced<string>;
 }>;
 
+export type DesignShortfall = Readonly<{
+  failedAspects: readonly string[];
+  comparedViewports: number | null;
+  reason: string;
+}>;
+
 export type CompletionSummary = Readonly<{
   available: Sourced<boolean>;
   complete: Sourced<boolean>;
+  /**
+   * Present when the build was delivered without reproducing the approved
+   * design in some measured aspect. `complete` is false whenever this is set:
+   * work may ship imperfect, but it may not be described as finished.
+   */
+  designShortfall: Sourced<DesignShortfall | null>;
   projectName: Sourced<string | null>;
   deliveredArtifact: Sourced<string | null>;
   buildDuration: Sourced<string | null>;
@@ -770,6 +782,10 @@ export type Mission = Readonly<{
       startedAt: string | null;
       completedAt: string | null;
     }>;
+    // Set when the build shipped without reproducing the approved design in
+    // some measured aspect. Read from the completion verdict, which reads it
+    // from the mission's own evidence, so it cannot be dropped on the way out.
+    designShortfall: DesignShortfall | null;
     phase: Readonly<{
       currentIndex: number;
       completedThrough: number;

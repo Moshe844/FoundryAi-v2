@@ -896,6 +896,14 @@ export function validateMission(value: unknown, path = "mission"): Mission {
             projection.observation,
             `${path}.executionProjection.observation`,
           );
+    const rawDesignShortfall =
+      projection.designShortfall === null ||
+      projection.designShortfall === undefined
+        ? null
+        : object(
+            projection.designShortfall,
+            `${path}.executionProjection.designShortfall`,
+          );
     const rawRepair =
       projection.repair === null
         ? null
@@ -943,6 +951,29 @@ export function validateMission(value: unknown, path = "mission"): Mission {
           `${path}.executionProjection.phase.includesDataPhase`,
         ),
       },
+      // Absent on every mission that reproduced its approved design, and on
+      // every mission recorded before the verdict carried it.
+      designShortfall:
+        rawDesignShortfall === null
+          ? null
+          : {
+              failedAspects: textList(
+                rawDesignShortfall.failedAspects,
+                `${path}.executionProjection.designShortfall.failedAspects`,
+              ),
+              comparedViewports:
+                rawDesignShortfall.comparedViewports === null ||
+                rawDesignShortfall.comparedViewports === undefined
+                  ? null
+                  : integer(
+                      rawDesignShortfall.comparedViewports,
+                      `${path}.executionProjection.designShortfall.comparedViewports`,
+                    ),
+              reason: text(
+                rawDesignShortfall.reason,
+                `${path}.executionProjection.designShortfall.reason`,
+              ),
+            },
       observation:
         rawObservation === null || rawObservation === undefined
           ? null
