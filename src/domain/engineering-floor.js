@@ -167,6 +167,55 @@ const SOURCE_RULES = Object.freeze([
       "An action that permanently removes a record must require an explicit confirmation before it takes effect. Do not wire a delete request directly to a control's click handler: hold the pending removal in state and require a second, clearly-labelled approval — or offer an undo — before the request is sent.",
   },
   {
+    id: "completed-work-outlives-the-click",
+    // A delivered signup passed all fifteen of its checks with zero network
+    // calls in the entire product: the submit handler validated the fields and
+    // ran setState('success'), and "Access confirmed" was a React state flip.
+    // Its obligation read "presents a successful account-creation state", which
+    // is exactly what it did — so no wording rule catches this, and no browser
+    // check does either, because the confirmation really is on screen. The only
+    // reliable tell is in the source: a form that announces completion while
+    // the product has no way to store anything has completed nothing.
+    signals: [EngineeringSignal.ALWAYS],
+    // Read per file. The build that prompted this shipped an unused lib/db.ts,
+    // which made the joined product look like it could store something while
+    // the page holding the form imported nothing but react.
+    perFile: true,
+    violated: (file) => {
+      if (!/\bpreventDefault\s*\(/u.test(file)) return false;
+      if (!announcesCompletion(file)) return false;
+      // Calling out to a local module counts: the work may well be done there.
+      return !persistsAnything(file) && !importsLocalModule(file);
+    },
+    message:
+      "A form that announces success must make the result outlive the click. This product shows a completion state but never sends or stores anything, so nothing was created. Send the submitted values to a route handler or server action that writes them, and drive the success state from that response — do not flip a local state variable and call it done.",
+  },
+  {
+    id: "validation-errors-clear-as-you-type",
+    // Errors were set only in the submit handler and never anywhere else, so
+    // after one empty submit the messages stayed painted over fields the user
+    // had since filled in correctly: a screenshot showed "Enter your name."
+    // under a filled name box. The validation logic was right; the display was
+    // stale. Nothing on the browser side notices, because the error text the
+    // check looked for is present.
+    signals: [EngineeringSignal.USER_INPUT],
+    perFile: true,
+    violated: (source) => {
+      if (!/\bsetErrors?\s*\(/u.test(source)) return false;
+      if (!/\bpreventDefault\s*\(/u.test(source)) return false;
+      const handlers = onChangeHandlerBodies(source);
+      if (handlers.length === 0) return false;
+      const clearsWhileTyping = handlers.some((body) =>
+        /\bsetErrors?\s*\(|\bvalidate|\bclearError/iu.test(body),
+      );
+      if (clearsWhileTyping) return false;
+      // Recomputing validation in an effect keyed to the fields is equally fine.
+      return !/\buseEffect\s*\([\s\S]{0,400}?\bsetErrors?\s*\(/u.test(source);
+    },
+    message:
+      "A validation error must disappear as soon as the field it describes is corrected. Errors here are written only by the submit handler, so they stay on screen over input the user has already fixed. Clear that field's error in its onChange handler, or recompute validation in an effect keyed to the field values.",
+  },
+  {
     id: "sql-is-parameterized",
     signals: [EngineeringSignal.PERSISTENCE],
     violated: (source) =>
@@ -222,28 +271,105 @@ export function engineeringFloorRequirements(signals) {
 // Applied to the customer-facing product source only. Test files legitimately
 // contain literal credentials and inline SQL, and failing a build for its own
 // fixtures would be the same mistake as counting evidence/ as changed source.
+export function productFilesForFloor(files) {
+  return (files ?? []).filter(
+    (file) =>
+      !/^tests?\//u.test(file.path) &&
+      !/\.(?:spec|test)\.[jt]sx?$/u.test(file.path) &&
+      !/^(?:public|evidence)\//u.test(file.path) &&
+      file.path !== "package-lock.json",
+  );
+}
+
 export function productSourceForFloor(files) {
-  return (files ?? [])
-    .filter(
-      (file) =>
-        !/^tests?\//u.test(file.path) &&
-        !/\.(?:spec|test)\.[jt]sx?$/u.test(file.path) &&
-        !/^(?:public|evidence)\//u.test(file.path) &&
-        file.path !== "package-lock.json",
-    )
+  return productFilesForFloor(files)
     .map((file) => String(file.content))
     .join("\n");
+}
+
+// Any one of these means a submitted value can leave the component: a request,
+// a server action, a client-side store, or a database client. A product that
+// has none of them cannot have created anything, whatever it puts on screen.
+const PERSISTENCE_PRIMITIVES = Object.freeze([
+  /\bfetch\s*\(/u,
+  /\bXMLHttpRequest\b/u,
+  /\bnavigator\s*\.\s*sendBeacon\b/u,
+  /["'`]use server["'`]/u,
+  /<form[^>]*\saction=\{/u,
+  /\b(?:localStorage|sessionStorage|indexedDB)\b/iu,
+  /\b(?:axios|prisma|supabase|sqlite|mongoose|drizzle|knex)\b/iu,
+  /\bcookies\s*\(/u,
+  /\b(?:writeFile|writeFileSync)\b/u,
+  /\b(?:signIn|signUp|createUser)\s*\(/u,
+  /\b(?:useMutation|useSWRMutation|revalidatePath|revalidateTag)\b/u,
+]);
+
+// A quoted state literal or a boolean flag being raised — the two shapes a
+// "we're done" screen takes. Deliberately narrow: a search form that filters a
+// list on submit has neither, and must not be reported.
+const COMPLETION_ANNOUNCEMENTS = Object.freeze([
+  /['"`](?:success|succeeded|submitted|confirmed|completed?|created|registered|done|sent|thanks|thank-?you)['"`]/iu,
+  /\bset(?:Is)?(?:Submitted|Success\w*|Confirmed|Registered|Created|Completed?|Done|Sent|Saved)\s*\(\s*true\b/iu,
+]);
+
+function persistsAnything(source) {
+  return PERSISTENCE_PRIMITIVES.some((pattern) => pattern.test(source));
+}
+
+function announcesCompletion(source) {
+  return COMPLETION_ANNOUNCEMENTS.some((pattern) => pattern.test(source));
+}
+
+// A relative or aliased import of real code — stylesheets and type-only
+// imports carry no behaviour, so they do not count as somewhere the work
+// could be happening.
+function importsLocalModule(source) {
+  const importPath = /\bfrom\s*["'`](\.{1,2}\/|@\/)([^"'`]+)["'`]/gu;
+  for (const match of source.matchAll(importPath)) {
+    if (/\.(?:css|scss|sass|less)$/u.test(match[2])) continue;
+    return true;
+  }
+  return /\bawait\s+import\s*\(\s*["'`](?:\.{1,2}\/|@\/)/u.test(source);
+}
+
+// Returns the body of every onChange={...} expression, brace-matched so that
+// nested objects and arrow bodies stay with their handler.
+function onChangeHandlerBodies(source) {
+  const bodies = [];
+  const opening = /onChange\s*=\s*\{/gu;
+  let match;
+  while ((match = opening.exec(source)) !== null) {
+    const start = match.index + match[0].length;
+    let depth = 1;
+    let index = start;
+    while (index < source.length && depth > 0) {
+      const character = source[index];
+      if (character === "{") depth += 1;
+      else if (character === "}") depth -= 1;
+      index += 1;
+    }
+    bodies.push(source.slice(start, index - 1));
+  }
+  return bodies;
 }
 
 export function validateEngineeringFloor(files, signals) {
   const source = productSourceForFloor(files);
   if (source.trim() === "") return;
+  // Rules about whether one component wires up to something must read that
+  // component alone. Judged across the joined product they pass on a helper
+  // sitting in another file that nothing imports.
+  const perFileSources = productFilesForFloor(files).map((file) =>
+    String(file.content),
+  );
   for (const rule of SOURCE_RULES) {
     if (!ruleApplies(rule, signals)) continue;
-    const failed =
+    const scopes = rule.perFile ? perFileSources : [source];
+    const failed = scopes.some((scope) =>
       typeof rule.violated === "function"
-        ? rule.violated(source)
-        : !rule.satisfied(source);
+        ? rule.violated(scope)
+        : !rule.satisfied(scope),
+    );
     if (failed) {
       throw new EngineeringFloorViolation(
         `Engineering floor "${rule.id}" is not met. ${rule.message}`,

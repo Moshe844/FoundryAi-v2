@@ -270,3 +270,98 @@ test("a record cannot be destroyed without an explicit confirmation", () => {
     /destructive-actions-are-confirmed/u,
   );
 });
+
+// The signup that passed fifteen of fifteen checks while creating no account:
+// its submit handler validated the fields and ran setState('success'), and the
+// product contained no fetch at all. Both defects below are read from that
+// delivered file.
+const FAKE_SUCCESS_SIGNUP = `'use client';
+import { FormEvent, useState } from 'react';
+export default function AccessPage() {
+  const [name,setName]=useState(''); const [errors,setErrors]=useState({});
+  const [state,setState]=useState('form');
+  const submit=(event: FormEvent)=>{event.preventDefault();
+    const e={}; if(!name.trim()) e.name='Enter your name.';
+    setErrors(e); if(Object.keys(e).length===0) setState('success');};
+  return <form onSubmit={submit}><input onChange={(event)=>setName(event.target.value)} />
+    {state==='success' && <p>Access confirmed.</p>}</form>;
+}`;
+
+test("a form that announces success without sending anything is a floor violation", () => {
+  assert.throws(
+    () =>
+      validateEngineeringFloor(
+        [{ path: "app/page.tsx", content: FAKE_SUCCESS_SIGNUP }],
+        new Set([EngineeringSignal.ALWAYS]),
+      ),
+    /completed-work-outlives-the-click/u,
+  );
+});
+
+test("an unused persistence helper elsewhere does not excuse the form", () => {
+  assert.throws(
+    () =>
+      validateEngineeringFloor(
+        [
+          { path: "app/page.tsx", content: FAKE_SUCCESS_SIGNUP },
+          { path: "lib/db.ts", content: "export const db = createClient('sqlite');" },
+        ],
+        new Set([EngineeringSignal.ALWAYS]),
+      ),
+    /completed-work-outlives-the-click/u,
+  );
+});
+
+test("a form that posts its values clears the persistence floor", () => {
+  const posts = FAKE_SUCCESS_SIGNUP.replace(
+    "setState('success')",
+    "fetch('/api/accounts',{method:'POST'}).then(()=>setState('success'))",
+  );
+  assert.doesNotThrow(() =>
+    validateEngineeringFloor(
+      [{ path: "app/page.tsx", content: posts }],
+      new Set([EngineeringSignal.ALWAYS]),
+    ),
+  );
+});
+
+test("validation errors that are never cleared while typing are a floor violation", () => {
+  assert.throws(
+    () =>
+      validateEngineeringFloor(
+        [{ path: "app/page.tsx", content: FAKE_SUCCESS_SIGNUP }],
+        new Set([EngineeringSignal.USER_INPUT]),
+      ),
+    /validation-errors-clear-as-you-type/u,
+  );
+});
+
+test("clearing the field's error in its onChange satisfies the floor", () => {
+  const clears = FAKE_SUCCESS_SIGNUP.replace(
+    "onChange={(event)=>setName(event.target.value)}",
+    "onChange={(event)=>{setName(event.target.value);setErrors({});}}",
+  );
+  assert.doesNotThrow(() =>
+    validateEngineeringFloor(
+      [{ path: "app/page.tsx", content: clears }],
+      new Set([EngineeringSignal.USER_INPUT]),
+    ),
+  );
+});
+
+test("a search form that filters a list on submit is not mistaken for a success screen", () => {
+  const search = `'use client';
+import { FormEvent, useState } from 'react';
+export default function Catalogue() {
+  const [query,setQuery]=useState(''); const [results,setResults]=useState([]);
+  const submit=(event: FormEvent)=>{event.preventDefault();
+    setResults(ITEMS.filter((item)=>item.name.includes(query)));};
+  return <form onSubmit={submit}><input onChange={(event)=>setQuery(event.target.value)} /></form>;
+}`;
+  assert.doesNotThrow(() =>
+    validateEngineeringFloor(
+      [{ path: "app/page.tsx", content: search }],
+      new Set([EngineeringSignal.ALWAYS, EngineeringSignal.USER_INPUT]),
+    ),
+  );
+});
