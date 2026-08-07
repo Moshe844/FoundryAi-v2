@@ -503,6 +503,70 @@ export function normalizeUserExperiencePlan(ux) {
   return freeze(Object.fromEntries(Object.entries(ux).map(([key, value]) => [key, list(value, `userExperiencePlan.${key}`, { required: ["primaryJourneys", "criticalMoments", "failureStates", "trustMoments"].includes(key) })])));
 }
 
+// A request for "sign up" asked for an account to exist afterwards. Foundry
+// answered with five capabilities — see the form, the form validates, the
+// button stays usable, tests cover states, the build succeeds — verified all
+// of them honestly, and reported success on a page where nobody can register.
+// Its own journeys said "Submit the registration form"; nothing said what
+// submitting does.
+//
+// An action a person performs is only delivered when its effect is. A project
+// whose journeys contain actions must promise at least one completed outcome,
+// not only that a form is displayed and validated.
+// Deliberately narrow. A wrong rejection blocks a legitimate project, while a
+// miss only leaves today's behaviour, so this lists verbs that are
+// unambiguously transactional and cannot be read as nouns. "Routine updates"
+// in a read-only policy viewer matched an earlier, broader list and wrongly
+// rejected it.
+// Deliberately narrow, on two grounds. A wrong rejection blocks a legitimate
+// project while a miss only leaves today's behaviour, so every verb here must
+// be unambiguously transactional and unreadable as a noun — "routine updates"
+// in a read-only policy viewer matched a broader list and wrongly rejected it.
+//
+// Signing in is excluded on principle: it is access, not creation. "A customer
+// can sign in, identify the newest activity, and understand its status" is a
+// product for reading, and the sign-in is plumbing on the way there. Signing
+// up is different — it is the account coming into existence, which is exactly
+// what a form that only renders and validates fails to do.
+const ACTION_JOURNEY =
+  /\b(?:signs? ?up|signing ?up|sign-?up|registers?|registering|registration|submits?|submitting|submission|checks? out|checkout|places? an order|creates? an account)\b/iu;
+
+// Wording that asserts the action finished and left something behind. Asking
+// additionally that a capability contain no presentational verb was wrong and
+// rejected a working tracker: "an item is added and it appears in the register"
+// is a completed outcome that happens to describe what is then visible.
+const COMPLETED_OUTCOME =
+  /\b(?:created|registered|saved|stored|recorded|added|removed|deleted|persisted|creates?|registers?|saves?|stores?|records?|persists?|able to sign ?in|reach(?:es)? the|arriv(?:es?|ing) at|receiv(?:es?|ing) (?:a )?confirmation|appears? in|remains? (?:available )?after|survives? a refresh|is signed ?in|can then)\b/iu;
+
+export function unfinishedActionIssues(design) {
+  // Read the action from what the customer asked for, not from every journey
+  // line. Signing in appears in the journeys of a read-only policy viewer as
+  // plumbing on the way to reading a document; the product there is the
+  // reading. Requiring a completion promise from that is wrong, and did
+  // wrongly reject one. The outcome, goal and definition of success are where
+  // the customer said what the product is.
+  const asked = [
+    design?.projectIntent?.customerOutcome,
+    design?.projectIntent?.primaryGoal,
+    design?.projectIntent?.successDefinition,
+  ]
+    .map((entry) => String(entry?.value ?? entry ?? ""))
+    .filter((entry) => entry !== "");
+  const actions = asked.filter((entry) => ACTION_JOURNEY.test(entry));
+  if (actions.length === 0) return [];
+
+  const capabilities = (design?.productProposal?.essentialCapabilities ?? []).map(
+    (capability) => String(capability?.value ?? capability ?? ""),
+  );
+  const promisesCompletion = capabilities.some((capability) =>
+    COMPLETED_OUTCOME.test(capability),
+  );
+  if (promisesCompletion) return [];
+  return [
+    `The customer asked for an action to be performed — ${actions.slice(0, 2).map((entry) => `"${entry}"`).join(", ")} — but every essential capability only describes what is displayed or validated. Add a capability stating what the action produces: the record it creates, the state the person reaches, or what remains true afterwards. A form that renders and validates but completes nothing is not the requested product.`,
+  ];
+}
+
 export function normalizeDesignDirection(design) {
   exact(design, ["visualPersonality", "tone", "layoutStrategy", "informationDensity", "navigationApproach", "responsivePriority", "accessibilityNeeds", "contentStrategy", "interactionStyle", "rationale"], "designDirection");
   return freeze({
@@ -910,6 +974,7 @@ export function validateProjectDesignQuality(
     const covered = design.verificationPlan.some((item) => overlap(requirementTokens, tokens(`${item.observableOutcome} ${item.sourceRequirement}`)));
     if (requirementTokens.size > 0 && !covered) issues.push(`productProposal.essentialCapabilities[${index}] has no traceable verification outcome.`);
   }
+  issues.push(...unfinishedActionIssues(design));
   if (issues.length > 0) {
     // The retry strategy leads: the correction loop truncates this message
     // before feeding it back, and a changed strategy matters more than the

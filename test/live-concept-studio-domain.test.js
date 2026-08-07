@@ -346,3 +346,88 @@ test("three directions may not share a composition", async () => {
   assert.match(prompt, /map-led, narrative-scroll, editorial-spread/u);
   assert.match(prompt, /choosing three obvious task layouts wastes the choice/u);
 });
+
+test("a request to sign up must promise the account, not the form", async () => {
+  // "Sign up and sign up page for shoe inventory" produced five capabilities —
+  // see the form, the form validates, the button stays usable, tests cover
+  // states, the build succeeds — thirteen obligations, every check verified,
+  // and a delivered page where nobody can register. The checks were true. The
+  // contract was wrong. Its own journeys said "Submit the registration form";
+  // nothing said what submitting does.
+  const { unfinishedActionIssues } = await import("../src/domain/project-design.js");
+  const design = (outcome, capabilities) => ({
+    projectIntent: {
+      customerOutcome: outcome,
+      primaryGoal: outcome,
+      successDefinition: outcome,
+    },
+    productProposal: { essentialCapabilities: capabilities },
+  });
+
+  const shipped = design("A visitor can sign up for shoe inventory.", [
+    "A visitor can open the sign-up page and see the complete registration form.",
+    "The form visibly validates required fields, email format, and password requirements.",
+    "The primary action remains clear and usable across desktop and mobile widths.",
+    "Automated tests cover valid submission state and representative invalid input states.",
+    "The project produces a successful production build without errors.",
+  ]);
+  const issue = unfinishedActionIssues(shipped)[0];
+  assert.ok(issue, "a sign-up that only renders a form must be refused");
+  assert.match(issue, /only describes what is displayed or validated/u);
+  assert.match(issue, /the record it creates, the state the person reaches/u);
+
+  // One capability asserting the completed effect is enough.
+  assert.deepEqual(
+    unfinishedActionIssues(
+      design("A visitor can sign up for shoe inventory.", [
+        "A visitor can see the registration form.",
+        "Submitting valid details creates the account and the person is signed in.",
+      ]),
+    ),
+    [],
+  );
+
+  // Signing in is access, not creation: a product for reading is unaffected
+  // even though its journeys begin with a sign-in.
+  assert.deepEqual(
+    unfinishedActionIssues(
+      design(
+        "A customer can sign in, identify the newest activity, and understand its status without assistance.",
+        ["A customer can see the newest activity and its current status."],
+      ),
+    ),
+    [],
+  );
+
+  // A noun must not read as a verb. "Routine updates" once rejected a
+  // read-only policy viewer.
+  assert.deepEqual(
+    unfinishedActionIssues(
+      design(
+        "Policyholders can review policy documents without calling their broker for routine updates.",
+        ["A policyholder can see current policy documents and their status."],
+      ),
+    ),
+    [],
+  );
+
+  // And a working tracker, whose completion wording also describes what is
+  // then visible, stays accepted.
+  assert.deepEqual(
+    unfinishedActionIssues(
+      design("Warehouse staff maintain accurate stock records.", [
+        "Staff can add an item and it appears in the register.",
+        "Inventory records remain available after refreshing the application.",
+      ]),
+    ),
+    [],
+  );
+
+  // The generator is told the rule before it writes a contract.
+  const prompt = await readFile(
+    new URL("../src/understanding-plane/project-understanding-service.js", import.meta.url),
+    "utf8",
+  );
+  assert.match(prompt, /asks for an account to exist afterwards/u);
+  assert.match(prompt, /describes a picture of the product, not the product/u);
+});
