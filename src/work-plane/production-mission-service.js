@@ -2762,6 +2762,24 @@ test("foundry contract observation", async ({ page }) => {
     if (message.type() === "error") consoleErrors.push(message.text());
   });
   page.on("pageerror", (error) => pageErrors.push(String(error?.message ?? error)));
+  // A workflow check reports one boolean. "added: false" was returned to three
+  // consecutive repairs and told none of them whether the form never
+  // submitted, the route answered 500, or the row simply rendered somewhere the
+  // locator did not look. The request the workflow made is the answer, and it
+  // was being thrown away: only the responses that failed are kept, tagged with
+  // the check that was running when they arrived.
+  const failedRequests: { check: string; method: string; url: string; status: number }[] = [];
+  let observingCheckId = "setup";
+  page.on("response", (response) => {
+    const status = response.status();
+    if (status < 400 || failedRequests.length >= 25) return;
+    failedRequests.push({
+      check: observingCheckId,
+      method: response.request().method(),
+      url: response.url().slice(0, 200),
+      status,
+    });
+  });
 
   try {
     await page.setViewportSize({ width: 390, height: 844 });
@@ -2847,6 +2865,7 @@ test("foundry contract observation", async ({ page }) => {
         captureProbeErrors.push("No observation supplied for " + id);
         continue;
       }
+      observingCheckId = id;
       try {
         // expect is handed to the check because reaching for it is the natural
         // way to write a Playwright assertion. A checks module that used it
@@ -2870,7 +2889,22 @@ test("foundry contract observation", async ({ page }) => {
   } finally {
     console.log(
       "FOUNDRY_BROWSER_RESULT:" +
-        JSON.stringify({ captureProbeErrors, checks, diagnostics, consoleErrors, pageErrors }),
+        JSON.stringify({
+          captureProbeErrors: [
+            ...captureProbeErrors,
+            ...failedRequests
+              .filter((entry) => checks[entry.check] === false)
+              .map(
+                (entry) =>
+                  "While computing " + entry.check + ", " + entry.method + " " +
+                  entry.url + " answered " + entry.status + ".",
+              ),
+          ],
+          checks,
+          diagnostics,
+          consoleErrors,
+          pageErrors,
+        }),
     );
   }
 });

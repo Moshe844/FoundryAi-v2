@@ -581,3 +581,43 @@ test("a broken gateway is named as the cause of the checks behind it", async () 
   assert.match(message, /Failed named sub-checks/u);
   assert.match(message, /every workflow behind it runs only once that succeeds/u);
 });
+
+test("a failing workflow reports the request that failed under it", async () => {
+  // obligation-004 reported {"added": false} to three consecutive repairs and
+  // told none of them whether the form never submitted, the route answered
+  // 500, or the row rendered somewhere the locator did not look. One boolean
+  // is not a diagnosis. The request the workflow made is, and the harness was
+  // watching console and page errors while ignoring the network entirely.
+  const harness = foundryObservationHarness(["obligation-004"]);
+
+  assert.match(harness, /page\.on\("response"/u);
+  assert.match(harness, /if \(status < 400 \|\| failedRequests\.length >= 25\) return;/u);
+
+  // Each failure is tagged with the check that was running when it arrived, so
+  // a 500 during user creation is not attributed to an unrelated check.
+  assert.match(harness, /observingCheckId = id;/u);
+  assert.match(harness, /check: observingCheckId/u);
+
+  // Reported only for checks that actually failed: a deliberate validation
+  // response under a passing check is not noise the repair has to dismiss.
+  assert.match(harness, /\.filter\(\(entry\) => checks\[entry\.check\] === false\)/u);
+  assert.match(harness, /"While computing " \+ entry\.check \+ ", " \+ entry\.method/u);
+  assert.match(harness, /answered " \+ entry\.status/u);
+
+  // The harness must still be valid source and still satisfy its own gates.
+  const { unbalancedJavaScriptDelimiter } = await import(
+    "../src/work-plane/production-mission-service.js"
+  );
+  assert.equal(unbalancedJavaScriptDelimiter(harness), null);
+  const checksModule = `
+    export const obligationChecks = {
+      'obligation-004': async ({ page }) => ({
+        passed: (await page.locator('tr').count()) >= 1,
+        diagnostics: { added: true },
+      }),
+    };
+  `;
+  assert.doesNotThrow(() =>
+    validateBrowserObservationTestSource([harness, checksModule].join("\n"), ["obligation-004"], {}),
+  );
+});
