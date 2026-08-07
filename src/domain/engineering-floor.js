@@ -191,6 +191,30 @@ const SOURCE_RULES = Object.freeze([
       "A form that announces success must make the result outlive the click. This product shows a completion state but never sends or stores anything, so nothing was created. Send the submitted values to a route handler or server action that writes them, and drive the success state from that response — do not flip a local state variable and call it done.",
   },
   {
+    id: "submitted-fields-reach-the-handler",
+    // A delivered signup rejected valid input on every attempt. Its handler
+    // read new FormData(event.currentTarget).get("email"), and its inputs
+    // carried id="email" but no name -- FormData keys off name, so the value
+    // was always null, validation always failed, and the request was never
+    // sent. Nothing about the page looked wrong; the errors it showed were the
+    // ones it was designed to show.
+    signals: [EngineeringSignal.USER_INPUT],
+    perFile: true,
+    violated: (file) => {
+      if (!/new\s+FormData\s*\(/u.test(file)) return false;
+      const missing = formDataKeys(file).filter(
+        (key) =>
+          !new RegExp(
+            `name\\s*=\\s*["'\`]${key.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}["'\`]`,
+            "u",
+          ).test(file),
+      );
+      return missing.length > 0;
+    },
+    message:
+      "Every field read out of FormData must carry a matching name attribute. FormData is keyed by name, not id, so a control with only an id yields null and the handler validates an empty value — rejecting input the person actually typed, or sending nothing at all. Add name=\"…\" to each control the handler reads, matching the key exactly.",
+  },
+  {
     id: "validation-errors-clear-as-you-type",
     // Errors were set only in the submit handler and never anywhere else, so
     // after one empty submit the messages stayed painted over fields the user
@@ -311,6 +335,18 @@ const COMPLETION_ANNOUNCEMENTS = Object.freeze([
   /['"`](?:success|succeeded|submitted|confirmed|completed?|created|registered|done|sent|thanks|thank-?you)['"`]/iu,
   /\bset(?:Is)?(?:Submitted|Success\w*|Confirmed|Registered|Created|Completed?|Done|Sent|Saved)\s*\(\s*true\b/iu,
 ]);
+
+// The literal keys a file pulls out of a FormData. Only meaningful once the
+// caller has established that the file builds one, since .get is also Map's.
+function formDataKeys(source) {
+  return [
+    ...new Set(
+      [...source.matchAll(/\.get\s*\(\s*["'`]([^"'`]+)["'`]\s*\)/gu)].map(
+        (match) => match[1],
+      ),
+    ),
+  ];
+}
 
 function persistsAnything(source) {
   return PERSISTENCE_PRIMITIVES.some((pattern) => pattern.test(source));

@@ -147,12 +147,22 @@ function cdpProcess({ executablePath, timeoutMs }) {
         child.once("close", () => { clearTimeout(timer); resolve(); });
       }
     });
-    rmSync(profile, {
-      recursive: true,
-      force: true,
-      maxRetries: 10,
-      retryDelay: 100,
-    });
+    // Cleanup, and cleanup only: the verification result is already computed by
+    // the time this runs. Windows keeps a handle on Chrome's profile directory
+    // for a moment after the process is gone, and letting that EPERM propagate
+    // failed a concept whose evidence had been captured successfully. Retry for
+    // longer, then leave the directory to the operating system's own temp
+    // sweep rather than lose the result over it.
+    try {
+      rmSync(profile, {
+        recursive: true,
+        force: true,
+        maxRetries: 40,
+        retryDelay: 150,
+      });
+    } catch {
+      // Intentionally ignored; a stale temp profile costs nothing.
+    }
   }
 
   return { send, waitFor, listeners, close };

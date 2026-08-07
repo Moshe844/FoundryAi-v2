@@ -365,3 +365,49 @@ export default function Catalogue() {
     ),
   );
 });
+
+test("a field FormData cannot read is a floor violation", () => {
+  // A delivered signup rejected valid input every time: the handler read
+  // FormData.get("email") while the input carried only id="email". FormData is
+  // keyed by name, so the value was always null and the request never left.
+  const unnamed = `'use client';
+export default function Access() {
+  const submit = async (event) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const email = String(form.get('email') || '');
+    if (!/^\S+@\S+$/.test(email)) return;
+    await fetch('/api/auth', { method: 'POST' });
+  };
+  return <form onSubmit={submit}><input id="email" type="email" onChange={() => {}} /></form>;
+}`;
+  assert.throws(
+    () =>
+      validateEngineeringFloor(
+        [{ path: "app/page.tsx", content: unnamed }],
+        new Set([EngineeringSignal.USER_INPUT]),
+      ),
+    /submitted-fields-reach-the-handler/u,
+  );
+
+  const named = unnamed.replace('<input id="email"', '<input name="email" id="email"');
+  assert.doesNotThrow(() =>
+    validateEngineeringFloor(
+      [{ path: "app/page.tsx", content: named }],
+      new Set([EngineeringSignal.USER_INPUT]),
+    ),
+  );
+});
+
+test("a .get call that is not a FormData read is left alone", () => {
+  // Map and URLSearchParams both have .get; only a file that builds a FormData
+  // is judged by this rule.
+  const usesAMap = `const cache = new Map(); const value = cache.get('email');
+export default function Page(){ return <input id="email" />; }`;
+  assert.doesNotThrow(() =>
+    validateEngineeringFloor(
+      [{ path: "app/page.tsx", content: usesAMap }],
+      new Set([EngineeringSignal.USER_INPUT]),
+    ),
+  );
+});
