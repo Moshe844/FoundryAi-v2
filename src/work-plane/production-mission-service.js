@@ -4724,6 +4724,13 @@ export function createProductionMissionService({
       let nonFidelityFailureOutstanding = true;
       // Which checks held last round, so a regression can be named as one.
       let previouslyPassingCheckIds = new Set();
+      // What the last correction was applied over, and whether it was a design
+      // repair. A design repair that breaks a working workflow is not a partial
+      // success to be reported and carried forward — it is worse than the state
+      // before it, and that state is still on disk.
+      let repairedOverCheckpointId = null;
+      let lastRepairWasDesignFidelity = false;
+      let designRegressionToUndo = null;
       const browserTargets = Object.entries(bindings)
         .filter(
           ([, binding]) =>
@@ -4945,6 +4952,16 @@ export function createProductionMissionService({
               observationFailures.unshift(
                 `The correction applied since the last observation broke ${nowFalse.length} check(s) that were passing: ${nowFalse.join(", ")}. Restore them while keeping the change that fixed the previous failure; do not treat these as pre-existing defects.`,
               );
+              // A design correction that breaks a working workflow is not
+              // progress to carry forward. Telling the next repair about it
+              // only spends another round re-earning what already worked, and
+              // one build lost sign-in to a markup reorder after every check
+              // had passed. Behaviour is what was promised; the closer design
+              // is not worth it, and the state without it is still on disk.
+              designRegressionToUndo =
+                lastRepairWasDesignFidelity && repairedOverCheckpointId !== null
+                  ? { checkpointId: repairedOverCheckpointId, checkIds: nowFalse }
+                  : null;
             }
             previouslyPassingCheckIds = new Set(
               requiredBrowserChecks.filter(
@@ -4965,6 +4982,40 @@ export function createProductionMissionService({
             observationFailures.length === 0
               ? undefined
               : observationFailures.join("\n");
+        }
+        // Undo a design correction that cost a working workflow, before
+        // anything else reasons about this observation. The project returns to
+        // the state whose behaviour was proven, and the loop continues from
+        // there: another design attempt may still be bought within budget, and
+        // if none succeeds the build is delivered with its shortfall recorded
+        // rather than with a broken sign-in.
+        if (designRegressionToUndo !== null) {
+          const undone = designRegressionToUndo;
+          designRegressionToUndo = null;
+          await runtime.stop({
+            missionId,
+            sessionId: session.sessionId,
+            observationId: `${browser.workUnitId}-design-regression-stop`,
+            evidenceId: `${browser.workUnitId}-design-regression-stop-evidence`,
+            causationId: `${browser.workUnitId}-design-regression-stop-command`,
+            idempotencyKey: `${browser.workUnitId}-design-regression-stop-key`,
+          });
+          await restoreBrowserCheckpoint({
+            checkpointId: undone.checkpointId,
+            evidenceId: `${browser.workUnitId}-design-regression-evidence`,
+            eventId: `${browser.workUnitId}-design-regression-rollback`,
+            causationId: `${browser.workUnitId}-design-regression-command`,
+          });
+          repairedOverCheckpointId = null;
+          lastRepairWasDesignFidelity = false;
+          previouslyPassingCheckIds = new Set();
+          priorRepairBreakage = [
+            `A design-fidelity correction was reverted: it broke ${undone.checkIds.length} working check(s) — ${undone.checkIds.join(", ")} — and a closer design is not worth a workflow that no longer runs.`,
+            "The project is back at the state whose behaviour was proven. Correct the approved design only in ways that leave every workflow intact: change styles, tokens and spacing in the stylesheet, and where markup must move, keep the roles, labels and ordering those checks locate.",
+          ].join(" ");
+          lastObservationFailure = priorRepairBreakage;
+          session = await startRuntime();
+          continue;
         }
         lastObservationFailure = browserFailure;
         if (browserFailure === undefined) priorRepairBreakage = undefined;
@@ -5469,6 +5520,12 @@ export function createProductionMissionService({
         const repairScope = deepestRepairScope(
           acceptedRepair.files.map((file) => repairScopeForPath(file.path)),
         );
+        // Remember what this correction was applied over, so a regression it
+        // causes can be undone rather than merely reported. The workspace was
+        // restored to this checkpoint immediately before the repair, so it is
+        // the state without it.
+        repairedOverCheckpointId = browser.preWorkCheckpointId;
+        lastRepairWasDesignFidelity = repairPolicy.designFidelity;
         for (const file of acceptedRepair.files) {
           const changed = await work(
             WorkUnitAction.REPLACE_FILE,

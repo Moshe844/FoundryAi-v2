@@ -460,3 +460,64 @@ test("a repair that cannot write a patch is asked for whole files instead", asyn
   );
   assert.match(source, /await requestBrowserRepair\(\s*\n?\s*semanticRejection,\s*\n?\s*wholeFileFallback,/u);
 });
+
+test("a design correction that breaks a working workflow is reverted", async () => {
+  // An admin dashboard passed every browser check, reached design fidelity,
+  // and the fidelity repair reordered markup that sign-in depended on. The
+  // next round reported sign-in false again. Telling the following repair
+  // about it only spends another round re-earning what already worked, and
+  // the state without the correction is still on disk.
+  const source = await readFile(
+    new URL("../src/work-plane/production-mission-service.js", import.meta.url),
+    "utf8",
+  );
+
+  // The checkpoint a correction was applied over is remembered, along with
+  // whether it was a design repair.
+  assert.match(source, /repairedOverCheckpointId = browser\.preWorkCheckpointId;/u);
+  assert.match(source, /lastRepairWasDesignFidelity = repairPolicy\.designFidelity;/u);
+
+  // A regression is only undone when a design repair caused it — a browser
+  // repair chasing a real defect may legitimately disturb other checks while
+  // converging, and the stall detector bounds that.
+  assert.match(
+    source,
+    /designRegressionToUndo =\s*\n\s*lastRepairWasDesignFidelity && repairedOverCheckpointId !== null/u,
+  );
+
+  // The undo runs before anything reasons about the observation, stops the
+  // runtime first, and restarts it against the restored project.
+  const undo = source.slice(
+    source.indexOf("if (designRegressionToUndo !== null) {"),
+    source.indexOf("lastObservationFailure = browserFailure;"),
+  );
+  assert.match(undo, /runtime\.stop\(\{/u);
+  assert.match(undo, /restoreBrowserCheckpoint\(\{\s*\n\s*checkpointId: undone\.checkpointId/u);
+  assert.match(undo, /session = await startRuntime\(\);/u);
+  assert.match(undo, /continue;/u);
+
+  // The next attempt is told what was reverted and why, so it does not simply
+  // repeat the change.
+  assert.match(undo, /A design-fidelity correction was reverted/u);
+  assert.match(undo, /a closer design is not worth a workflow that no longer runs/u);
+  assert.match(undo, /keep the roles, labels and ordering those checks locate/u);
+
+  // Behaviour is proven again after the revert, so a build that cannot improve
+  // its design without breaking a workflow still ships, with the shortfall
+  // recorded — it does not fail.
+  const { ObservationAction, browserObservationDecision } = await import(
+    "../src/domain/browser-observation-policy.js"
+  );
+  assert.equal(
+    browserObservationDecision({
+      attempt: 4,
+      maxAttempts: 6,
+      outstandingChecks: 0,
+      outstandingFidelityAspects: 3,
+      previousOutstanding: 3,
+      stalledRounds: 1,
+      behaviourProven: true,
+    }).action,
+    ObservationAction.DELIVER_WITH_SHORTFALL,
+  );
+});
