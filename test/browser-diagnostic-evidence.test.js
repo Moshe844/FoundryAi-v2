@@ -203,7 +203,7 @@ test("Foundry's observation harness satisfies every scaffolding gate itself", ()
   assert.match(harness, /keyboard\.press\("Tab"\)/u);
   assert.match(harness, /activeElement/u);
   // Per-check isolation: one failing check cannot leave another unobserved.
-  assert.match(harness, /try \{[\s\S]*await check\(/u);
+  assert.match(harness, /try \{[\s\S]*check\(\{ page, expect/u);
   assert.match(harness, /catch \(error: unknown\)[\s\S]*checks\[id\] = false/u);
 });
 
@@ -448,7 +448,7 @@ test("a Playwright test cannot break the production build", async () => {
   const harness = foundryObservationHarness(["obligation-001"]);
   assert.match(
     harness,
-    /await check\(\{ page, expect, responsiveEvidence, accessibilityEvidence \}\)/u,
+    /check\(\{ page, expect, responsiveEvidence, accessibilityEvidence \}\)/u,
   );
   assert.match(source, /Take expect from the supplied context rather than importing it/u);
 });
@@ -620,4 +620,42 @@ test("a failing workflow reports the request that failed under it", async () => 
   assert.doesNotThrow(() =>
     validateBrowserObservationTestSource([harness, checksModule].join("\n"), ["obligation-004"], {}),
   );
+});
+
+test("no check can inherit the browser state another check left behind", async () => {
+  // A build that finally implemented real signup was marked EXHAUSTED with nine
+  // failing checks. The product worked: the signup check created its account and
+  // left the page on the signed-in view, which has no tablist, so the next check
+  // waited the entire test budget for a "Sign in" tab and every check after it
+  // reported that the browser had closed. One cause, nine reported failures.
+  const harness = foundryObservationHarness(["obligation-001", "obligation-002"]);
+  assert.match(
+    harness,
+    /const resetBrowserState = async \(\) => \{/u,
+    "the harness must define a state reset",
+  );
+  assert.match(harness, /await page\.context\(\)\.clearCookies\(\)/u);
+  assert.match(harness, /localStorage\.clear\(\)/u);
+  // The reset has to run inside the loop, before the check -- defining it and
+  // never calling it is exactly the bug this replaces.
+  const loop = harness.slice(harness.indexOf("for (const id of requiredCheckIds)"));
+  assert.match(
+    loop,
+    /await resetBrowserState\(\);[\s\S]{0,400}?check\(\{ page, expect/u,
+    "each check must be preceded by the reset",
+  );
+});
+
+test("one stuck check cannot spend the whole run's time", async () => {
+  const harness = foundryObservationHarness(["obligation-001"]);
+  assert.match(harness, /const CHECK_BUDGET_MS = 20_000;/u);
+  const loop = harness.slice(harness.indexOf("for (const id of requiredCheckIds)"));
+  assert.match(
+    loop,
+    /withBudget\(\(\) => check\(/u,
+    "the per-check budget must wrap the check call",
+  );
+  // The budget helper must be typed: the observation spec is TypeScript, and an
+  // implicit any parameter here is a type error in the generated project.
+  assert.match(harness, /const withBudget = async <T>\(work: \(\) => Promise<T>\): Promise<T>/u);
 });

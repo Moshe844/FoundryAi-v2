@@ -1628,7 +1628,14 @@ export function ensureCertifiedStackScaffold(
       "",
       "export default defineConfig({",
       '  testDir: "./tests",',
-      "  timeout: 30_000,",
+      // 30s covered the whole observation spec, which runs every browser check
+      // in one test. Once the checks became real workflows -- create an
+      // account, sign in, reload and confirm the session held -- twelve of them
+      // shared about two and a half seconds each, and the run was cut off
+      // mid-way with the remaining checks reporting that the browser had
+      // closed. The per-check budget inside the harness is the real bound on a
+      // stuck check; this only has to be roomy enough not to be it.
+      "  timeout: 600_000,",
       "  use: {",
       "    baseURL: process.env.FOUNDRY_PREVIEW_URL,",
       '    channel: "chrome",',
@@ -2785,6 +2792,10 @@ test("foundry contract observation", async ({ page }) => {
   const consoleErrors: string[] = [];
   const pageErrors: string[] = [];
   const requiredCheckIds = [${idList}];
+  // Per-check ceiling. A workflow check signs in, submits, and waits on a
+  // result, so it needs real time; what it must never do is spend the rest of
+  // the run waiting for something that is not going to appear.
+  const CHECK_BUDGET_MS = 20_000;
   const checks: Record<string, boolean> = {};
   const diagnostics: Record<string, Record<string, boolean | number | string | null>> = {};
   for (const id of requiredCheckIds) checks[id] = false;
@@ -2889,6 +2900,47 @@ test("foundry contract observation", async ({ page }) => {
 
     // Each check runs in isolation: one failure can never leave another
     // unobserved, and every check records diagnostics whether it passes or not.
+    //
+    // Isolation used to mean only that a throw was caught. It did not mean the
+    // browser forgot anything, and a build that finally implemented real signup
+    // exposed the difference: the signup check created its account and left the
+    // page on the signed-in view, which has no tablist, so the very next check
+    // waited the whole test budget for a "Sign in" tab that could never appear
+    // and every check after it reported "browser has been closed". Nine
+    // failures, one cause, and a working product marked EXHAUSTED. State is
+    // reset here, before each check, so no check can inherit another's session.
+    const resetBrowserState = async () => {
+      await page.context().clearCookies();
+      await page.goto("/", { waitUntil: "domcontentloaded" });
+      await page.evaluate(() => {
+        try {
+          localStorage.clear();
+          sessionStorage.clear();
+        } catch {
+          // Storage can be unavailable; the cookie clear above is what matters.
+        }
+      });
+      await page.goto("/", { waitUntil: "domcontentloaded" });
+    };
+    // One stuck locator must cost one check, not the run. Playwright's own
+    // timeout applies to the whole test, so without a per-check bound the first
+    // check that waits on something absent spends every remaining check's time.
+    const withBudget = async <T>(work: () => Promise<T>): Promise<T> => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        return await Promise.race([
+          work(),
+          new Promise<T>((_resolve, reject) => {
+            timer = setTimeout(
+              () => reject(new Error("Check exceeded its own observation budget of " + CHECK_BUDGET_MS + "ms.")),
+              CHECK_BUDGET_MS,
+            );
+          }),
+        ]);
+      } finally {
+        clearTimeout(timer);
+      }
+    };
     for (const id of requiredCheckIds) {
       const check = obligationChecks[id];
       if (typeof check !== "function") {
@@ -2898,10 +2950,11 @@ test("foundry contract observation", async ({ page }) => {
       }
       observingCheckId = id;
       try {
+        await resetBrowserState();
         // expect is handed to the check because reaching for it is the natural
         // way to write a Playwright assertion. A checks module that used it
         // without importing it once failed the production build itself.
-        const outcome = await check({ page, expect, responsiveEvidence, accessibilityEvidence });
+        const outcome = await withBudget(() => check({ page, expect, responsiveEvidence, accessibilityEvidence }));
         const passed = outcome === true || (outcome !== null && typeof outcome === "object" && outcome.passed === true);
         const detail =
           outcome !== null && typeof outcome === "object" && outcome.diagnostics !== undefined
@@ -3245,6 +3298,11 @@ export function approvedDesignPromptSegments(approvedContract) {
     // are the whole cost of a generation call.
     "Foundry supplies its own Playwright spec that captures screenshots and computed-style evidence at phone, tablet, and desktop widths and proves no horizontal overflow and observable keyboard focus. Do not write that evidence capture again.",
     "Your Playwright test must cover only the supplied browser-check obligations and emit the FOUNDRY_BROWSER_RESULT line. Set whatever viewport a specific check needs in order to compute its own verdict, but do not add screenshot capture, font/color/computed-style surveys, or general responsive evidence beyond what a listed check requires. Keep it as small as the checks allow.",
+    // A signup check submitted the form, read isVisible() immediately, and
+    // reported false while the account it had just created sat in the database.
+    // The action had happened; the assertion simply did not wait for it.
+    "After an action that reaches the server — submitting a form, signing in, saving — assert with a locator that waits, such as await expect(locator).toBeVisible() or await locator.waitFor(). isVisible() and textContent() read the DOM at that instant and will report the state from before the request resolved. Return the verdict from the waited assertion, not from an immediate read.",
+    "Foundry clears cookies and storage and reloads the page before each check, so write every check as if it starts signed out on a fresh load. Do not rely on state a previous check established, and do not repeat the reset yourself.",
     "The customer approved a specific visual design. Reproduce that approved design in the generated source; do not substitute your own art direction, palette, type scale, or layout.",
     "Implement the approved color tokens, typography system, and spacing scale as real CSS applied to real elements. Declaring unused custom properties is not implementing the design.",
     "Follow the approved surface sequence, navigation model, and composition rules so the produced pages match the approved prototype's structure and visual order.",
