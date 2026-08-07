@@ -121,7 +121,33 @@ export function productionRepairBudgets({ approvedPrototype = false } = {}) {
 // Reporting that as "the check failed" sent repairs chasing application
 // defects that did not exist, once for every check downstream of a single
 // early break.
-export function browserCheckObservationFailure(failedCheckIds, diagnostics = {}) {
+// A check that can only run once someone is signed in is not independent
+// evidence when signing in is itself broken. One build reported nine false
+// checks — sign-in, the gated route, the created-user list, the layout behind
+// it — and spent three identical rounds trying to correct nine defects when
+// there was one. Naming the gateway lets the repair fix the cause.
+const GATEWAY_STATEMENT =
+  /\b(?:signs? in|sign-in|signin|log(?:s|ged)? in|log-in|login|authenticat\w*|create an account|sign(?:s|ing)? up|sign-up)\b/iu;
+
+export function blockedByGatewayFailure(failedCheckIds, obligations = []) {
+  const statementOf = new Map(
+    obligations.map((obligation) => [
+      obligation.obligationId,
+      String(obligation.statement ?? ""),
+    ]),
+  );
+  const gateways = failedCheckIds.filter((checkId) =>
+    GATEWAY_STATEMENT.test(statementOf.get(checkId) ?? ""),
+  );
+  if (gateways.length === 0 || failedCheckIds.length <= gateways.length) return null;
+  const downstream = failedCheckIds.filter((checkId) => !gateways.includes(checkId));
+  return [
+    `${gateways.join(" and ")} ${gateways.length === 1 ? "is" : "are"} false, and every workflow behind ${gateways.length === 1 ? "it" : "them"} runs only once that succeeds.`,
+    `Fix ${gateways.length === 1 ? "that first" : "those first"}. The other ${downstream.length} failing check(s) — ${downstream.join(", ")} — are probably not independent defects, and correcting them one by one while the gateway is broken changes nothing observable.`,
+  ].join(" ");
+}
+
+export function browserCheckObservationFailure(failedCheckIds, diagnostics = {}, obligations = []) {
   const uncomputed = failedCheckIds.filter(
     (checkId) => Object.keys(diagnostics?.[checkId] ?? {}).length === 0,
   );
@@ -148,11 +174,13 @@ export function browserCheckObservationFailure(failedCheckIds, diagnostics = {})
                 `These checks were never computed because the test stopped early, so their false values are not observations: ${uncomputed.join(", ")}. Fix the run first; do not change application source on their account.`,
               ]),
         ];
+  const gateway = blockedByGatewayFailure(observed, obligations);
   return [
     ...lines,
     ...(Object.keys(failedSubchecks).length === 0
       ? []
       : [`Failed named sub-checks: ${JSON.stringify(failedSubchecks)}.`]),
+    ...(gateway === null ? [] : [gateway]),
   ].join("\n");
 }
 
@@ -4783,6 +4811,7 @@ export function createProductionMissionService({
                 browserCheckObservationFailure(
                   failedChecks,
                   browserResult.diagnostics ?? {},
+                  contract.obligations,
                 ),
               );
             } else if (blockingErrors.length > 0) {

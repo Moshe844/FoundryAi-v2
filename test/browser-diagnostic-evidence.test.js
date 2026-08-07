@@ -528,3 +528,56 @@ test("Foundry's own specs are never offered as repair targets", async () => {
   );
   assert.match(source, /!foundryOwnedTestPath\(file\.path\),/u);
 });
+
+test("a broken gateway is named as the cause of the checks behind it", async () => {
+  // The real failure: an admin dashboard reported nine false checks — sign-in,
+  // the gated route, the created-user list, the layout behind it — and spent
+  // three identical rounds trying to correct nine defects. There was one. The
+  // contract declares no dependencies between obligations, so nothing told the
+  // repair that a workflow requiring a signed-in session cannot pass while
+  // signing in is broken.
+  const { blockedByGatewayFailure, browserCheckObservationFailure } =
+    await import("../src/work-plane/production-mission-service.js");
+
+  const obligations = [
+    { obligationId: "obligation-002", statement: "A registered user can sign in with valid details and reach the dashboard." },
+    { obligationId: "obligation-003", statement: "An unauthenticated visitor cannot access the dashboard workspace." },
+    { obligationId: "obligation-005", statement: "Submitting a valid new user displays the created user in the list." },
+    { obligationId: "obligation-007", statement: "The dashboard preserves its approved accessibility behaviour." },
+  ];
+
+  const named = blockedByGatewayFailure(
+    ["obligation-002", "obligation-003", "obligation-005", "obligation-007"],
+    obligations,
+  );
+  assert.match(named, /obligation-002 is false/u);
+  assert.match(named, /Fix that first/u);
+  assert.match(named, /obligation-003, obligation-005, obligation-007/u);
+  assert.match(named, /changes nothing observable/u);
+
+  // No gateway among the failures means no such claim is made.
+  assert.equal(
+    blockedByGatewayFailure(["obligation-005", "obligation-007"], obligations),
+    null,
+  );
+  // A gateway failing alone is not "blocking" anything else.
+  assert.equal(blockedByGatewayFailure(["obligation-002"], obligations), null);
+  // And a project with no sign-in at all is unaffected.
+  assert.equal(
+    blockedByGatewayFailure(["a", "b"], [
+      { obligationId: "a", statement: "Staff can add a stock item." },
+      { obligationId: "b", statement: "The dashboard lists low stock." },
+    ]),
+    null,
+  );
+
+  // The whole observation failure carries it, after the sub-check detail.
+  const message = browserCheckObservationFailure(
+    ["obligation-002", "obligation-005"],
+    { "obligation-002": { signin: false }, "obligation-005": { listed: false } },
+    obligations,
+  );
+  assert.match(message, /real browser checks were false/u);
+  assert.match(message, /Failed named sub-checks/u);
+  assert.match(message, /every workflow behind it runs only once that succeeds/u);
+});
