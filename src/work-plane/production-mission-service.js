@@ -19,6 +19,7 @@ import {
   isTerminalMissionState,
 } from "../domain/lifecycle.js";
 import { ObservationKind } from "../domain/observation-evidence.js";
+import { collusiveCheckIssues } from "../domain/observation-independence.js";
 import {
   ObservationAction,
   browserObservationDecision,
@@ -2066,6 +2067,15 @@ export function validateBrowserObservationTestSource(
       );
     }
   }
+  // Last, because it is the subtlest: a check may pass and still be worthless
+  // if its expected value was copied from the implementation rather than
+  // derived from the page. A dashboard shipped "Open tickets" counting
+  // everything not closed, and its check asserted the widget read "2" after
+  // filtering to Pending -- true only because the code was wrong the same way.
+  const colluding = collusiveCheckIssues(source);
+  if (colluding.length > 0) {
+    throw new TypeError(colluding[0]);
+  }
 }
 
 export function generatedFileReconciliationAction(file, workUnits) {
@@ -3324,6 +3334,9 @@ export function approvedDesignPromptSegments(approvedContract) {
     // A signup check submitted the form, read isVisible() immediately, and
     // reported false while the account it had just created sat in the database.
     // The action had happened; the assertion simply did not wait for it.
+    // The gate below rejects this shape, so the instruction has to be here too:
+    // enforcing a rule the generator has not been told is a trap, not a gate.
+    "Derive every expected value from the page, never from what you believe the code computes. To check a displayed count, total or summary, count the elements that genuinely satisfy the condition and compare the display to that count -- do not assert it equals a number you worked out yourself. A dashboard whose \"open\" count wrongly included pending tickets passed its own check because the check asserted the literal the buggy code happened to produce; had it counted the rows actually marked open, it would have failed. A literal is only acceptable when your own test typed it in.",
     "After an action that reaches the server — submitting a form, signing in, saving — assert with a locator that waits, such as await expect(locator).toBeVisible() or await locator.waitFor(). isVisible() and textContent() read the DOM at that instant and will report the state from before the request resolved. Return the verdict from the waited assertion, not from an immediate read.",
     "Foundry clears cookies and storage and reloads the page before each check, so write every check as if it starts signed out on a fresh load. Do not rely on state a previous check established, and do not repeat the reset yourself.",
     "The customer approved a specific visual design. Reproduce that approved design in the generated source; do not substitute your own art direction, palette, type scale, or layout.",
