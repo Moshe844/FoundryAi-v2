@@ -1,0 +1,485 @@
+{
+ "missionId": "mission-1786283968821-1d2a523a",
+ "profileVersion": 2,
+ "name": "Support Ticket Dashboard",
+ "summary": "Support staff can quickly find tickets, understand priority, and see the current open-ticket workload.",
+ "family": "web-application",
+ "platform": "web",
+ "primaryActors": [
+  "Support agents",
+  "Support team leads"
+ ],
+ "primaryJourneys": [
+  "Open the dashboard and see the open-ticket workload.",
+  "Filter tickets by status or priority.",
+  "Search for tickets by customer name."
+ ],
+ "outcomes": [
+  "The dashboard displays tickets in a table with customer name, status, and priority visible.",
+  "Changing the status filter updates the table to show only matching tickets.",
+  "Changing the priority filter updates the table to show only matching tickets.",
+  "Entering a customer name search updates the table to matching tickets.",
+  "The dashboard shows a count equal to the currently open tickets.",
+  "The dashboard builds successfully for deployment."
+ ],
+ "capabilities": [
+  "browser-verification",
+  "development-runtime",
+  "production-build",
+  "typescript",
+  "web-application"
+ ],
+ "dataConcepts": [
+  "Ticket with customer name, status, and priority",
+  "Open-ticket count"
+ ],
+ "observations": [
+  "The request centers on rapid queue inspection rather than ticket management.",
+  "Status, priority, and customer search are the primary retrieval dimensions."
+ ],
+ "designDirection": {
+  "recommendedStyle": "Professional, direct, and dependable.",
+  "reason": "The requested behaviors are all fastest to use in one operational table.",
+  "layoutApproach": "Wide table with a compact summary row and controls above it.",
+  "tone": "Clear, restrained, and operational.",
+  "mobilePriority": "Collapse ticket columns into stacked rows while keeping filters prominent.",
+  "accessibilityConsiderations": [
+   "Use labeled controls and visible focus states.",
+   "Do not rely on color alone for status or priority."
+  ]
+ },
+ "designAlternatives": [
+  {
+   "approach": "Queue Control",
+   "rationale": "The requested behaviors are all fastest to use in one operational table.",
+   "recommended": true,
+   "whyItFits": "The requested behaviors are all fastest to use in one operational table.",
+   "layoutApproach": "Wide table with a compact summary row and controls above it.",
+   "visualPersonality": "Professional, direct, and dependable.",
+   "informationDensity": "Balanced and scannable.",
+   "navigationApproach": "Single-screen workspace",
+   "mobileBehavior": "Collapse ticket columns into stacked rows while keeping filters prominent.",
+   "tradeoff": "Optimizes daily triage over visual storytelling.",
+   "confidence": {
+    "score": 0.75,
+    "rationale": "The requested behaviors are all fastest to use in one operational table."
+   },
+   "preview": {
+    "typographyCharacter": "grotesque neutral, measured scale",
+    "spacingDensity": "steady beat",
+    "colorMood": "Professional, direct, and dependable.",
+    "hierarchy": "Summary count → Controls → Ticket table"
+   },
+   "visualSystem": {
+    "layoutType": "dashboard",
+    "navigationType": "inline",
+    "typographyCategory": "humanist",
+    "density": "balanced",
+    "spacingProfile": "rhythmic",
+    "surfaceTreatment": "bordered",
+    "contentEmphasis": "data",
+    "imageStrategy": "none",
+    "interactionModel": "direct",
+    "buttonTreatment": "compact",
+    "colorRoles": {
+     "accent": "#2563eb",
+     "background": "#f8fafc",
+     "primary": "#0f172a",
+     "surface": "#ffffff",
+     "text": "#334155"
+    },
+    "sampleLabels": [
+     "Open tickets",
+     "All statuses",
+     "All priorities",
+     "Search customer"
+    ]
+   },
+   "creativeDNA": {
+    "thesis": "A focused support queue that makes the next ticket obvious.",
+    "emotionalGoal": "Calm operational clarity.",
+    "audienceResponse": "Feel oriented immediately and resolve lookup tasks quickly.",
+    "primaryAction": "Filter and search tickets",
+    "compositionPrimitive": "table-operations",
+    "typeScale": "measured",
+    "typeVoice": "grotesque-neutral",
+    "imageryTreatment": "none",
+    "motionStrategy": "restrained",
+    "spacingRhythm": "steady-beat",
+    "surfaceDepth": "hairline-ruled",
+    "responsiveTransform": "prioritise-primary-task",
+    "surfaceSequence": [
+     "Summary count",
+     "Controls",
+     "Ticket table"
+    ],
+    "exclusions": [
+     "Decorative imagery",
+     "Dense secondary analytics"
+    ],
+    "surfaceLabels": [
+     "Tickets",
+     "Open tickets",
+     "Status",
+     "Priority",
+     "Customer"
+    ]
+   }
+  },
+  {
+   "approach": "Workload Lens",
+   "rationale": "The open-ticket count becomes a clear workload signal without losing the requested table.",
+   "recommended": false,
+   "whyItFits": "The open-ticket count becomes a clear workload signal without losing the requested table.",
+   "layoutApproach": "Large open-ticket metric beside a narrower filter-and-table workspace.",
+   "visualPersonality": "Calm, spacious, and supervisory.",
+   "informationDensity": "Moderate with stronger hierarchy.",
+   "navigationApproach": "Inline workspace",
+   "mobileBehavior": "Move the metric above the filters and table.",
+   "tradeoff": "Creates stronger hierarchy but uses more space than a compact queue.",
+   "confidence": {
+    "score": 0.75,
+    "rationale": "The open-ticket count becomes a clear workload signal without losing the requested table."
+   },
+   "preview": {
+    "typographyCharacter": "humanist warm, editorial scale",
+    "spacingDensity": "wide breath",
+    "colorMood": "Calm, spacious, and supervisory.",
+    "hierarchy": "Open-ticket hero metric → Filter rail → Queue table"
+   },
+   "visualSystem": {
+    "layoutType": "split-screen",
+    "navigationType": "inline",
+    "typographyCategory": "humanist",
+    "density": "spacious",
+    "spacingProfile": "open",
+    "surfaceTreatment": "elevated",
+    "contentEmphasis": "status",
+    "imageStrategy": "none",
+    "interactionModel": "direct",
+    "buttonTreatment": "solid",
+    "colorRoles": {
+     "accent": "#d97706",
+     "background": "#f7f5f0",
+     "primary": "#1c1917",
+     "surface": "#ffffff",
+     "text": "#57534e"
+    },
+    "sampleLabels": [
+     "Open now",
+     "Status",
+     "Priority",
+     "Customer search"
+    ]
+   },
+   "creativeDNA": {
+    "thesis": "Put workload pressure beside the queue it explains.",
+    "emotionalGoal": "Measured situational awareness.",
+    "audienceResponse": "Feel confident that workload patterns are visible at a glance.",
+    "primaryAction": "Inspect filtered queue",
+    "compositionPrimitive": "asymmetric-split",
+    "typeScale": "editorial",
+    "typeVoice": "humanist-warm",
+    "imageryTreatment": "none",
+    "motionStrategy": "static",
+    "spacingRhythm": "wide-breath",
+    "surfaceDepth": "soft-elevation",
+    "responsiveTransform": "collapse-to-stack",
+    "surfaceSequence": [
+     "Open-ticket hero metric",
+     "Filter rail",
+     "Queue table"
+    ],
+    "exclusions": [
+     "Decorative imagery",
+     "Overloaded metric grids"
+    ],
+    "surfaceLabels": [
+     "Workload",
+     "Ticket queue",
+     "Filters"
+    ]
+   }
+  },
+  {
+   "approach": "Ticket Finder",
+   "rationale": "It prioritizes the most frequent task: locating a customer’s ticket quickly.",
+   "recommended": false,
+   "whyItFits": "It prioritizes the most frequent task: locating a customer’s ticket quickly.",
+   "layoutApproach": "Search-first command bar followed by a compact result table.",
+   "visualPersonality": "Precise, compact, and tool-like.",
+   "informationDensity": "Dense but task-focused.",
+   "navigationApproach": "Command-led single screen",
+   "mobileBehavior": "Pin search and expose filters through a compact control row.",
+   "tradeoff": "Fast for experienced users but less immediately explanatory for new staff.",
+   "confidence": {
+    "score": 0.75,
+    "rationale": "It prioritizes the most frequent task: locating a customer’s ticket quickly."
+   },
+   "preview": {
+    "typographyCharacter": "mono technical, utilitarian scale",
+    "spacingDensity": "tight grid",
+    "colorMood": "Precise, compact, and tool-like.",
+    "hierarchy": "Search-first command bar → Active filter chips → Compact results"
+   },
+   "visualSystem": {
+    "layoutType": "dashboard",
+    "navigationType": "command",
+    "typographyCategory": "technical",
+    "density": "dense",
+    "spacingProfile": "compact",
+    "surfaceTreatment": "flat",
+    "contentEmphasis": "action",
+    "imageStrategy": "none",
+    "interactionModel": "command-driven",
+    "buttonTreatment": "quiet",
+    "colorRoles": {
+     "accent": "#0f766e",
+     "background": "#f1f5f9",
+     "primary": "#0f172a",
+     "surface": "#ffffff",
+     "text": "#475569"
+    },
+    "sampleLabels": [
+     "Find customer",
+     "Any status",
+     "Any priority",
+     "12 results"
+    ]
+   },
+   "creativeDNA": {
+    "thesis": "Treat ticket discovery as a high-speed retrieval tool.",
+    "emotionalGoal": "Efficient momentum.",
+    "audienceResponse": "Feel fast and focused while narrowing the queue.",
+    "primaryAction": "Narrow the ticket queue",
+    "compositionPrimitive": "command-surface",
+    "typeScale": "utilitarian",
+    "typeVoice": "mono-technical",
+    "imageryTreatment": "none",
+    "motionStrategy": "responsive",
+    "spacingRhythm": "tight-grid",
+    "surfaceDepth": "paper-flat",
+    "responsiveTransform": "prioritise-primary-task",
+    "surfaceSequence": [
+     "Search-first command bar",
+     "Active filter chips",
+     "Compact results"
+    ],
+    "exclusions": [
+     "Persistent side navigation",
+     "Decorative imagery"
+    ],
+    "surfaceLabels": [
+     "Search",
+     "Status",
+     "Priority",
+     "Results"
+    ]
+   }
+  }
+ ],
+ "includedDefaults": [
+  "Show the open-ticket count for the current filtered result set while labeling it clearly.",
+  "Preserve active filters and search text when the visible ticket list refreshes.",
+  "Add sortable columns for status, priority, and customer name."
+ ],
+ "constraints": [
+  "No ticket creation, editing, deletion, assignment, or reply workflow is included.",
+  "No authentication, external ticket integration, or customer-facing portal is included.",
+  "Use a responsive table-first dashboard with client-side filtering and search for the requested ticket list."
+ ],
+ "assumptions": [
+  "Ticket data is available as representative dashboard content because no source system or records were supplied.",
+  "Open tickets include every ticket whose status is not closed."
+ ],
+ "customerContent": {
+  "supplied": [],
+  "missingBeforeLaunch": []
+ },
+ "architectureDecisions": [
+  "Use a responsive table-first dashboard with client-side filtering and search for the requested ticket list."
+ ],
+ "openQuestions": [],
+ "contextualSuggestions": [
+  {
+   "suggestionId": "suggestion-001",
+   "label": "Contextual open count",
+   "rationale": "It keeps the workload metric aligned with the queue the user is actively inspecting.",
+   "value": "Show the open-ticket count for the current filtered result set while labeling it clearly.",
+   "impact": "Changes first-version scope and proof for Contextual open count.",
+   "selectedByDefault": true,
+   "confidence": 0.8,
+   "requiredDependencies": []
+  },
+  {
+   "suggestionId": "suggestion-002",
+   "label": "Stable queue context",
+   "rationale": "Support staff can investigate repeatedly without losing their current narrowing choices.",
+   "value": "Preserve active filters and search text when the visible ticket list refreshes.",
+   "impact": "Changes first-version scope and proof for Stable queue context.",
+   "selectedByDefault": true,
+   "confidence": 0.8,
+   "requiredDependencies": []
+  },
+  {
+   "suggestionId": "suggestion-003",
+   "label": "Optional queue sorting",
+   "rationale": "Sorting may help larger queues but is not required for the requested dashboard.",
+   "value": "Add sortable columns for status, priority, and customer name.",
+   "impact": "Changes first-version scope and proof for Optional queue sorting.",
+   "selectedByDefault": false,
+   "confidence": 0.8,
+   "requiredDependencies": []
+  }
+ ],
+ "sourceRequirementIds": [
+  "customer-intent-1",
+  "foundry-derived-design-quality",
+  "foundry-derived-production-readiness",
+  "foundry-derived-browser-stability"
+ ],
+ "selectedStack": {
+  "stackId": "web-nextjs-typescript-sqlite-npm-playwright",
+  "version": "1.0.0"
+ },
+ "runtimeAdapterId": "nextjs-web-runtime",
+ "requirementContractVersion": 1,
+ "verificationPlan": {
+  "planId": "verification-plan-v2",
+  "checks": [
+   {
+    "checkId": "obligation-001",
+    "label": "The dashboard displays tickets in a table with customer name, status, and priority visible.: observable evidence proves this approved capability works.",
+    "origin": "customer-stated",
+    "acceptanceCondition": {
+     "type": "browser-check-equals",
+     "check": "obligation-001",
+     "expected": true,
+     "checkpointIndependent": false
+    },
+    "evidenceKinds": [
+     "browser-interaction-result"
+    ],
+    "dependencyCheckIds": []
+   },
+   {
+    "checkId": "obligation-002",
+    "label": "Changing the status filter updates the table to show only matching tickets.: observable evidence proves this approved capability works.",
+    "origin": "customer-stated",
+    "acceptanceCondition": {
+     "type": "browser-check-equals",
+     "check": "obligation-002",
+     "expected": true,
+     "checkpointIndependent": false
+    },
+    "evidenceKinds": [
+     "browser-interaction-result"
+    ],
+    "dependencyCheckIds": []
+   },
+   {
+    "checkId": "obligation-003",
+    "label": "Changing the priority filter updates the table to show only matching tickets.: observable evidence proves this approved capability works.",
+    "origin": "customer-stated",
+    "acceptanceCondition": {
+     "type": "browser-check-equals",
+     "check": "obligation-003",
+     "expected": true,
+     "checkpointIndependent": false
+    },
+    "evidenceKinds": [
+     "browser-interaction-result"
+    ],
+    "dependencyCheckIds": []
+   },
+   {
+    "checkId": "obligation-004",
+    "label": "Entering a customer name search updates the table to matching tickets.: observable evidence proves this approved capability works.",
+    "origin": "customer-stated",
+    "acceptanceCondition": {
+     "type": "browser-check-equals",
+     "check": "obligation-004",
+     "expected": true,
+     "checkpointIndependent": false
+    },
+    "evidenceKinds": [
+     "browser-interaction-result"
+    ],
+    "dependencyCheckIds": []
+   },
+   {
+    "checkId": "obligation-005",
+    "label": "The dashboard shows a count equal to the currently open tickets.: observable evidence proves this approved capability works.",
+    "origin": "customer-stated",
+    "acceptanceCondition": {
+     "type": "browser-check-equals",
+     "check": "obligation-005",
+     "expected": true,
+     "checkpointIndependent": false
+    },
+    "evidenceKinds": [
+     "browser-interaction-result"
+    ],
+    "dependencyCheckIds": []
+   },
+   {
+    "checkId": "obligation-006",
+    "label": "The dashboard builds successfully for deployment.: observable evidence proves this approved capability works.",
+    "origin": "customer-stated",
+    "acceptanceCondition": {
+     "type": "command-exit-code-equals",
+     "expectedExitCode": 0,
+     "checkpointIndependent": true
+    },
+    "evidenceKinds": [
+     "command-exit-result"
+    ],
+    "dependencyCheckIds": []
+   },
+   {
+    "checkId": "obligation-007",
+    "label": "Support Ticket Dashboard preserves its approved Balanced operational density.; Keep search, filters, and customer identity usable on narrow screens.; Single-screen inline controls.; and accessible keyboard behavior including Use labeled controls and visible focus states., Do not rely on color alone for status or priority..",
+    "origin": "foundry-derived",
+    "acceptanceCondition": {
+     "type": "browser-check-equals",
+     "check": "obligation-007",
+     "expected": true,
+     "checkpointIndependent": false
+    },
+    "evidenceKinds": [
+     "browser-interaction-result"
+    ],
+    "dependencyCheckIds": []
+   },
+   {
+    "checkId": "obligation-008",
+    "label": "Support Ticket Dashboard completes a production build for the approved first-version scope.",
+    "origin": "foundry-derived",
+    "acceptanceCondition": {
+     "type": "command-exit-code-equals",
+     "expectedExitCode": 0,
+     "checkpointIndependent": true
+    },
+    "evidenceKinds": [
+     "command-exit-result"
+    ],
+    "dependencyCheckIds": []
+   },
+   {
+    "checkId": "obligation-009",
+    "label": "Support Ticket Dashboard completes its primary browser workflow without blocking browser errors.",
+    "origin": "foundry-derived",
+    "acceptanceCondition": {
+     "type": "browser-error-counts",
+     "maxConsoleErrors": 0,
+     "maxPageErrors": 0,
+     "checkpointIndependent": false
+    },
+    "evidenceKinds": [
+     "browser-error-result"
+    ],
+    "dependencyCheckIds": []
+   }
+  ]
+ }
+}

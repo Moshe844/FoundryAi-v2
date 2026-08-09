@@ -177,6 +177,35 @@ function uniqueMeaningfulTextList(
   );
 }
 
+// Sample labels are the words a mock puts on a control, and they follow the
+// product rather than prose. A calculator's most meaningful labels are "=",
+// "+", "%" and "C": no letter or digit between them, so meaningfulText called
+// them placeholders and refused the design. Five understanding attempts died
+// that way on a one-word request -- three on the duplicate rule, two on this --
+// and the project sat in CLARIFYING with no profile and a continue button that
+// could do nothing.
+//
+// So display labels are judged on what actually matters for them: present, not
+// a placeholder word, and short enough to fit a control. Repeats are allowed --
+// two buttons legitimately read "View" -- and symbols are labels, not noise.
+function displayLabelList(value, label) {
+  if (!Array.isArray(value) || value.length === 0) {
+    fail(`${label} must be a non-empty array.`);
+  }
+  return value.map((entry, index) => {
+    const at = `${label}[${index}]`;
+    const normalized = text(entry, at);
+    const comparable = normalized
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}]+/gu, " ")
+      .trim();
+    if (PLACEHOLDER_TEXT.has(comparable)) {
+      fail(`${at} must describe a real project-specific value.`);
+    }
+    return normalized;
+  });
+}
+
 function normalizeQuestion(question, index) {
   keysWithOptional(
     question,
@@ -423,10 +452,9 @@ function normalizeDesignAlternative(alternative, index) {
           return [field, value.toLowerCase()];
         }),
       ),
-      sampleLabels: uniqueMeaningfulTextList(
+      sampleLabels: displayLabelList(
         alternative.visualSystem.sampleLabels,
         `designAlternatives[${index}].visualSystem.sampleLabels`,
-        { allowEmpty: false },
       ),
     };
   }
