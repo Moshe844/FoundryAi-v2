@@ -56,7 +56,8 @@ const UNSAFE_REMEDY = Object.freeze({
   "external script": "Remove the script tag; the prototype loads concept.js only.",
   "external form action": "Leave the form action empty and handle submission locally in concept.js.",
   "network API": "The prototype has no network. Hold sample data in a local constant in concept.js.",
-  "dynamic code execution": "Write the behaviour directly instead of building it from a string.",
+  "dynamic code execution":
+    "Write the behaviour directly instead of building it from a string. To evaluate arithmetic, hold the operands and the pending operator in variables and apply them with real operators, or tokenize the expression and walk the tokens; never hand a string to eval or new Function.",
   "secret-bearing environment access": "The prototype has no environment or cookies; use local constants.",
   "parent-window control": "The prototype is origin-isolated and may not reach its host page.",
 });
@@ -122,6 +123,15 @@ function validateGeneratedOutput(value, contract) {
       !/<link\b[^>]*href=["'](?:\/|\.\/)?styles\.css["']/iu.test(html)
     )
   ) fail("index.html must be semantic, localized, and load isolated concept CSS.");
+  // Caught here rather than after admission: a heading is deterministic markup,
+  // and discovering it missing only once the concept has been opened at three
+  // viewports costs half a minute and a whole direction. A calculator concept
+  // was lost exactly that way while its two siblings were admitted.
+  if (html !== undefined && !/<h[1-6]\b[^>]*>\s*\S/iu.test(html)) {
+    fail(
+      "index.html must contain at least one heading element (h1-h6) with visible text. Admission refuses a concept that has no heading at any viewport, including a minimal tool whose display is the main content -- name the surface rather than leaving it unlabelled.",
+    );
+  }
   const css = byPath.get("styles.css");
   if (
     css !== undefined &&
@@ -158,6 +168,13 @@ function prompt(contract, admissionFeedback = []) {
           "The result must still satisfy the project outcome, primary users, required workflows, accessibility, responsive behavior, technical feasibility, and every explicit exclusion. Do not create a generic SaaS shell and do not use arbitrary novelty.",
         ]
       : []),
+    // Overflow used to be the only admission rule the generator was told, so it
+    // was the only one it reliably satisfied. A calculator direction was
+    // refused at all three viewports for having no heading -- a fair rule the
+    // model had never been given -- and the studio offered two directions
+    // instead of three. Admission is deterministic; there is no reason to make
+    // the model guess it.
+    "The concept is refused admission unless every viewport shows: a <main> landmark; at least one real heading element (h1-h6) with visible text, even on a minimal tool where the display is the main content; at least two distinct semantic sections; at least one keyboard-focusable control that takes focus on Tab; alt text on every image; and no console or page errors. Satisfy all of these in the markup rather than treating them as optional polish.",
     // Horizontal overflow is the most common reason a concept is refused
     // admission, and a refused concept can take the studio below the two
     // directions a choice requires.

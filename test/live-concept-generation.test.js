@@ -420,3 +420,58 @@ test("an unsafe prototype is told where the violation is and what to do", async 
   assert.match(source, /Toggle a class or a data attribute/u);
   assert.match(source, /UNSAFE_REMEDY\[unsafe\.reason\]/u);
 });
+
+test("a concept with no heading is refused before it costs a browser round trip", async () => {
+  // A calculator direction was admitted-checked at three viewports and refused
+  // for "visual hierarchy has no heading", losing half a minute and one of the
+  // three directions the studio is meant to offer. A heading is deterministic
+  // markup and belongs in this validator.
+  const root = mkdtempSync(join(tmpdir(), "foundry-generation-heading-"));
+  try {
+    const workspaceService = createPrototypeWorkspaceService({ prototypeRoot: root });
+    const headless = structuredClone(generated);
+    const html = headless.files.find((file) => file.path === "index.html");
+    html.content = html.content
+      .replace("<h1>Commercial assignments, clearly seen.</h1>", "<p>7 8 9</p>")
+      .replace("<h2>Sample: Northline Campaign</h2>", "<p>Sample</p>");
+    const generation = createPrototypeGenerationService({
+      workspaceService,
+      modelGateway: {
+        async request(input) {
+          return { requestId: input.requestId, structuredOutput: headless, tokenMetadata: {}, costMetadata: {} };
+        },
+      },
+    });
+    await assert.rejects(
+      generation.generate({ conceptContract: concept("concept-headless") }),
+      /at least one heading element/u,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a concept that has a heading is not refused for lacking one", async () => {
+  const root = mkdtempSync(join(tmpdir(), "foundry-generation-heading-ok-"));
+  try {
+    const workspaceService = createPrototypeWorkspaceService({ prototypeRoot: root });
+    const withHeading = structuredClone(generated);
+    withHeading.files.find((file) => file.path === "index.html").content =
+      withHeading.files
+        .find((file) => file.path === "index.html")
+        .content.replace('href="/styles.css"', 'href="styles.css"');
+    const generation = createPrototypeGenerationService({
+      workspaceService,
+      modelGateway: {
+        async request(input) {
+          return { requestId: input.requestId, structuredOutput: withHeading, tokenMetadata: {}, costMetadata: {} };
+        },
+      },
+    });
+    await assert.doesNotReject(
+      generation.generate({ conceptContract: concept("concept-with-heading") }),
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

@@ -524,6 +524,22 @@ export function deepestRepairScope(scopes) {
   return deepest;
 }
 
+// `npm ci` refuses to install when package-lock.json and package.json disagree,
+// and says so precisely: "lock file's react-dom@19.1.0 does not satisfy
+// react-dom@19.0.0 ... update your lock file with `npm install`". The remedy is
+// deterministic and npm names it. Foundry instead sent the failure to a model,
+// which edited package.json twice, neither time touching the lock, and the
+// mission exhausted its install budget with the application unbuilt.
+export function lockOutOfSyncWithManifest(output) {
+  const text = String(output ?? "");
+  return (
+    /npm error code EUSAGE/u.test(text) ||
+    /can only install packages when your package\.json and package-lock\.json[\s\S]{0,80}are in sync/u.test(text) ||
+    /lock file's .+ does not satisfy /u.test(text) ||
+    /Missing: .+ from lock file/u.test(text)
+  );
+}
+
 export function classifyProductionFailure({
   stage,
   stdout = "",
@@ -4334,6 +4350,44 @@ export function createProductionMissionService({
             throw new Error(
               `${procedureName} failed first-pass verification; its exact command evidence is persisted.`,
             );
+          }
+          // A lock that disagrees with the manifest is fixed by regenerating
+          // the lock, which is what npm's own error tells you to do. Doing it
+          // here costs one command and no model call; the alternative, already
+          // observed, is two paid repairs editing package.json while the lock
+          // -- the actual problem -- goes untouched, and the build dies with
+          // its install budget spent.
+          if (
+            procedureName === "install" &&
+            lockOutOfSyncWithManifest(
+              `${failureEvidence.payload.stdout}
+${failureEvidence.payload.stderr}`,
+            )
+          ) {
+            const priorRelocks = execution
+              .listWorkUnits(missionId)
+              .filter(
+                (record) =>
+                  record.actionType === WorkUnitAction.RUN_COMMAND &&
+                  record.inputs.procedureName === "dependencyLock" &&
+                  record.workUnitId.includes("lock-resync"),
+              );
+            // Once. If a freshly generated lock still disagrees, the manifest
+            // itself is wrong and that is a repair, not a re-run.
+            if (priorRelocks.length === 0) {
+              const relocked = await work(
+                WorkUnitAction.RUN_COMMAND,
+                {
+                  procedureName: "dependencyLock",
+                  environment: {},
+                  timeoutMs: 600_000,
+                  outputLimitBytes: 1_048_576,
+                },
+                targets.length > 0 ? targets : generationTargetIds,
+                "lock-resync-dependencylock",
+              );
+              if (relocked.status === WorkUnitStatus.SUCCEEDED) continue;
+            }
           }
           if (
             failureClassification.scope ===
