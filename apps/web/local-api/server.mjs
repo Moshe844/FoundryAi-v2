@@ -138,7 +138,17 @@ const prototypeRoot = resolve(stateRoot, "prototype-root");
 const prototypeWorkspaces = createPrototypeWorkspaceService({ prototypeRoot });
 const prototypeRuntimes = createPrototypeRuntimeService({
   workspaceService: prototypeWorkspaces,
-  previewParentOrigins: ["http://127.0.0.1:3001", "http://localhost:3001"],
+  // These become frame-ancestors on the prototype preview server, so an origin
+  // missing here is a concept that renders blank in the studio rather than an
+  // error anyone would see. 3001 was the only entry while the dev server
+  // actually serves 3000, so both are listed and the studio survives whichever
+  // port is free.
+  previewParentOrigins: [
+    "http://127.0.0.1:3000",
+    "http://localhost:3000",
+    "http://127.0.0.1:3001",
+    "http://localhost:3001",
+  ],
 });
 const prototypeGeneration = createPrototypeGenerationService({
   modelGateway: control.models,

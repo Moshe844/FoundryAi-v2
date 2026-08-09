@@ -43,7 +43,6 @@ const HASH_PATTERN = /^[a-f0-9]{64}$/;
 const VERDICT_KEYS = [
   "contractVersion",
   "deficiencies",
-  "designShortfall",
   "integrityHash",
   "missionId",
   "obligationVerdicts",
@@ -54,6 +53,11 @@ const VERDICT_KEYS = [
   "workspaceCheckpointReference",
 ];
 const DESIGN_SHORTFALL_KEYS = ["comparedViewports", "failedAspects", "reason"];
+// Optional, and it has to be. The ledger is append-only: every verdict recorded
+// before this field existed has no such key, and requiring one made each of
+// them fail replay -- which took out the whole project list, not just the
+// mission. A field added to a durable record is optional forever.
+const OPTIONAL_VERDICT_KEYS = ["designShortfall"];
 const OBLIGATION_VERDICT_KEYS = [
   "deficiency",
   "evidenceReferences",
@@ -100,9 +104,11 @@ function assertObject(value, label) {
   }
 }
 
-function assertExactKeys(value, keys, label) {
+function assertExactKeys(value, keys, label, optionalKeys = []) {
   assertObject(value, label);
-  const actual = Object.keys(value).sort();
+  const actual = Object.keys(value)
+    .filter((key) => !optionalKeys.includes(key))
+    .sort();
   const expected = [...keys].sort();
   if (
     actual.length !== expected.length ||
@@ -626,7 +632,7 @@ export function createCompletionVerdict({
   verificationTimestamp,
   workspaceCheckpointReference,
   obligationVerdicts,
-  designShortfall = null,
+  designShortfall = undefined,
 }) {
   const deficiencies = obligationVerdicts
     .filter((verdict) => verdict.result === ObligationVerdictResult.NOT_SATISFIED)
@@ -653,14 +659,25 @@ export function createCompletionVerdict({
       ? CompletionResult.COMPLETE
       : CompletionResult.INCOMPLETE,
     deficiencies,
-    // overallResult stays a statement about the obligations, because the
-    // SUCCEEDED transition is gated on it: making a shortfall INCOMPLETE sent
-    // proven builds back to repair and destroyed them. The shortfall is
-    // disclosed alongside it instead, and the customer-facing claim is required
-    // to reflect it.
-    designShortfall: normalizeDesignShortfall(designShortfall),
     unverifiableConditions,
   };
+  // overallResult stays a statement about the obligations, because the
+  // SUCCEEDED transition is gated on it: making a shortfall INCOMPLETE sent
+  // proven builds back to repair and destroyed them. The shortfall is disclosed
+  // alongside it instead, and the customer-facing claim reflects it.
+  //
+  // Added to the hashed object only when there is one, so a verdict without a
+  // shortfall hashes exactly as it did before this field existed and every
+  // verdict already in the ledger still verifies.
+  // Three shapes have to verify, because all three are already on disk:
+  // absent (recorded before the field existed), present-and-null (recorded
+  // while it was being added), and present with a shortfall. `undefined` means
+  // omit the key entirely and hash exactly as the oldest records did; an
+  // explicit null keeps the key. Validation passes the stored value straight
+  // through, so each record is re-hashed in its own shape.
+  if (designShortfall !== undefined) {
+    verdictWithoutHash.designShortfall = normalizeDesignShortfall(designShortfall);
+  }
   return deepFreeze({
     ...verdictWithoutHash,
     integrityHash: computeCompletionVerdictIntegrityHash(verdictWithoutHash),
@@ -668,7 +685,7 @@ export function createCompletionVerdict({
 }
 
 export function validateCompletionVerdict(verdict, { missionId, contract }) {
-  assertExactKeys(verdict, VERDICT_KEYS, "completionVerdict");
+  assertExactKeys(verdict, VERDICT_KEYS, "completionVerdict", OPTIONAL_VERDICT_KEYS);
   assertIdentifier(verdict.verdictId, "completionVerdict.verdictId");
   if (verdict.missionId !== missionId) {
     throw new CompletionVerdictIntegrityError(
@@ -812,6 +829,9 @@ export function validateCompletionVerdict(verdict, { missionId, contract }) {
     verificationTimestamp: verdict.verificationTimestamp,
     workspaceCheckpointReference: verdict.workspaceCheckpointReference,
     obligationVerdicts: verdict.obligationVerdicts,
+    // Passed through exactly as stored, so the verdict is re-hashed in the
+    // shape it was written in rather than in today's shape.
+    designShortfall: verdict.designShortfall,
   });
   if (
     verdict.overallResult !== expected.overallResult ||

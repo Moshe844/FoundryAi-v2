@@ -93,3 +93,51 @@ test("a shortfall that names nothing is not a disclosure", () => {
     /reason/u,
   );
 });
+
+// Adding designShortfall to the verdict's required keys made every verdict
+// recorded before the field existed fail replay, which 500'd the whole project
+// list rather than one mission. Three shapes are on disk and all three must
+// verify: absent, present-and-null, and present with a shortfall.
+test("a verdict recorded before the field existed still verifies", () => {
+  const legacy = createCompletionVerdict({
+    verdictId: "verdict-legacy",
+    missionId: "mission-1",
+    contractVersion: 1,
+    verificationTimestamp: "2026-01-01T00:00:00.000Z",
+    workspaceCheckpointReference: null,
+    obligationVerdicts: SATISFIED,
+    // No designShortfall at all, exactly as the oldest records were written.
+  });
+  assert.equal("designShortfall" in legacy, false);
+
+  // And its hash must be what it always was: adding the key would silently
+  // invalidate every historical record.
+  const recomputed = createCompletionVerdict({
+    verdictId: "verdict-legacy",
+    missionId: "mission-1",
+    contractVersion: 1,
+    verificationTimestamp: "2026-01-01T00:00:00.000Z",
+    workspaceCheckpointReference: null,
+    obligationVerdicts: SATISFIED,
+    designShortfall: undefined,
+  });
+  assert.equal(recomputed.integrityHash, legacy.integrityHash);
+});
+
+test("a verdict written with an explicit null keeps the key and its own hash", () => {
+  // Recorded while the field was being added. Re-hashing it in today's shape
+  // would reject it, so the stored shape is preserved.
+  const withNull = verdict(null);
+  assert.equal("designShortfall" in withNull, true);
+  assert.equal(withNull.designShortfall, null);
+
+  const legacy = createCompletionVerdict({
+    verdictId: "verdict-1",
+    missionId: "mission-1",
+    contractVersion: 1,
+    verificationTimestamp: withNull.verificationTimestamp,
+    workspaceCheckpointReference: null,
+    obligationVerdicts: SATISFIED,
+  });
+  assert.notEqual(withNull.integrityHash, legacy.integrityHash);
+});
