@@ -873,6 +873,44 @@ export function validateMission(value: unknown, path = "mission"): Mission {
       ),
     };
   })();
+  // Absent whenever the read-back could not be produced. Reported as
+  // unavailable rather than as nothing-missing: the difference matters, since
+  // the whole point is to notice what is not there.
+  const requestReadback = (() => {
+    if (
+      input.requestReadback === null ||
+      input.requestReadback === undefined
+    ) {
+      return null;
+    }
+    const raw = object(input.requestReadback, `${path}.requestReadback`);
+    if (typeof raw.unavailable === "string") {
+      return { asks: [], unavailable: raw.unavailable };
+    }
+    if (!Array.isArray(raw.asks)) return null;
+    return {
+      asks: raw.asks.map((entry, index) => {
+        const at = `${path}.requestReadback.asks[${index}]`;
+        const ask = object(entry, at);
+        return {
+          ask: text(ask.ask, `${at}.ask`),
+          quotedFromRequest: text(
+            ask.quotedFromRequest,
+            `${at}.quotedFromRequest`,
+          ),
+          disposition: text(
+            ask.disposition,
+            `${at}.disposition`,
+          ) as Mission["requestReadback"] extends null
+            ? never
+            : NonNullable<Mission["requestReadback"]>["asks"][number]["disposition"],
+          citation: nullableText(ask.citation, `${at}.citation`),
+        };
+      }),
+      unavailable: null,
+    };
+  })();
+
   const executionProjection = (() => {
     const projection = object(
       input.executionProjection,
@@ -1286,6 +1324,7 @@ export function validateMission(value: unknown, path = "mission"): Mission {
     productTypeDiscovery: productDiscovery,
     productBlueprint: blueprint,
     conceptStudio,
+    requestReadback,
     proposalConfirmed: bool(
       input.proposalConfirmed,
       `${path}.proposalConfirmed`,

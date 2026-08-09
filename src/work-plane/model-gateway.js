@@ -27,6 +27,11 @@ export { rankRoutesByPersistedTaskHistory } from "./model-route-reliability.js";
 
 export const ModelExecutionStage = Object.freeze({
   DESIGN_PROTOTYPE: "DESIGN_PROTOTYPE",
+  // Checking the plan against the customer's own words happens while they are
+  // still deciding whether to approve it, which is before EXECUTING by
+  // definition. Given its own stage rather than relaxing the general rule, and
+  // restricted below to exactly the shape the read-back uses.
+  REQUEST_READBACK: "REQUEST_READBACK",
 });
 
 const taskTier = Object.freeze({
@@ -588,12 +593,27 @@ export function createModelGateway({
       );
       const designPrototypeRequest =
         input.executionStage === ModelExecutionStage.DESIGN_PROTOTYPE;
+      const requestReadbackRequest =
+        input.executionStage === ModelExecutionStage.REQUEST_READBACK;
+      const preExecutionRequest =
+        designPrototypeRequest || requestReadbackRequest;
       if (
         input.executionStage !== undefined &&
-        !designPrototypeRequest
+        !preExecutionRequest
       ) {
         throw new ModelGatewayValidationError(
           "Model executionStage is invalid.",
+        );
+      }
+      if (
+        requestReadbackRequest &&
+        (input.taskClass !== ModelTaskClass.STRUCTURED_TRANSFORMATION ||
+          !contextReferences.some(
+            (reference) => reference.kind === "customer-request",
+          ))
+      ) {
+        throw new ModelGatewayValidationError(
+          "REQUEST_READBACK is restricted to customer-request STRUCTURED_TRANSFORMATION.",
         );
       }
       if (
@@ -626,12 +646,12 @@ export function createModelGateway({
         missionState === MissionState.INTAKE ||
         missionState === MissionState.CLARIFYING;
       if (
-        (!designPrototypeRequest && missionState !== MissionState.EXECUTING) ||
-        (designPrototypeRequest && !designPrototypeState)
+        (!preExecutionRequest && missionState !== MissionState.EXECUTING) ||
+        (preExecutionRequest && !designPrototypeState)
       ) {
         throw new ModelGatewayValidationError(
-          designPrototypeRequest
-            ? "Design prototype model calls are permitted only during INTAKE or CLARIFYING, before production execution."
+          preExecutionRequest
+            ? "Design prototype and request read-back model calls are permitted only during INTAKE or CLARIFYING, before production execution."
             : "Model calls are permitted only during EXECUTING.",
         );
       }
@@ -695,8 +715,10 @@ export function createModelGateway({
       const startTimestamp = clock();
       // A concept is generated before a production workspace exists. Its
       // isolated workspace is controlled by PrototypeWorkspaceService, while
-      // all normal production calls remain checkpoint-bound here.
-      const workspace = designPrototypeRequest
+      // all normal production calls remain checkpoint-bound here. The request
+      // read-back runs earlier still and reads only the customer's sentence and
+      // the plan, so there is no workspace for it to be bound to either.
+      const workspace = preExecutionRequest
         ? Object.freeze({ currentCheckpointId: null })
         : workspaces.getWorkspace(input.missionId);
       const priorRouteAttemptCount = evidence

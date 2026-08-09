@@ -67,8 +67,13 @@ export const REQUEST_READBACK_SCHEMA = Object.freeze({
           quotedFromRequest: { type: "string", minLength: 1, maxLength: 160 },
           disposition: { type: "string", enum: [...DISPOSITIONS] },
           // The exact proposal text that accounts for this ask; null for
-          // CONTEXT and UNACCOUNTED, which cite nothing by definition.
-          citation: { type: ["string", "null"], maxLength: 400 },
+          // CONTEXT and UNACCOUNTED, which cite nothing by definition. Written
+          // as anyOf rather than a type union: the response validator takes a
+          // single type string, and a union silently makes the whole schema
+          // malformed rather than optional.
+          citation: {
+            anyOf: [{ type: "string", maxLength: 400 }, { type: "null" }],
+          },
         }),
       }),
     }),

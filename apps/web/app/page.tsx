@@ -1697,6 +1697,7 @@ export default function Page() {
         <DecisionBrief
           brief={experience.decisionBrief}
           blueprint={mission.productBlueprint}
+          readback={mission.requestReadback}
           busy={busy}
           missionRunning={mission.running}
           onStart={start}

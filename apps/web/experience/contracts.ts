@@ -284,6 +284,23 @@ export type SuggestedNextStep = Readonly<{
   description: Sourced<string>;
 }>;
 
+export type RequestAsk = Readonly<{
+  ask: string;
+  quotedFromRequest: string;
+  disposition: "BUILDING" | "EXCLUDED" | "CONTEXT" | "UNACCOUNTED";
+  citation: string | null;
+}>;
+
+/**
+ * The customer's request decomposed and matched against the plan. `null` means
+ * it could not be produced, which is not the same as nothing being missing and
+ * must never be presented as such.
+ */
+export type RequestReadback = Readonly<{
+  asks: readonly RequestAsk[];
+  unavailable: string | null;
+}>;
+
 export type DesignShortfall = Readonly<{
   failedAspects: readonly string[];
   comparedViewports: number | null;
@@ -777,6 +794,7 @@ export type Mission = Readonly<{
     frameworkVersion: string | null;
     knownLimitations: readonly string[];
   }>;
+  requestReadback: RequestReadback | null;
   executionProjection: Readonly<{
     timing: Readonly<{
       startedAt: string | null;

@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { dirname, resolve } from "node:path";
@@ -28,6 +28,7 @@ import {
   normalizeCustomerFollowUpAnswers,
 } from "../../../src/index.js";
 import { terminateProcessTree } from "../../../src/work-plane/command-runner.js";
+import { createRequestReadbackService } from "../../../src/work-plane/request-readback-service.js";
 import { projectDecisionHistory } from "./decision-history.mjs";
 import { projectDiscoveryConversation } from "./discovery-conversation.mjs";
 import { projectExecutionProjection } from "./execution-projection.mjs";
@@ -103,6 +104,33 @@ const control = openMissionControl({
   maxModelProviderAttempts: 3,
   requireProductBlueprintApproval: true,
 });
+// The customer's own request, decomposed and matched line by line against the
+// plan they are about to approve. Kept beside the mission rather than on the
+// blueprint: it must never be able to invalidate a blueprint or stop a mission,
+// only to show the customer what is missing from it.
+const readbackRoot = resolve(stateRoot, "request-readback");
+mkdirSync(readbackRoot, { recursive: true });
+const requestReadbacks = {
+  path(missionId) {
+    return resolve(readbackRoot, `${missionId}.json`);
+  },
+  read(missionId) {
+    const file = this.path(missionId);
+    if (!existsSync(file)) return null;
+    try {
+      return JSON.parse(readFileSync(file, "utf8"));
+    } catch {
+      return null;
+    }
+  },
+  save(missionId, readback) {
+    writeFileSync(this.path(missionId), JSON.stringify(readback, null, 1), "utf8");
+  },
+};
+const requestReadback = createRequestReadbackService({
+  modelGateway: control.models,
+});
+
 const activeJobs = new Map();
 const activeUnderstandingJobs = new Map();
 const activeConceptJobs = new Map();
@@ -159,7 +187,28 @@ function startUnderstandingJob({
       eventId: `${missionId}-profile-${profileVersion}`,
       causationId,
     })
-    .then(() => {
+    .then(async () => {
+      // Computed before understanding is reported finished, so the customer can
+      // never reach the plan ahead of the check on it. It is two short calls on
+      // one sentence; the plan itself takes far longer.
+      try {
+        const design = control.understanding.latestDesign(missionId);
+        const settled = await requestReadback.readBack({
+          missionId,
+          originalCustomerRequest: intent,
+          projectDesign: design,
+          profileVersion,
+        });
+        if (settled !== null) requestReadbacks.save(missionId, settled);
+      } catch (error) {
+        // A read-back that cannot be produced is reported as unavailable, never
+        // as a clean bill of health, and it must not cost the customer the plan
+        // Foundry already built.
+        requestReadbacks.save(missionId, {
+          unavailable: String(error?.message ?? error).slice(0, 300),
+          profileVersion,
+        });
+      }
       activeUnderstandingJobs.delete(missionId);
     })
     .catch((error) => {
@@ -1372,6 +1421,7 @@ async function missionView(missionId) {
     productTypeDiscovery,
     productBlueprint,
     conceptStudio: publicConceptStudio(missionId),
+    requestReadback: requestReadbacks.read(missionId),
     proposalConfirmed,
     experience,
     contract,
@@ -1458,6 +1508,7 @@ function missionSummary(missionId) {
     productTypeDiscovery,
     productBlueprint,
     conceptStudio: publicConceptStudio(missionId),
+    requestReadback: requestReadbacks.read(missionId),
     proposalConfirmed,
     contract: null,
     decisionHistory: decisionHistory.decisions,

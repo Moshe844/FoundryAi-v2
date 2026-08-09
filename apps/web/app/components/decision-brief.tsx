@@ -7,6 +7,7 @@ import type {
   CustomerFollowUpAnswer,
   DecisionBrief as DecisionBriefModel,
   ProductBlueprint,
+  RequestReadback,
 } from "../../experience/contracts";
 
 type ClarifyAnswer = CustomerFollowUpAnswer;
@@ -125,6 +126,7 @@ function DecisionEditor({
 export function DecisionBrief({
   brief,
   blueprint,
+  readback,
   busy,
   missionRunning,
   onClarify,
@@ -133,12 +135,17 @@ export function DecisionBrief({
 }: Readonly<{
   brief: DecisionBriefModel;
   blueprint: ProductBlueprint | null;
+  readback: RequestReadback | null;
   busy: boolean;
   missionRunning: boolean;
   onClarify: (answers: ClarifyAnswer[]) => Promise<boolean>;
   profileVersion: number;
   onStart: () => Promise<boolean>;
 }>) {
+  const asks = readback?.asks ?? [];
+  const unaccounted = asks.filter((entry) => entry.disposition === "UNACCOUNTED");
+  const excluded = asks.filter((entry) => entry.disposition === "EXCLUDED");
+  const building = asks.filter((entry) => entry.disposition === "BUILDING");
   const decisionsRef = useRef<HTMLDivElement>(null);
   const assumptionsRef = useRef<HTMLDivElement>(null);
   const [editingDecision, setEditingDecision] = useState<string | null>(null);
@@ -571,6 +578,73 @@ export function DecisionBrief({
         </div>
       </dl>
 
+      {/* Directly above the approve button, because this is the one thing that
+          can tell the customer the plan is missing something they asked for.
+          Unaccounted asks come first: they are the reason it exists. */}
+      {readback !== null && (
+        <section className="request-readback" aria-label="Your request, checked against this plan">
+          <h2 className="t-title-s">What you asked for</h2>
+          {readback.unavailable !== null ? (
+            <p className="t-body-m ink-secondary">
+              I could not check this plan against your original wording
+              ({readback.unavailable}). Read the plan above carefully — I am not
+              telling you everything is covered, only that I could not check.
+            </p>
+          ) : (
+            <>
+              {unaccounted.length > 0 && (
+                <div className="field-row">
+                  <dt className="t-body-m">
+                    Not in this plan — you asked for{" "}
+                    {unaccounted.length === 1 ? "this" : "these"}, and I have not
+                    accounted for {unaccounted.length === 1 ? "it" : "them"}
+                  </dt>
+                  <dd>
+                    <ul className="unproved stack-list">
+                      {unaccounted.map((entry) => (
+                        <li key={entry.ask} className="t-body-m">
+                          <strong>{entry.ask}</strong> — from your words: “
+                          {entry.quotedFromRequest}”
+                        </li>
+                      ))}
+                    </ul>
+                  </dd>
+                </div>
+              )}
+              {excluded.length > 0 && (
+                <div className="field-row">
+                  <dt className="t-body-m">
+                    Deliberately left out — check that you agree
+                  </dt>
+                  <dd>
+                    <ul className="unproved stack-list">
+                      {excluded.map((entry) => (
+                        <li key={entry.ask} className="t-body-m">
+                          <strong>{entry.ask}</strong> — from your words: “
+                          {entry.quotedFromRequest}”
+                        </li>
+                      ))}
+                    </ul>
+                  </dd>
+                </div>
+              )}
+              {building.length > 0 && (
+                <div className="field-row">
+                  <dt className="t-body-m">In this plan</dt>
+                  <dd>
+                    <ul className="proved t-body-m stack-list">
+                      {building.map((entry) => (
+                        <li key={entry.ask}>{entry.ask}</li>
+                      ))}
+                    </ul>
+                  </dd>
+                </div>
+              )}
+            </>
+          )}
+        </section>
+      )}
+
       <div className="continue-row">
         <button
           className="btn btn-primary"
@@ -578,7 +652,14 @@ export function DecisionBrief({
           onClick={() => void beginBuilding()}
           type="button"
         >
-          {working ? "Starting\u2026" : "Approve blueprint · Start building"}
+          {/* The label states what approving actually means here. "Approve
+              blueprint" over a plan with an uncovered ask is the same false
+              reassurance this whole read-back exists to remove. */}
+          {working
+            ? "Starting…"
+            : unaccounted.length > 0
+              ? `Build anyway · ${unaccounted.length} ${unaccounted.length === 1 ? "ask" : "asks"} not covered`
+              : "Approve blueprint · Start building"}
         </button>
         <button
           className="btn-quiet small"
