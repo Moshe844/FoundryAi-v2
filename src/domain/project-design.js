@@ -410,13 +410,15 @@ function text(value, label) {
   return value.trim();
 }
 
-function list(value, label, { required = false } = {}) {
+function list(value, label, { required = false, unique = true } = {}) {
   if (!Array.isArray(value) || (required && value.length === 0)) {
     fail(`${label} must be ${required ? "a non-empty" : "an"} array.`);
   }
   const normalized = value.map((entry, index) => text(entry, `${label}[${index}]`));
-  const comparable = normalized.map(normalizeText);
-  if (new Set(comparable).size !== comparable.length) fail(`${label} contains duplicates.`);
+  if (unique) {
+    const comparable = normalized.map(normalizeText);
+    if (new Set(comparable).size !== comparable.length) fail(`${label} contains duplicates.`);
+  }
   return normalized;
 }
 
@@ -742,7 +744,13 @@ function normalizeVisualSystem(value, entry, index, label) {
   return {
     ...Object.fromEntries(Object.keys(VISUAL_ENUMS).map((key) => [key, candidate[key]])),
     colorRoles,
-    sampleLabels: list(candidate.sampleLabels, `${label}.visualSystem.sampleLabels`, { required: true }).slice(0, 5),
+    // Sample labels are the words a mock puts on screen, not a set. Two cards
+    // legitimately both read "View", and rejecting that killed a mission in
+    // CLARIFYING with "sampleLabels contains duplicates" -- no concepts, and a
+    // continue button that silently did nothing. Uniqueness is right for
+    // journeys and capabilities; for display strings the cost of enforcing it
+    // is the whole project, and the benefit is a tidier mock.
+    sampleLabels: list(candidate.sampleLabels, `${label}.visualSystem.sampleLabels`, { required: true, unique: false }).slice(0, 5),
   };
 }
 
