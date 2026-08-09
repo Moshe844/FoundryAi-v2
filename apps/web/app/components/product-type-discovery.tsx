@@ -16,10 +16,14 @@ function confidenceLabel(score: number) {
 export function ProductTypeDiscovery({
   busy,
   discovery,
+  error,
   onContinue,
 }: Readonly<{
   busy: boolean;
   discovery: ProductTypeDiscoveryModel;
+  /** Whatever went wrong last time, shown at the button rather than only in a
+   *  banner further up the page. */
+  error: string | null;
   onContinue: (answers: CustomerFollowUpAnswer[]) => Promise<boolean>;
 }>) {
   const recommended = useMemo(
@@ -30,6 +34,11 @@ export function ProductTypeDiscovery({
   const [showOther, setShowOther] = useState(false);
   const [other, setOther] = useState("");
   const [showContext, setShowContext] = useState(false);
+  // Clicking continue used to discard the result. When understanding failed --
+  // five times, on one project, for a reason no screen showed -- the button
+  // simply stayed put and looked broken. Refusal has to say so where the click
+  // happened, even if the reason is only known upstream.
+  const [refused, setRefused] = useState(false);
   const [context, setContext] = useState("");
   const [combinationNotice, setCombinationNotice] = useState("");
 
@@ -246,15 +255,16 @@ export function ProductTypeDiscovery({
         <button
           className="btn btn-primary"
           disabled={busy || !canContinue}
-          onClick={() =>
+          onClick={() => {
+            setRefused(false);
             void onContinue(
               answersFor(
                 selectedIds.size > 0 || (showOther && other.trim() !== "")
                   ? "selected"
                   : "delegate",
               ),
-            )
-          }
+            ).then((accepted) => setRefused(!accepted));
+          }}
           type="button"
         >
           {busy
@@ -273,6 +283,16 @@ export function ProductTypeDiscovery({
         >
           Let Foundry decide
         </button>
+        {(refused || error !== null) && (
+          <div className="banner banner-fault" role="alert">
+            <div className="banner-body">
+              <p className="t-body-s">
+                {error ??
+                  "Foundry could not build a proposal from that choice, and nothing was saved. Try a different direction, or let Foundry decide."}
+              </p>
+            </div>
+          </div>
+        )}
         <p className="t-caption">
           Next, Foundry will design the complete proposal around this choice. Nothing is built yet.
         </p>

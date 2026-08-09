@@ -285,10 +285,25 @@ export function ProjectDiscovery({
   }
 
   async function continueFromDesign() {
-    if (!conceptStudioReady) return;
+    // Both of these used to return in silence. A project whose understanding
+    // had failed reached this screen with no concepts, and every click did
+    // nothing at all -- no message, no movement, nothing to act on.
+    if (!conceptStudioReady) {
+      setDesignSubmissionError(
+        conceptStudio === null
+          ? "Foundry has not produced any visual directions for this project yet, so there is nothing to continue with. If this does not resolve, the project understanding behind it did not finish."
+          : "Foundry needs two browser-admitted directions before you can continue. It is still proving them.",
+      );
+      return;
+    }
     // A combined direction is valid once traits are selected. Typing is never
     // required, so completeness is read from the structured composition.
-    if (designChoice.mode === "other" && designChoice.composition?.complete !== true) return;
+    if (designChoice.mode === "other" && designChoice.composition?.complete !== true) {
+      setDesignSubmissionError(
+        "Choose the traits for your combined direction before continuing.",
+      );
+      return;
+    }
     setDesignSubmissionError(null);
     try {
       const selectedConceptId = designChoice.optionId ?? conceptStudio?.selectedConceptId ?? conceptStudio?.recommendedConceptId;

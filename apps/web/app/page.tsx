@@ -1620,6 +1620,7 @@ export default function Page() {
         <ProductTypeDiscovery
           busy={busy || mission.running}
           discovery={mission.productTypeDiscovery}
+          error={error ?? mission.error}
           onContinue={clarify}
         />
       );
