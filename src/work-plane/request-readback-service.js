@@ -19,7 +19,7 @@ import {
 function extractionPrompt(originalCustomerRequest) {
   return [
     "Read the customer's request below and list every distinct thing they asked for. Work only from their words. You are not being shown any plan, and you must not imagine one: your job is to record the request faithfully, not to decide what is reasonable or feasible.",
-    "Split compound requests. \"login/signup page\" is two asks, not one. A qualifier that describes the product's setting, audience, industry or tone is kind CONTEXT; something that has to be built or has to work is kind DELIVERABLE.",
+    "Split compound requests: \"a booking form and a calendar view\" is two asks, not one, and so is any phrase joined by a slash. A qualifier that describes the product's setting, audience, industry or tone is kind CONTEXT; something that has to be built or has to work is kind DELIVERABLE.",
     "Include asks the customer implied by a word like \"full\", \"complete\", or \"working\" only where that word commits to something specific and nameable. Do not pad the list with things they never mentioned.",
     "quotedFromRequest must be the customer's own words, copied exactly from the request, so they can recognise their own sentence.",
     `Customer request:\n${originalCustomerRequest}`,
