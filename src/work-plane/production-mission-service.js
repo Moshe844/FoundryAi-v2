@@ -23,7 +23,10 @@ import {
   ObservationAction,
   browserObservationDecision,
 } from "../domain/browser-observation-policy.js";
-import { CompletionResult } from "../domain/verification.js";
+import {
+  CompletionResult,
+  normalizeAcceptanceCondition,
+} from "../domain/verification.js";
 import {
   parseBrowserResult,
   RuntimeStatus,
@@ -2502,6 +2505,26 @@ function commandEvidence(evidence, workUnitId) {
     .find((record) => record.kind === ObservationKind.COMMAND_EXIT_RESULT);
 }
 
+// Mirrors the binding rule the verification authority enforces, so the evidence
+// chosen here is evidence it will accept. Kept deliberately in step with
+// loadApplicableEvidence: picking a record the authority then rejects fails the
+// whole mission at the last step, after the application is already built.
+export function evidenceBindsToObligation(record, obligation, activeObligations) {
+  if (record === undefined || record === null) return false;
+  if (!obligation.requiredEvidenceKinds.includes(record.kind)) return false;
+  if (record.obligationReference === obligation.obligationId) return true;
+  const sameShape = (candidate) =>
+    JSON.stringify(normalizeAcceptanceCondition(candidate.acceptanceCondition)) ===
+      JSON.stringify(normalizeAcceptanceCondition(obligation.acceptanceCondition)) &&
+    JSON.stringify([...candidate.requiredEvidenceKinds].sort()) ===
+      JSON.stringify([...obligation.requiredEvidenceKinds].sort());
+  return (activeObligations ?? []).some(
+    (candidate) =>
+      candidate.obligationId === record.obligationReference &&
+      sameShape(candidate),
+  );
+}
+
 function persistedWorkInputs(actionType, inputs) {
   if (actionType === WorkUnitAction.APPLY_FILE_BUNDLE) {
     return {
@@ -3580,18 +3603,30 @@ export function createProductionMissionService({
       const mode = bindings[obligation.obligationId];
       let records = [];
       if (modeProcedures[mode] !== undefined) {
-        const workUnit = workUnits
+        // Newest first, and take the newest one this obligation can actually
+        // accept. A scoped repair re-runs the production build while it is
+        // fixing a browser check, and the resulting command evidence is stamped
+        // with that browser obligation -- which does not accept command
+        // evidence at all. Taking the newest run unconditionally then handed a
+        // build obligation a record bound to a browser one, and verification
+        // rejected the binding after a build that had otherwise finished.
+        const candidates = workUnits
           .filter(
             (record) =>
               record.status === WorkUnitStatus.SUCCEEDED &&
               record.actionType === WorkUnitAction.RUN_COMMAND &&
               record.inputs.procedureName === modeProcedures[mode],
           )
-          .at(-1);
-        const record =
-          workUnit === undefined
-            ? undefined
-            : commandEvidence(evidence, workUnit.workUnitId);
+          .reverse()
+          .map((workUnit) => commandEvidence(evidence, workUnit.workUnitId))
+          .filter((record) => record !== undefined);
+        const bindable = candidates.find((record) =>
+          evidenceBindsToObligation(record, obligation, contract.obligations),
+        );
+        // Falling back to the newest keeps the previous behaviour when nothing
+        // is bindable, so verification reports why rather than finding no
+        // evidence at all.
+        const record = bindable ?? candidates[0];
         records =
           record === undefined
             ? []
