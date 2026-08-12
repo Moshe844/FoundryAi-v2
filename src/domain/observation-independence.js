@@ -66,13 +66,92 @@ export function checkBodies(source) {
 // expected value came from the test's own hand, not from believing the code.
 // Weak as a check, but it is not the defect this rule is looking for, and
 // rejecting it would send a correct check back for rewriting.
-function roundTripsItsOwnInput(body, comparison) {
+function balancedBlockAt(source, openingIndex) {
+  let depth = 0;
+  let quote = null;
+  let escaped = false;
+  for (let index = openingIndex; index < source.length; index += 1) {
+    const character = source[index];
+    if (quote !== null) {
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === quote) quote = null;
+      continue;
+    }
+    if (["\"", "'", "`"].includes(character)) {
+      quote = character;
+      continue;
+    }
+    if (character === "{") depth += 1;
+    else if (character === "}") {
+      depth -= 1;
+      if (depth === 0) return source.slice(openingIndex, index + 1);
+    }
+  }
+  return "";
+}
+
+function helperPerformsInput(source, helperName) {
+  const escapedName = helperName.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+  const interaction = /\.(?:click|fill|type|selectOption|press)\s*\(|\.keyboard\.(?:type|press)\s*\(/u;
+  const definitions = [
+    new RegExp(`\\bfunction\\s+${escapedName}\\b[^\\n{]{0,400}\\{`, "u"),
+    new RegExp(`\\b(?:const|let)\\s+${escapedName}\\b[^=\\n]{0,200}=\\s*(?:async\\s*)?[^\\n]{0,400}?=>\\s*\\{`, "u"),
+  ];
+  const definition = definitions
+    .map((pattern) => pattern.exec(source))
+    .find((match) => match !== null);
+  if (definition !== undefined) {
+    const openingIndex = definition.index + definition[0].lastIndexOf("{");
+    const helperBody = balancedBlockAt(source, openingIndex);
+    if (interaction.test(helperBody)) return true;
+  }
+  return false;
+}
+
+function roundTripsItsOwnInput(source, body, comparison) {
   const number = comparison.match(/\d+(?:\.\d+)?/u)?.[0];
   if (number === undefined) return false;
-  return new RegExp(
+  const directInput = new RegExp(
     `\\.(?:fill|type|selectOption|press)\\s*\\(\\s*(["'\`])\\s*${number}\\s*\\1`,
     "u",
   ).test(body);
+  if (directInput) return true;
+
+  const comparisonIndex = body.indexOf(comparison);
+  const beforeComparison = comparisonIndex < 0
+    ? body
+    : body.slice(0, comparisonIndex);
+  const locatorInput = new RegExp(
+    `(?:getByRole|getByLabel|locator)\\s*\\([\\s\\S]{0,240}?(["'\`])\\s*${number}\\s*\\1[\\s\\S]{0,240}?\\.(?:click|fill|type|press)\\s*\\(`,
+    "u",
+  ).test(beforeComparison);
+  if (locatorInput) return true;
+
+  // Generated checks usually centralize interaction in a small helper, for
+  // example press(context, ['9', 'Backspace']). The literal still came from
+  // the test, but the direct-action pattern above cannot see through that
+  // helper boundary. Only interaction-named calls qualify: an unrelated
+  // formatter or filter receiving a number must not turn a hard-coded display
+  // assertion into independent evidence.
+  const quotedNumbers = [
+    ...beforeComparison.matchAll(
+      new RegExp(`(["'\`])\\s*${number}\\s*\\1`, "gu"),
+    ),
+  ];
+  return quotedNumbers.some((literal) => {
+    const beforeLiteral = beforeComparison.slice(
+      Math.max(0, literal.index - 500),
+      literal.index,
+    );
+    // Take the innermost open call that owns this literal. A global call regex
+    // let an outer async(...) expression consume the nested press(...) call,
+    // losing the provenance we were trying to recover.
+    const call = /\b([A-Za-z_$][\w$]*)\s*\([^()]{0,500}$/u.exec(
+      beforeLiteral,
+    );
+    return call !== null && helperPerformsInput(source, call[1]);
+  });
 }
 
 /**
@@ -89,7 +168,7 @@ export function collusiveCheckIssues(source) {
     );
     if (literal === undefined) continue;
     if (DERIVES_FROM_PAGE.test(body)) continue;
-    if (roundTripsItsOwnInput(body, body.match(literal)?.[0] ?? "")) continue;
+    if (roundTripsItsOwnInput(source, body, body.match(literal)?.[0] ?? "")) continue;
     const quoted = body.match(literal)?.[0]?.trim().slice(0, 40) ?? "a literal";
     issues.push(
       `Check "${checkId}" reads a value the application rendered and settles it against the literal ${quoted}. ` +
@@ -98,4 +177,21 @@ export function collusiveCheckIssues(source) {
     );
   }
   return issues;
+}
+
+/**
+ * Fails once with every independent-observation defect in the generated test
+ * module. Reporting only the first issue made a bundle with three bad checks
+ * consume one paid correction per check, even though all three defects were
+ * already detectable in the original source.
+ */
+export function assertObservationIndependence(source) {
+  const issues = collusiveCheckIssues(source);
+  if (issues.length === 0) return;
+  throw new TypeError(
+    [
+      `The browser observation test contains ${issues.length} non-independent ${issues.length === 1 ? "check" : "checks"}. Correct all of them in the same response:`,
+      ...issues.map((issue, index) => `${index + 1}. ${issue}`),
+    ].join("\n"),
+  );
 }

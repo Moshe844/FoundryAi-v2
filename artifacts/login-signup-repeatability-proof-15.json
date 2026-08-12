@@ -1,0 +1,56 @@
+{
+  "startedAt": "2026-08-11T20:05:37.954Z",
+  "execute": true,
+  "resumed": false,
+  "inputs": [
+    {
+      "input": "Build a polished responsive login and signup website with distinct account creation and sign-in modes, durable user accounts, server-validated sessions that survive refresh, session-revoking sign out, accessible keyboard-friendly forms, and useful validation and authentication errors",
+      "missionId": "mission-1786478737980-385b6a5b",
+      "subtypeCount": 1,
+      "selectedSubtype": "web-application",
+      "blueprintVersion": 2,
+      "blueprintHash": "69769dbd506173a95248f2703fb7ef50bf3071026b6b9e9f775a236be332e7eb",
+      "primaryWorkflows": [
+        "A new visitor creates an account and remains signed in after refresh.",
+        "A returning user signs in, refreshes successfully, then signs out and loses access.",
+        "A user corrects validation or authentication errors through keyboard-friendly forms."
+      ],
+      "requiredSurfaces": [
+        "A person can switch between distinct sign-in and account-creation modes using keyboard and pointer input.",
+        "Submitting valid sign-up details creates a durable user account and reaches an authenticated state.",
+        "Submitting valid credentials authenticates the existing account and reaches an authenticated state.",
+        "Invalid, incomplete, and incorrect credentials produce useful accessible validation or authentication errors.",
+        "An authenticated session remains valid after a page refresh.",
+        "Signing out revokes the active session and leaves the person unauthenticated after refresh.",
+        "All form controls support logical keyboard navigation, visible focus, labels, and announced errors."
+      ],
+      "designDirections": [
+        "Guided Trust",
+        "Verified Workspace",
+        "Private Threshold"
+      ],
+      "minimumVisualDifferences": 7,
+      "recommendations": [
+        "Protect account privacy",
+        "Make session state explicit",
+        "Improve password entry"
+      ],
+      "customMessagePresent": true,
+      "selectedSubtypePresent": true,
+      "executionState": "SUCCEEDED",
+      "contractBlueprintHash": "69769dbd506173a95248f2703fb7ef50bf3071026b6b9e9f775a236be332e7eb",
+      "finishedMatchesApprovedBlueprint": true,
+      "firstPass": true,
+      "firstPassMetrics": {
+        "repairModelCalls": 0,
+        "reinstallCount": 0,
+        "rebuildCount": 1,
+        "runtimeRestartCount": 0
+      },
+      "attempts": 1
+    }
+  ],
+  "completedAt": "2026-08-11T20:12:40.043Z",
+  "passed": 1,
+  "failed": 0
+}

@@ -1,0 +1,15 @@
+{
+  "startedAt": "2026-08-11T14:52:34.509Z",
+  "execute": true,
+  "resumed": true,
+  "inputs": [
+    {
+      "input": "Build a full login and signup page with durable accounts, real session persistence, sign out, accessible responsive forms, and clear validation and authentication errors",
+      "attempts": 1,
+      "error": "Build a full login and signup page with durable accounts, real session persistence, sign out, accessible responsive forms, and clear validation and authentication errors execution: The original generated bundle failed deterministic admission; no paid regeneration was attempted: Accessibility check \"obligation-005\" must be computed from measured labeling and focus evidence."
+    }
+  ],
+  "completedAt": "2026-08-11T14:55:25.406Z",
+  "passed": 0,
+  "failed": 1
+}

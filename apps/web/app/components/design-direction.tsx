@@ -271,11 +271,13 @@ export function DesignDirection({
   choice,
   missionId,
   onChange,
+  onGenerationStarted,
   studio,
 }: Readonly<{
   choice: DesignDirectionChoice;
   missionId: string;
   onChange: (choice: DesignDirectionChoice) => void;
+  onGenerationStarted: () => Promise<void>;
   studio: LiveConceptStudio | null;
 }>) {
   const requested = useRef(false);
@@ -285,16 +287,23 @@ export function DesignDirection({
     message: string;
     scope: "generate" | "shock";
   } | null>(null);
+  const [generationRequested, setGenerationRequested] = useState(false);
 
-  function requestConcepts() {
+  async function requestConcepts() {
     requested.current = true;
+    setGenerationRequested(true);
     setRequestError(null);
-    void post(`/missions/${missionId}/concepts/generate`).catch((failure) => {
+    try {
+      await post(`/missions/${missionId}/concepts/generate`);
+      await onGenerationStarted();
+      setGenerationRequested(false);
+    } catch (failure) {
+      setGenerationRequested(false);
       setRequestError({
         message: failure instanceof Error ? failure.message : String(failure),
         scope: "generate",
       });
-    });
+    }
   }
 
   function requestShockConcept() {
@@ -308,31 +317,56 @@ export function DesignDirection({
   }
 
   useEffect(() => {
-    if (studio === null && !requested.current) requestConcepts();
+    if (studio === null && !requested.current) void requestConcepts();
   });
 
   const admitted = useMemo(
     () => studio?.concepts.filter((concept) => concept.verificationStatus === "PASSED") ?? [],
     [studio?.concepts],
   );
-  // Everything the waiting line needs. A retry has produced a concept record
-  // that did not pass; a slot with neither is still on its first attempt.
-  const retrying = (studio?.concepts ?? []).filter(
-    (concept) => concept.verificationStatus !== "PASSED",
+  const generationTracks = studio?.generationProgress?.concepts ?? [];
+  const progressWeight = {
+    QUEUED: 0,
+    GENERATING_FILES: 28,
+    RETRYING: 42,
+    VERIFYING_BROWSER: 72,
+    FAILED: 100,
+    ADMITTED: 100,
+  } as const;
+  const progressPercent = generationTracks.length === 0
+    ? Math.max(8, admitted.length * 33)
+    : Math.max(
+        8,
+        Math.round(
+          generationTracks.reduce(
+            (total, concept) => total + progressWeight[concept.phase],
+            0,
+          ) / generationTracks.length,
+        ),
+      );
+  const retrying = generationTracks.filter((concept) => concept.phase === "RETRYING").length;
+  const stillGenerating = generationTracks.filter((concept) =>
+    ["QUEUED", "GENERATING_FILES", "VERIFYING_BROWSER"].includes(concept.phase),
   ).length;
-  const stillGenerating = Math.max(0, 3 - admitted.length - retrying);
+  const writtenFiles = generationTracks.reduce(
+    (total, concept) => total + concept.files.filter((file) => file.status === "WRITTEN").length,
+    0,
+  );
+  const latestGenerationEvent = studio?.generationProgress?.events.at(-1) ?? null;
 
-  // Waiting looks like failure when nothing on screen moves, and for the two
-  // to four minutes before the first admission nothing genuinely does. The
-  // clock always does.
-  const generating = studio === null || studio.status === "GENERATING";
-  const [startedAt] = useState(() => Date.now());
+  const generating = generationRequested || studio === null || studio.status === "GENERATING";
   const [elapsedMs, setElapsedMs] = useState(0);
+  const generationStartedAt = Date.parse(
+    studio?.generationProgress?.startedAt ?? studio?.generation.startedAt ?? "",
+  );
   useEffect(() => {
     if (!generating) return;
-    const tick = window.setInterval(() => setElapsedMs(Date.now() - startedAt), 1_000);
+    const startedAt = Number.isFinite(generationStartedAt) ? generationStartedAt : Date.now();
+    const update = () => setElapsedMs(Math.max(0, Date.now() - startedAt));
+    update();
+    const tick = window.setInterval(update, 1_000);
     return () => window.clearInterval(tick);
-  }, [generating, startedAt]);
+  }, [generating, generationStartedAt]);
   const elapsedLabel = `${Math.floor(elapsedMs / 60_000)}m ${String(Math.floor((elapsedMs % 60_000) / 1_000)).padStart(2, "0")}s`;
 
   const recommended = admitted.find((concept) => concept.contract.conceptId === studio?.recommendedConceptId) ?? admitted[0];
@@ -387,26 +421,83 @@ export function DesignDirection({
           Each direction is generated as isolated HTML, CSS, and interaction code, then opened in a real browser at mobile, tablet, and desktop sizes. Broken concepts stay hidden.
         </p>
         <div className="concept-generation-progress">
-          <span style={{ width: `${Math.max(8, admitted.length * 33)}%` }} />
+          <span style={{ width: `${progressPercent}%` }} />
         </div>
-        {/* One line, and something in it always moves. Three fixed rows all
-            reading "Generating and opening in a real browser" told the truth —
-            all three were generating — and looked frozen for the two to four
-            minutes before anything is admitted. The elapsed count ticks every
-            second, so waiting never reads as stuck, and the counts change the
-            moment a concept is admitted or a retry begins. */}
         <p className="t-caption ink-tertiary concept-generation-line">
           <span className="concept-generation-elapsed">{elapsedLabel}</span>
           {" · "}
           {admitted.length > 0 ? `${admitted.length} admitted` : "none admitted yet"}
           {retrying > 0 ? ` · ${retrying} retrying` : ""}
-          {stillGenerating > 0 ? ` · ${stillGenerating} generating` : ""}
-          {admitted.length >= 2 ? " · enough to choose from" : ""}
+          {stillGenerating > 0 ? ` · ${stillGenerating} active` : ""}
         </p>
+        {generationTracks.length > 0 && (
+          <div className="concept-generation-now" aria-label="Current concept generation activity">
+            <span className="concept-generation-dot" aria-hidden="true" />
+            <p>
+              <strong>{latestGenerationEvent?.message ?? "Generating three isolated concepts."}</strong>
+              <span>
+                {writtenFiles > 0
+                  ? `${writtenFiles} real ${writtenFiles === 1 ? "file" : "files"} available in the activity drawer.`
+                  : "The activity drawer will show each real file as soon as validated output arrives."}
+              </span>
+            </p>
+          </div>
+        )}
         {admitted.length > 0 && (
           <p className="t-caption ink-secondary">
             Ready: {admitted.map((entry) => entry.contract.conceptName).join(", ")}
           </p>
+        )}
+        {studio?.generationProgress !== null && studio?.generationProgress !== undefined && (
+          <details className="concept-generation-details">
+            <summary>
+              <span>Live activity and generated code</span>
+              <span>{writtenFiles > 0 ? `${writtenFiles} files` : `${stillGenerating || 3} active`}</span>
+            </summary>
+            <div className="concept-generation-details-body">
+              <p className="t-caption ink-secondary">
+                Activity is recorded live. Actual source appears after each model response passes file and sandbox validation; Foundry never invents a fake code stream.
+              </p>
+              <ul className="concept-generation-activity" aria-label="Concept generation status">
+                {studio.generationProgress.concepts.map((concept) => (
+                  <li data-phase={concept.phase} key={concept.conceptId}>
+                    <span className="concept-generation-dot" aria-hidden="true" />
+                    <span><strong>{concept.conceptName}</strong> {concept.message}</span>
+                  </li>
+                ))}
+              </ul>
+              {studio.generationProgress.events.length > 0 && (
+                <ol className="concept-generation-events" aria-label="Generation event log">
+                  {studio.generationProgress.events.map((event, index) => (
+                    <li key={`${event.at}:${event.conceptId}:${index}`}>
+                      <time dateTime={event.at}>{new Date(event.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</time>
+                      <span><strong>{event.conceptName}</strong> {event.message}</span>
+                    </li>
+                  ))}
+                </ol>
+              )}
+              {studio.generationProgress.concepts.map((concept) => (
+                <details className="concept-code-group" key={concept.conceptId}>
+                  <summary>
+                    <span>{concept.conceptName}</span>
+                    <span>{concept.files.filter((file) => file.status === "WRITTEN").length}/{concept.files.length} files</span>
+                  </summary>
+                  <div>
+                    {concept.files.map((file) => (
+                      <details className="concept-code-file" key={file.path}>
+                        <summary>
+                          <code>{file.path}</code>
+                          <span>{file.status === "WRITTEN" ? "written" : "waiting"}</span>
+                        </summary>
+                        <pre><code>{file.content ?? "Waiting for validated model output…"}</code></pre>
+                        {file.truncated && <p className="t-caption">Preview truncated; the complete file is preserved in the isolated prototype workspace.</p>}
+                      </details>
+                    ))}
+                  </div>
+                </details>
+              ))}
+            </div>
+          </details>
         )}
         {studio === null && requestError?.scope === "generate" && (
           <div className="banner banner-fault" role="alert">
@@ -419,12 +510,27 @@ export function DesignDirection({
   }
 
   if (studio.status !== "READY") {
+    const admittedCount = studio.concepts.filter(
+      (concept) => concept.verificationStatus === "PASSED",
+    ).length;
     return (
       <section className="design-quality-blocker" role="alert">
-        <p className="t-label">Live Concept Studio paused</p>
-        <h2 className="t-title-l">Foundry could not produce a safe choice of concepts.</h2>
-        <p className="t-body-m">{studio.error ?? "The interrupted concept session can be resumed from its immutable artifacts."}</p>
-        <button type="button" className="btn btn-primary" onClick={requestConcepts}>Try concept generation again</button>
+        <p className="t-label">One direction needs attention</p>
+        <h2 className="t-title-l">Foundry kept the finished concepts.</h2>
+        <p className="t-body-m">
+          {admittedCount > 0
+            ? `${admittedCount} of 3 directions are safely finished. Foundry will keep them and correct only the missing direction.`
+            : "No broken concept was shown. Foundry can retry the isolated generation safely."}
+        </p>
+        {studio.error !== null && (
+          <details className="concept-failure-details">
+            <summary>Technical details</summary>
+            <p>{studio.error}</p>
+          </details>
+        )}
+        <button type="button" className="btn btn-primary" onClick={() => void requestConcepts()}>
+          {admittedCount > 0 ? "Complete the missing direction" : "Try concept generation again"}
+        </button>
       </section>
     );
   }

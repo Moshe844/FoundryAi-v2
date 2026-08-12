@@ -166,8 +166,18 @@ export function customerPhase(mission: Mission): CustomerPhaseView {
         // This read identically at the first observation and the seventh. A
         // passing build spends under a minute here; one correcting itself can
         // spend eleven, and looked frozen the entire time.
-        const observation = mission.executionProjection.observation;
+      const observation = mission.executionProjection.observation;
+      if (observation?.correcting === true) {
         return {
+          label: "Correcting an issue",
+          status: "Applying one focused correction before the next browser check",
+          pill: "pill-attention",
+          action: "Watch",
+          spineIndex: currentPhaseIndex,
+          fixing: true,
+        };
+      }
+      return {
           label: "Testing",
           status:
             observation === null || observation === undefined || observation.round <= 1
@@ -1439,13 +1449,28 @@ function lifecycleOutcome(
   const affectedArea = customerRepairArea(
     mission.executionProjection.repair?.affectedArea ?? null,
   );
+  const recordedTerminalError = mission.error
+    ?.trim()
+    .replace(/\s+/g, " ")
+    .slice(0, 500) || null;
+  const terminalError =
+    recordedTerminalError !== null &&
+    /generated bundle still failed deterministic admission/iu.test(
+      recordedTerminalError,
+    )
+      ? "Foundry's generated verification code did not pass its pre-build safety checks, so the project was not built. The exact technical reason is preserved in Engineering details."
+      : recordedTerminalError;
   const copy = {
     failed: {
       headline: "I stopped, and I couldn't finish this.",
       happened:
         affectedArea === null
-          ? "A recorded build step could not be completed safely."
-          : `The build could not safely complete ${affectedArea}.`,
+          ? terminalError === null
+            ? "A recorded build step could not be completed safely."
+            : terminalError
+          : terminalError === null
+            ? `The build could not safely complete ${affectedArea}.`
+            : `The build could not safely complete ${affectedArea}. ${terminalError}`,
       next:
         "Review what was proved and the Engineering details before starting a revised project.",
       need:

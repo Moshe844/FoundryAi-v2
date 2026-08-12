@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 1,
+  "result": "SUCCEEDED",
+  "missionId": "mission-1786468608575-798a8afd",
+  "projectName": "Secure Account Access",
+  "intent": "Build a full login and signup page with durable accounts, real secure server-validated session persistence, sign out that revokes the session, accessible responsive forms, and clear validation and authentication errors",
+  "previewUrl": "http://127.0.0.1:60576",
+  "workspaceRoot": "C:\\Users\\mekstein\\Documents\\Foundry-v2\\.foundry\\customer\\workspaces\\live\\mission-1786468608575-798a8afd-workspace\\root",
+  "timing": {
+    "missionStartedAt": "2026-08-11T17:16:48.575Z",
+    "executionStartedAt": "2026-08-11T17:18:20.260Z",
+    "succeededAt": "2026-08-11T17:23:01.459Z",
+    "totalSeconds": 372.9,
+    "executionToSuccessSeconds": 281.2
+  },
+  "verification": {
+    "bindingObligationsPassed": 13,
+    "bindingObligationsTotal": 13,
+    "productionBuild": "PASSED",
+    "runtimeStartup": "READY",
+    "browserTests": "2 passed",
+    "browserContractChecksPassed": 8,
+    "browserContractChecksTotal": 8,
+    "consoleErrors": [],
+    "pageErrors": [],
+    "captureProbeErrors": [],
+    "livePreviewHttpStatus": 200,
+    "livePreviewTitle": "Secure Account Access",
+    "repositoryRegressionSuite": {
+      "passed": 561,
+      "failed": 0,
+      "skipped": 2,
+      "total": 563
+    }
+  },
+  "executionMetrics": {
+    "installCount": 1,
+    "reinstallCount": 0,
+    "rebuildCount": 1,
+    "runtimeRestartCount": 1,
+    "browserTestRepairs": 1
+  },
+  "security": {
+    "durableStorage": "SQLite",
+    "passwordHashing": "scrypt with per-account random salt",
+    "passwordComparison": "timingSafeEqual",
+    "sessionToken": "32-byte cryptographically random opaque token",
+    "serverStorage": "SHA-256 digest of session token with expiry",
+    "sessionRefresh": "server lookup of token digest and expiry",
+    "logout": "server-side session revocation and cookie clearing",
+    "cookie": {
+      "httpOnly": true,
+      "sameSite": "lax",
+      "secureInProduction": true,
+      "maxAgeSeconds": 604800
+    }
+  },
+  "evidence": {
+    "ledger": ".foundry/customer/ledger/mission-1786468608575-798a8afd.jsonl",
+    "browserVerification": ".foundry/customer/evidence/records/mission-1786468608575-798a8afd-007-browser-verification-runtime-2-attempt-2.command.json"
+  }
+}

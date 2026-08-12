@@ -1,0 +1,15 @@
+{
+  "startedAt": "2026-08-11T16:08:17.495Z",
+  "execute": true,
+  "resumed": false,
+  "inputs": [
+    {
+      "input": "Build a full login and signup page with durable accounts, real secure server-validated session persistence, sign out that revokes the session, accessible responsive forms, and clear validation and authentication errors",
+      "attempts": 1,
+      "error": "Build a full login and signup page with durable accounts, real secure server-validated session persistence, sign out that revokes the session, accessible responsive forms, and clear validation and authentication errors execution: Three browser repair proposals were rejected before pipeline execution: Structured output failed semantic validation: Responsive check \"obligation-013\" observes project-specific element visibility without setting the viewport in that check. The shared phone evidence is measured earlier, but each project check starts at desktop width; set a 280-480px viewport before asserting a mobile-only navigation or control."
+    }
+  ],
+  "completedAt": "2026-08-11T16:14:37.101Z",
+  "passed": 0,
+  "failed": 1
+}

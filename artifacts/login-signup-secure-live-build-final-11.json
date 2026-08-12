@@ -1,0 +1,15 @@
+{
+  "startedAt": "2026-08-11T17:16:48.538Z",
+  "execute": true,
+  "resumed": false,
+  "inputs": [
+    {
+      "input": "Build a full login and signup page with durable accounts, real secure server-validated session persistence, sign out that revokes the session, accessible responsive forms, and clear validation and authentication errors",
+      "attempts": 1,
+      "error": "Build a full login and signup page with durable accounts, real secure server-validated session persistence, sign out that revokes the session, accessible responsive forms, and clear validation and authentication errors did not complete on the original generation path; repaired or repeated execution is not certification."
+    }
+  ],
+  "completedAt": "2026-08-11T17:23:02.496Z",
+  "passed": 0,
+  "failed": 1
+}

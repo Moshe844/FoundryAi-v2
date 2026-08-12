@@ -6,7 +6,6 @@ import { fileURLToPath } from "node:url";
 import { createHash, randomUUID } from "node:crypto";
 
 import {
-  CERTIFIED_PROJECT_PACKAGE_VERSIONS,
   ProviderHealth,
   ProviderId,
   MODEL_GOVERNANCE_POLICY,
@@ -28,7 +27,10 @@ import {
   normalizeCustomerFollowUpAnswers,
 } from "../../../src/index.js";
 import { terminateProcessTree } from "../../../src/work-plane/command-runner.js";
-import { createRequestReadbackService } from "../../../src/work-plane/request-readback-service.js";
+import {
+  createRequestReadbackService,
+  deterministicFocusedAuthenticationReadback,
+} from "../../../src/work-plane/request-readback-service.js";
 import { projectDecisionHistory } from "./decision-history.mjs";
 import { projectDiscoveryConversation } from "./discovery-conversation.mjs";
 import { projectExecutionProjection } from "./execution-projection.mjs";
@@ -134,6 +136,7 @@ const requestReadback = createRequestReadbackService({
 const activeJobs = new Map();
 const activeUnderstandingJobs = new Map();
 const activeConceptJobs = new Map();
+const activeConceptProgress = new Map();
 const prototypeRoot = resolve(stateRoot, "prototype-root");
 const prototypeWorkspaces = createPrototypeWorkspaceService({ prototypeRoot });
 const prototypeRuntimes = createPrototypeRuntimeService({
@@ -203,12 +206,18 @@ function startUnderstandingJob({
       // one sentence; the plan itself takes far longer.
       try {
         const design = control.understanding.latestDesign(missionId);
-        const settled = await requestReadback.readBack({
-          missionId,
-          originalCustomerRequest: intent,
-          projectDesign: design,
-          profileVersion,
-        });
+        const settled =
+          deterministicFocusedAuthenticationReadback({
+            originalCustomerRequest: intent,
+            projectDesign: design,
+            profileVersion,
+          }) ??
+          await requestReadback.readBack({
+            missionId,
+            originalCustomerRequest: intent,
+            projectDesign: design,
+            profileVersion,
+          });
         if (settled !== null) requestReadbacks.save(missionId, settled);
       } catch (error) {
         // A read-back that cannot be produced is reported as unavailable, never
@@ -559,6 +568,11 @@ function publicConceptStudio(missionId) {
   const session = prototypeSessions.read(missionId);
   if (session === null) return null;
   const generating = activeConceptJobs.has(missionId);
+  const progress = activeConceptProgress.get(missionId);
+  let generationProgress = session.generationProgress ?? null;
+  if (generating) {
+    generationProgress = progress === undefined ? null : conceptProgressSnapshot(progress);
+  }
   return {
     ...session,
     status: generating ? "GENERATING" : session.status,
@@ -573,8 +587,85 @@ function publicConceptStudio(missionId) {
           ? `http://127.0.0.1:${port}/missions/${missionId}/concepts/${concept.contract.conceptId}/evidence/root-desktop.png`
           : null,
     })),
+    generationProgress,
     generating,
   };
+}
+
+const CONCEPT_FILE_PREVIEW_LIMIT = 12_000;
+
+function conceptProgressSnapshot(progress) {
+  return structuredClone({
+    ...progress,
+    concepts: [...progress.concepts.values()],
+  });
+}
+
+function startConceptProgress({ missionId, alternatives, session }) {
+  const now = new Date().toISOString();
+  const admittedById = new Map(
+    session.concepts
+      .filter((concept) => concept.verificationStatus === "PASSED")
+      .map((concept) => [concept.contract.conceptId, concept]),
+  );
+  const progress = {
+    startedAt: session.generation?.startedAt ?? now,
+    updatedAt: now,
+    events: [],
+    concepts: new Map(alternatives.map((alternative) => {
+      const admitted = admittedById.get(alternative.id);
+      return [alternative.id, {
+        conceptId: alternative.id,
+        conceptName: alternative.name.value,
+        attempt: admitted === undefined ? 0 : 1,
+        maxAttempts: 3,
+        phase: admitted === undefined ? "QUEUED" : "ADMITTED",
+        message: admitted === undefined
+          ? "Waiting for an isolated generation slot."
+          : "Already passed mobile, tablet, and desktop browser admission.",
+        files: admitted === undefined
+          ? ["index.html", "styles.css", "concept.js"].map((path) => ({
+              path,
+              status: "PLANNED",
+              content: null,
+              truncated: false,
+            }))
+          : [],
+        updatedAt: now,
+      }];
+    })),
+  };
+  activeConceptProgress.set(missionId, progress);
+}
+
+function updateConceptProgress(missionId, conceptId, patch, event = null) {
+  const progress = activeConceptProgress.get(missionId);
+  const previous = progress?.concepts.get(conceptId);
+  if (progress === undefined || previous === undefined) return;
+  const now = new Date().toISOString();
+  progress.concepts.set(conceptId, { ...previous, ...patch, updatedAt: now });
+  progress.updatedAt = now;
+  if (event !== null) {
+    progress.events.push({
+      conceptId,
+      conceptName: previous.conceptName,
+      at: now,
+      message: event,
+    });
+    if (progress.events.length > 80) progress.events.splice(0, progress.events.length - 80);
+  }
+}
+
+function generatedFilePreviews(workspace) {
+  return workspace.fileManifest.map((file) => {
+    const content = readFileSync(resolve(workspace.sourcePath, file.path), "utf8");
+    return {
+      path: file.path,
+      status: "WRITTEN",
+      content: content.slice(0, CONCEPT_FILE_PREVIEW_LIMIT),
+      truncated: content.length > CONCEPT_FILE_PREVIEW_LIMIT,
+    };
+  });
 }
 
 // Save one admitted concept into the session immediately, so the studio can
@@ -651,6 +742,23 @@ function shockDirectivesFromContract(shockContract, sourceContract) {
   ].filter((entry) => typeof entry === "string" && entry.trim() !== "");
 }
 
+function focusedConceptAdmissionFeedback(value) {
+  const message = String(value ?? "");
+  if (
+    /(?:inline style|style-src 'self'|setAttribute\(['"]style|\.style\.|\.cssText)/iu.test(
+      message,
+    )
+  ) {
+    return [
+      "The prior prototype attempted inline styling, which the isolated CSP blocks.",
+      "Do not use style attributes, setAttribute('style', ...), cssText, element.style, or style.setProperty anywhere.",
+      "For scroll or task progress, render a native <progress max=\"100\" value=\"0\"> element, style it in styles.css, and update only its JavaScript value property and aria-valuenow.",
+      "For every other visual state, toggle a class, hidden, aria-expanded, aria-selected, or a data attribute whose complete styling already exists in styles.css.",
+    ].join(" ");
+  }
+  return message.slice(0, 1_000);
+}
+
 function startConceptGenerationJob({ missionId, understanding, sourceProjectDesignVersion }) {
   if (activeConceptJobs.has(missionId)) return activeConceptJobs.get(missionId);
   const alternatives = understanding.proposal.alternatives.slice(0, 3);
@@ -658,6 +766,7 @@ function startConceptGenerationJob({ missionId, understanding, sourceProjectDesi
     throw new TypeError("Live Concept Studio requires three model-authored design alternatives before generation.");
   }
   let session = prototypeSessions.begin({ missionId, sourceProjectDesignVersion });
+  startConceptProgress({ missionId, alternatives, session });
   const operation = (async () => {
     // Yield once so the operation is registered before a restart audit that needs
     // no provider or browser awaits can reach its cleanup path.
@@ -695,7 +804,7 @@ function startConceptGenerationJob({ missionId, understanding, sourceProjectDesi
         // later failed browser admission.
         const usages = [];
         let admissionFeedback = priorFeedback.get(alternative.id) ?? [];
-        for (let attempt = 1; attempt <= 2; attempt += 1) {
+        for (let attempt = 1; attempt <= 3; attempt += 1) {
           // Versions are filtered by conceptId, so concurrent alternatives never
           // contend for the same number.
           const previousVersions = prototypeWorkspaces
@@ -711,11 +820,28 @@ function startConceptGenerationJob({ missionId, understanding, sourceProjectDesi
             conceptVersion,
           });
           try {
+            updateConceptProgress(missionId, alternative.id, {
+              attempt,
+              phase: "GENERATING_FILES",
+              message: `Drafting index.html, styles.css, and concept.js (attempt ${attempt} of 3).`,
+              files: contract.expectedFiles.map((path) => ({
+                path,
+                status: "PLANNED",
+                content: null,
+                truncated: false,
+              })),
+            }, `Started code generation attempt ${attempt} of 3.`);
             const generated = await prototypeGeneration.generate({
               conceptContract: contract,
               admissionFeedback,
             });
             usages.push(generated.usage);
+            const files = generatedFilePreviews(generated.workspace);
+            updateConceptProgress(missionId, alternative.id, {
+              phase: "VERIFYING_BROWSER",
+              message: "Files written. Opening the isolated runtime at mobile, tablet, and desktop sizes.",
+              files,
+            }, `Wrote ${files.map((file) => file.path).join(", ")}; browser verification started.`);
             const verification = await prototypeVerification.verify({
               conceptContract: contract,
               verificationId: `${contract.conceptId}-v${contract.conceptVersion}-admission`,
@@ -744,10 +870,20 @@ function startConceptGenerationJob({ missionId, understanding, sourceProjectDesi
                 error: `Concept "${contract.conceptName}" failed browser admission: ${verification.findings.join(" ")}`,
                 occurredAt: new Date().toISOString(),
               });
-              admissionFeedback = [failures.at(-1).error.slice(0, 1_000)];
-              if (attempt === 2) {
+              admissionFeedback = [
+                focusedConceptAdmissionFeedback(failures.at(-1).error),
+              ];
+              if (attempt === 3) {
+                updateConceptProgress(missionId, alternative.id, {
+                  phase: "FAILED",
+                  message: "This direction did not pass browser admission after three attempts.",
+                }, `Browser admission failed on attempt ${attempt}: ${verification.findings.join(" ").slice(0, 500)}`);
                 return { concept, usages, failures, error: new TypeError(failures.at(-1).error) };
               }
+              updateConceptProgress(missionId, alternative.id, {
+                phase: "RETRYING",
+                message: `Browser admission found a problem. Correcting only this direction (attempt ${attempt + 1} of 3).`,
+              }, `Browser admission rejected attempt ${attempt}; a focused retry was queued.`);
               continue;
             }
             // Publish the moment it is admitted. Holding every concept until
@@ -756,6 +892,10 @@ function startConceptGenerationJob({ missionId, understanding, sourceProjectDesi
             // third retried — the customer watching "Building live concepts…"
             // with the work already done and nothing to show for it.
             publishAdmittedConcept(missionId, concept);
+            updateConceptProgress(missionId, alternative.id, {
+              phase: "ADMITTED",
+              message: "Passed mobile, tablet, and desktop browser admission.",
+            }, "Direction admitted and ready to preview.");
             return { concept, usages, verification, failures, error: null };
           } catch (error) {
             const message = String(error?.message ?? error).slice(0, 1_000);
@@ -766,8 +906,18 @@ function startConceptGenerationJob({ missionId, understanding, sourceProjectDesi
               error: message,
               occurredAt: new Date().toISOString(),
             });
-            admissionFeedback = [message];
-            if (attempt === 2) return { concept: null, usages, failures, error };
+            admissionFeedback = [focusedConceptAdmissionFeedback(message)];
+            if (attempt === 3) {
+              updateConceptProgress(missionId, alternative.id, {
+                phase: "FAILED",
+                message: "This direction could not produce valid isolated files after three attempts.",
+              }, `Code generation failed on attempt ${attempt}: ${message.slice(0, 500)}`);
+              return { concept: null, usages, failures, error };
+            }
+            updateConceptProgress(missionId, alternative.id, {
+              phase: "RETRYING",
+              message: `Generated code missed a safety or file rule. Correcting it (attempt ${attempt + 1} of 3).`,
+            }, `Code validation rejected attempt ${attempt}; a focused retry was queued.`);
           }
         }
         return { concept: null, usages, failures, error: new TypeError("Concept generation produced no result.") };
@@ -817,18 +967,15 @@ function startConceptGenerationJob({ missionId, understanding, sourceProjectDesi
         concepts,
         attemptFailures,
         generation,
+        generationProgress: conceptProgressSnapshot(activeConceptProgress.get(missionId)),
       });
       const admitted = session.concepts.filter((concept) => concept.verificationStatus === "PASSED");
-      // Three directions are what Foundry aims for, not what a choice requires.
-      // One concept tripping a prototype safety rule used to discard the two
-      // that had been generated, browser-admitted at three viewports, and were
-      // ready to choose between — the customer was shown a paused studio and a
-      // CSP message about a concept they never asked for. Offer what was
-      // actually proven; only a studio that cannot offer a choice has failed.
-      if (admitted.length < 2) {
+      // The screen promises three real directions. Keep every passed artifact
+      // for a focused resume, but never label a two-direction result READY.
+      if (admitted.length < 3) {
         throw firstError ??
           new TypeError(
-            `Only ${admitted.length} concept${admitted.length === 1 ? "" : "s"} passed browser admission, which is not a choice.`,
+            `Only ${admitted.length} of 3 concepts passed browser admission. Retry resumes from the admitted concepts and regenerates only the missing direction.`,
           );
       }
       const differentiation = verifyStudioDifferentiation(admitted, verified);
@@ -842,6 +989,7 @@ function startConceptGenerationJob({ missionId, understanding, sourceProjectDesi
         recommendedConceptId: recommended.contract.conceptId,
         recommendationReason: recommended.recommendationReason,
         generation: { ...session.generation, completedAt: new Date().toISOString() },
+        generationProgress: conceptProgressSnapshot(activeConceptProgress.get(missionId)),
         error: null,
       });
       return session;
@@ -850,11 +998,15 @@ function startConceptGenerationJob({ missionId, understanding, sourceProjectDesi
         ...session,
         status: "FAILED",
         generation: { ...session.generation, completedAt: new Date().toISOString() },
+        generationProgress: activeConceptProgress.has(missionId)
+          ? conceptProgressSnapshot(activeConceptProgress.get(missionId))
+          : session.generationProgress ?? null,
         error: String(error?.message ?? error).slice(0, 1_000),
       });
       throw error;
     } finally {
       activeConceptJobs.delete(missionId);
+      activeConceptProgress.delete(missionId);
     }
   })();
   activeConceptJobs.set(missionId, operation);
@@ -952,7 +1104,7 @@ function startConceptEvolutionJob({
           admitted = { concept, nextConcepts, differentiation };
         } catch (error) {
           const failure = String(error?.message ?? error).slice(0, 1_000);
-          admissionFeedback = [failure];
+          admissionFeedback = [focusedConceptAdmissionFeedback(failure)];
           session = prototypeSessions.save({
             ...session,
             evolution: {
@@ -1816,7 +1968,14 @@ const server = createServer(async (request, response) => {
         return json(response, 409, { error: "Concepts can be generated only after project understanding and before production execution." });
       }
       const ready = prototypeSessions.read(conceptRoute.missionId);
-      if (ready?.status !== "READY" || ready?.differentiationStatus !== "PASSED") {
+      const admittedCount = ready?.concepts.filter(
+        (concept) => concept.verificationStatus === "PASSED",
+      ).length ?? 0;
+      if (
+        ready?.status !== "READY" ||
+        ready?.differentiationStatus !== "PASSED" ||
+        admittedCount < 3
+      ) {
         startConceptGenerationJob({
           missionId: conceptRoute.missionId,
           understanding: conceptUnderstandingFromProfile(prior.profile),
@@ -2200,27 +2359,20 @@ const server = createServer(async (request, response) => {
 // a precondition for building.
 function warmCertifiedPackageCache() {
   try {
-    // Only shell-safe specifiers may be passed, because Windows needs
-    // shell: true to launch npm.cmd at all.
-    const specifiers = Object.entries(CERTIFIED_PROJECT_PACKAGE_VERSIONS)
-      .map(([packageName, version]) => `${packageName}@${version}`)
-      .filter((specifier) => /^@?[a-z0-9._/-]+@[a-z0-9.+-]+$/iu.test(specifier));
-    if (specifiers.length === 0) return;
     const child = spawn(
-      process.platform === "win32" ? "npm.cmd" : "npm",
-      ["cache", "add", ...specifiers],
+      process.execPath,
+      [resolve(repositoryRoot, "scripts/foundry-certified-install.mjs"), "--warm"],
       {
         cwd: repositoryRoot,
         stdio: "ignore",
         windowsHide: true,
-        shell: process.platform === "win32",
       },
     );
     child.once("error", () => {});
     child.once("exit", (code) => {
       if (code === 0) {
         process.stdout.write(
-          `Certified package cache warmed (${specifiers.length} packages).\n`,
+          "Certified dependency image is ready.\n",
         );
       }
     });

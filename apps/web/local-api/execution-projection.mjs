@@ -98,8 +98,12 @@ function observationProjection(events) {
   ).length;
   return Object.freeze({
     round: started.length,
-    maximumRounds: 7,
+    maximumRounds: 3,
     corrections,
+    // Between an observation and its next rerun, the engine is repairing or
+    // rebuilding. Calling that whole interval "Testing" made a 60-second
+    // browser phase look like ten minutes of the same test repeating.
+    correcting: corrections >= started.length,
   });
 }
 

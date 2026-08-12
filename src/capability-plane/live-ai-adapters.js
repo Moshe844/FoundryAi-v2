@@ -21,6 +21,13 @@ const endpoints = Object.freeze({
 });
 
 export function modelRequestTimeoutMs(request) {
+  if (
+    Number.isSafeInteger(request.requestTimeoutMs) &&
+    request.requestTimeoutMs >= 15_000 &&
+    request.requestTimeoutMs <= 300_000
+  ) {
+    return request.requestTimeoutMs;
+  }
   // A complete responsive HTML/CSS/interaction prototype routinely approaches
   // the same structured-output size as production file generation. Cutting it
   // off at two minutes caused healthy providers to fail after doing the work.

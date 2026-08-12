@@ -110,6 +110,7 @@ export function ProjectDiscovery({
   missionRunning,
   missionId,
   conceptStudio,
+  onConceptGenerationStarted,
   onClarify,
   initialStage,
   onStageChange,
@@ -122,6 +123,7 @@ export function ProjectDiscovery({
   missionRunning: boolean;
   missionId: string;
   conceptStudio: LiveConceptStudio | null;
+  onConceptGenerationStarted: () => Promise<void>;
   onClarify: (answers: CustomerFollowUpAnswer[]) => Promise<boolean>;
   initialStage?: string | null;
   onStageChange?: (stage: string) => void;
@@ -160,15 +162,13 @@ export function ProjectDiscovery({
   const stageRef = useRef<HTMLDivElement>(null);
   const proposal = understanding.proposal;
   const interactionBusy = busy || missionRunning;
-  // The studio admits a session once it can offer a choice, which is two
-  // proven directions. Requiring three here left a READY studio showing its
-  // concepts with the button still reading "Building live concepts…", so the
-  // customer could select a direction and had no way to continue.
+  // "Three real directions" is a customer-facing contract, so both the server
+  // and the continue gate require all three to pass browser admission.
   const conceptStudioReady =
     conceptStudio?.status === "READY" &&
     conceptStudio.concepts.filter(
       (concept) => concept.verificationStatus === "PASSED",
-    ).length >= 2;
+    ).length >= 3;
   const effectiveSelected = Object.fromEntries(
     proposal.recommendations.map((recommendation) => [
       recommendation.id,
@@ -212,9 +212,15 @@ export function ProjectDiscovery({
   }
 
   function inviteInput() {
-    document
-      .querySelector<HTMLTextAreaElement>("#customer-conversation-message")
-      ?.focus();
+    const companion = document.querySelector<HTMLDetailsElement>(
+      ".discovery-companion",
+    );
+    if (companion !== null) companion.open = true;
+    window.requestAnimationFrame(() =>
+      document
+        .querySelector<HTMLTextAreaElement>("#customer-conversation-message")
+        ?.focus(),
+    );
   }
 
   async function submitCustomerInput(answer: CustomerFollowUpAnswer) {
@@ -515,13 +521,14 @@ export function ProjectDiscovery({
               <DesignDirection
                 choice={designChoice}
                 missionId={missionId}
+                onGenerationStarted={onConceptGenerationStarted}
                 onChange={(choice) => {
                   setDesignChoice(choice);
                   setApprovedPrototype(null);
                 }}
                 studio={conceptStudio}
               />
-              <div className="stage-actions">
+              {conceptStudioReady && <div className="stage-actions">
                 <button
                   className="btn btn-primary"
                   disabled={
@@ -547,7 +554,7 @@ export function ProjectDiscovery({
                     Add a design note
                   </button>
                 )}
-              </div>
+              </div>}
               {designSubmissionError && (
                 <div className="banner banner-fault" role="alert">
                   <div className="banner-body">

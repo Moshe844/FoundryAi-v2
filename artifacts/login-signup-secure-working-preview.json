@@ -1,0 +1,25 @@
+{
+  "status": "verified-working-preview",
+  "missionId": "mission-1786467880675-886b8fef",
+  "missionCardState": "CANCELLED",
+  "previewUrl": "http://127.0.0.1:49333",
+  "workspace": "C:\\Users\\mekstein\\Documents\\Foundry-v2\\.foundry\\customer\\workspaces\\live\\mission-1786467880675-886b8fef-workspace\\root",
+  "verification": {
+    "productionBuild": "passed",
+    "browserChecksPassed": 9,
+    "browserChecksTotal": 9,
+    "consoleErrors": 0,
+    "pageErrors": 0,
+    "captureProbeErrors": 0,
+    "repositoryTestsPassed": 561,
+    "repositoryTestsSkipped": 2,
+    "repositoryTestsFailed": 0
+  },
+  "security": {
+    "passwordStorage": "scrypt with a random per-account salt",
+    "sessionCookie": "opaque random token, HttpOnly, SameSite=Lax, Secure in production",
+    "serverSessionStorage": "SHA-256 token hash with server-side expiry",
+    "signOut": "deletes the server-side session and clears the cookie"
+  },
+  "caveat": "The generated application is verified and live, but the Foundry project card is CANCELLED because the supervising run was deliberately stopped after the first browser failure; its fast test-only repair completed with 9/9 checks immediately before cancellation. This artifact does not claim the Foundry build pipeline is fully reliable."
+}

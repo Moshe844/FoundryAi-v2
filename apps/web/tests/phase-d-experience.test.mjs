@@ -176,6 +176,8 @@ test("the accepted start request has an honest bounded handoff", async () => {
   ]);
   assert.match(page, /baselineActivitySequence/);
   assert.match(page, /activity\.sequence > startHandoff\.baselineActivitySequence/);
+  assert.match(page, /executionStarted=\{!\["INTAKE", "CLARIFYING", "CONTRACTED"\]\.includes\(/);
+  assert.match(transition, /if \(!activityArrived \|\| !executionStarted\) return;/);
   assert.match(transition, /Starting work on \{projectName\}\./);
   assert.match(transition, /everything is\s+recorded/);
   assert.match(transition, /20_000/);
@@ -196,4 +198,26 @@ test("the accepted start request has an honest bounded handoff", async () => {
     server,
     /missionRoute\?\.action === "start"[\s\S]*json\(response, 202/,
   );
+});
+
+test("concept recovery acknowledges the click immediately and refreshes authoritative state", async () => {
+  const [direction, discovery, page] = await Promise.all([
+    source("../app/components/design-direction.tsx"),
+    source("../app/components/project-discovery.tsx"),
+    source("../app/page.tsx"),
+  ]);
+
+  assert.match(direction, /setGenerationRequested\(true\)/);
+  assert.match(
+    direction,
+    /await post\(`\/missions\/\$\{missionId\}\/concepts\/generate`\)/,
+  );
+  assert.match(direction, /await onGenerationStarted\(\)/);
+  assert.match(
+    direction,
+    /generationRequested \|\| studio === null \|\| studio\.status === "GENERATING"/,
+  );
+  assert.match(discovery, /onGenerationStarted=\{onConceptGenerationStarted\}/);
+  assert.match(page, /onConceptGenerationStarted=\{async \(\) => \{/);
+  assert.match(page, /await api<unknown>\(`\/missions\/\$\{mission\.missionId\}`\)/);
 });

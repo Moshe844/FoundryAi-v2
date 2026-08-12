@@ -1,0 +1,15 @@
+{
+  "startedAt": "2026-08-11T21:15:40.359Z",
+  "execute": true,
+  "resumed": false,
+  "inputs": [
+    {
+      "input": "Build a polished responsive and accessible login and signup website. People must create durable accounts, sign in later with saved credentials, remain signed in across refresh through secure sessions, sign out with session revocation, switch clearly between sign-in and account-creation modes, use labelled keyboard-accessible forms on phone and desktop, and see useful validation and authentication errors.",
+      "attempts": 1,
+      "error": "Build a polished responsive and accessible login and signup website. People must create durable accounts, sign in later with saved credentials, remain signed in across refresh through secure sessions, sign out with session revocation, switch clearly between sign-in and account-creation modes, use labelled keyboard-accessible forms on phone and desktop, and see useful validation and authentication errors. execution: The generated bundle still failed deterministic admission after 1 paid regenerations: Responsive check \"obligation-013\" must be computed from measured phone-layout quality evidence."
+    }
+  ],
+  "completedAt": "2026-08-11T21:19:05.190Z",
+  "passed": 0,
+  "failed": 1
+}

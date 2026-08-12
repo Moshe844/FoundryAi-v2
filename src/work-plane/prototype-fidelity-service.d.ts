@@ -11,6 +11,13 @@ export function createPrototypeFidelityService(input: {
   workspaceService: Readonly<Record<string, unknown>>;
   browserVerifier: Readonly<Record<string, unknown>>;
 }): Readonly<{
+  loadApprovedPrototypeSource(input: {
+    approvedDesignContract: ApprovedDesignContract;
+  }): Readonly<{
+    approvedDesignId: string;
+    prototypeContentHash: string;
+    files: readonly Readonly<{ path: string; content: string; contentHash: string }>[];
+  }>;
   verify(input: {
     approvedDesignContract: ApprovedDesignContract;
     productionPreviewUrl: string;

@@ -28,13 +28,21 @@ function acceptedDesignShortfall(evidence, missionId) {
     )
     .at(-1);
   if (record === undefined) return null;
+  const recordedComparedViewports = record.payload.record.comparedViewports;
+  // One deployed writer briefly persisted the fidelity evidence's viewport
+  // key array instead of the completion contract's numeric count. Normalize
+  // that historical shape at the evidence boundary so an otherwise proven
+  // mission can always finish verification after a restart.
+  const comparedViewports = Array.isArray(recordedComparedViewports)
+    ? recordedComparedViewports.length
+    : recordedComparedViewports ?? null;
   const failedAspects = (record.payload.record.failedAspects ?? []).filter(
     (aspect) => typeof aspect === "string" && aspect.trim() !== "",
   );
   // A shortfall was accepted, so something fell short. If the aspect names did
   // not survive, say so rather than reporting a clean verdict.
   return {
-    comparedViewports: record.payload.record.comparedViewports ?? null,
+    comparedViewports,
     failedAspects:
       failedAspects.length > 0 ? failedAspects : ["unnamed design aspects"],
     reason:

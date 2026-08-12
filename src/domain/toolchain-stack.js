@@ -43,17 +43,26 @@ export const CertificationEvidenceScope = Object.freeze({
 
 export const CERTIFIED_STACK_ID =
   "web-nextjs-typescript-sqlite-npm-playwright";
-export const CERTIFIED_STACK_VERSION = "1.0.0";
+export const CERTIFIED_STACK_VERSION = "1.5.0";
+const READABLE_CERTIFIED_STACK_VERSIONS = new Set([
+  "1.0.0",
+  "1.1.0",
+  "1.2.0",
+  "1.3.0",
+  "1.4.0",
+  "1.5.0",
+]);
 export const CERTIFIED_PROJECT_PACKAGE_VERSIONS = Object.freeze({
-  "@playwright/test": "1.54.2",
+  "@eslint/eslintrc": "3.3.1",
+  "@playwright/test": "1.62.1",
   "@types/better-sqlite3": "7.6.13",
   "@types/node": "22.15.21",
   "@types/react": "19.1.2",
   "@types/react-dom": "19.1.2",
   "better-sqlite3": "13.0.1",
   eslint: "9.29.0",
-  "eslint-config-next": "15.4.4",
-  next: "15.4.4",
+  "eslint-config-next": "15.5.23",
+  next: "15.5.23",
   react: "19.1.0",
   "react-dom": "19.1.0",
   typescript: "5.8.3",
@@ -322,7 +331,7 @@ export const WEB_STACK_MANIFEST = withManifestHash({
     },
     {
       toolId: "nextjs",
-      versionRange: "=15.4.4",
+      versionRange: "=15.5.23",
       availabilityScope: "project-dependency",
     },
     {
@@ -337,7 +346,7 @@ export const WEB_STACK_MANIFEST = withManifestHash({
     },
     {
       toolId: "playwright",
-      versionRange: ">=1.54.0 <2.0.0",
+      versionRange: ">=1.62.1 <2.0.0",
       availabilityScope: "project-dependency",
     },
     {
@@ -357,7 +366,7 @@ export const WEB_STACK_MANIFEST = withManifestHash({
       [
         "exec",
         "--yes",
-        "create-next-app@15.4.4",
+        "create-next-app@15.5.23",
         "--",
         "--typescript",
         "--eslint",
@@ -367,9 +376,9 @@ export const WEB_STACK_MANIFEST = withManifestHash({
       "Scaffold the pinned Next.js TypeScript application shape.",
     ),
     install: procedure(
-      "npm",
-      ["ci"],
-      "Install exactly the dependency-lock contents.",
+      "node",
+      ["scripts/foundry-certified-install.mjs"],
+      "Materialize the exact certified dependency image, falling back to an ordinary pinned npm install when the image is unavailable.",
     ),
     typeCheck: procedure(
       "npm",
@@ -521,10 +530,10 @@ export function normalizeStackManifest(input) {
   );
   if (
     input.stackId !== CERTIFIED_STACK_ID ||
-    stackVersion !== CERTIFIED_STACK_VERSION
+    !READABLE_CERTIFIED_STACK_VERSIONS.has(stackVersion)
   ) {
     throw new StackManifestValidationError(
-      "Milestone 6 permits only the single declared web stack and version.",
+      "Foundry permits only a supported version of the declared web stack.",
     );
   }
   if (

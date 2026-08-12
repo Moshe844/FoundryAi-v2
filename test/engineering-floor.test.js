@@ -271,6 +271,78 @@ test("a record cannot be destroyed without an explicit confirmation", () => {
   );
 });
 
+test("an identity value cannot masquerade as an authenticated session", () => {
+  const signals = detectEngineeringSignals(
+    profile({ summary: "Members create an account and sign in with a password." }),
+  );
+  assert.throws(
+    () =>
+      validateEngineeringFloor(
+        files(`
+          import { scryptSync } from 'node:crypto';
+          const hash = scryptSync(password, salt, 64);
+          response.cookies.set('auth_email', email, { httpOnly: true });
+        `),
+        signals,
+      ),
+    /session-cookie-is-unforgeable/u,
+  );
+  assert.doesNotThrow(() =>
+    validateEngineeringFloor(
+      files(`
+        import { createHash, randomBytes, scryptSync } from 'node:crypto';
+        const passwordHash = scryptSync(password, salt, 64);
+        const token = randomBytes(32).toString('hex');
+        const tokenHash = createHash('sha256').update(token).digest('hex');
+        db.prepare('INSERT INTO sessions(token_hash, account_id) VALUES (?, ?)').run(tokenHash, accountId);
+        response.cookies.set('session', token, { httpOnly: true });
+      `),
+      signals,
+    ),
+  );
+});
+
+test("ending an authenticated session is not destructive record deletion", () => {
+  const sessionTermination = files(`
+    async function signOut() {
+      await fetch('/api/auth', { method: 'DELETE' });
+      setUser(null);
+    }
+    export default function Account() {
+      return <button onClick={signOut}>Sign out</button>;
+    }
+  `);
+  assert.doesNotThrow(() =>
+    validateEngineeringFloor(
+      sessionTermination,
+      detectEngineeringSignals(
+        profile({ summary: "People sign in and sign out of their dashboard." }),
+      ),
+    ),
+  );
+
+  // The exception is endpoint-specific. DELETE requests to application data
+  // remain destructive even in a product that also has authentication.
+  const recordDeletion = files(`
+    async function removeTodo(id) {
+      await fetch('/api/todos?id=' + id, { method: 'DELETE' });
+    }
+    export default function Todo({ todo }) {
+      return <button onClick={() => removeTodo(todo.id)}>Remove</button>;
+    }
+  `);
+  assert.throws(
+    () =>
+      validateEngineeringFloor(
+        recordDeletion,
+        detectEngineeringSignals(
+          profile({ summary: "People manage todos in a signed-in dashboard." }),
+        ),
+      ),
+    /destructive-actions-are-confirmed/u,
+  );
+});
+
 // The signup that passed fifteen of fifteen checks while creating no account:
 // its submit handler validated the fields and ran setState('success'), and the
 // product contained no fetch at all. Both defects below are read from that

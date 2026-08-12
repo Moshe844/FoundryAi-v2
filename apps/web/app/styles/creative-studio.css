@@ -245,6 +245,84 @@
 .concept-generation-line { margin-top: 12px; font-variant-numeric: tabular-nums; }
 .concept-generation-elapsed { color: var(--ink-primary); font-weight: 600; }
 
+.concept-generation-now {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--space-3);
+  width: min(52rem, 100%);
+  align-items: start;
+  padding: .25rem 0;
+}
+
+.concept-generation-now p { display: grid; gap: .2rem; margin: 0; font-size: .8rem; }
+.concept-generation-now p span { color: var(--ink-tertiary); font-size: .74rem; }
+
+.concept-generation-dot {
+  width: .65rem;
+  height: .65rem;
+  margin-top: .3rem;
+  border: 2px solid color-mix(in srgb, var(--ink-primary) 28%, transparent);
+  border-radius: 50%;
+}
+.concept-generation-now .concept-generation-dot,
+.concept-generation-activity li[data-phase="GENERATING_FILES"] .concept-generation-dot,
+.concept-generation-activity li[data-phase="VERIFYING_BROWSER"] .concept-generation-dot,
+.concept-generation-activity li[data-phase="RETRYING"] .concept-generation-dot {
+  border-color: var(--accent-line);
+  border-top-color: transparent;
+  animation: concept-progress-spin .8s linear infinite;
+}
+.concept-generation-activity li[data-phase="ADMITTED"] .concept-generation-dot { border-color: #23794c; background: #23794c; }
+.concept-generation-activity li[data-phase="FAILED"] .concept-generation-dot { border-color: #a13927; background: #a13927; }
+
+.concept-generation-details {
+  width: min(52rem, 100%);
+  border-top: 1px solid var(--line);
+  padding-top: var(--space-3);
+}
+.concept-generation-details > summary,
+.concept-code-group > summary {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  cursor: pointer;
+  color: var(--ink-secondary);
+  font-size: .8rem;
+}
+.concept-generation-details > summary span:last-child,
+.concept-code-group > summary span:last-child { color: var(--ink-tertiary); font-size: .72rem; }
+.concept-generation-details-body { display: grid; gap: var(--space-4); margin-top: var(--space-3); }
+.concept-generation-activity { display: grid; gap: .5rem; margin: 0; padding: 0; list-style: none; }
+.concept-generation-activity li { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--space-2); align-items: start; color: var(--ink-secondary); font-size: .74rem; }
+.concept-generation-activity .concept-generation-dot { width: .55rem; height: .55rem; margin-top: .2rem; }
+.concept-code-group { border-top: 1px solid var(--line); padding-top: var(--space-3); }
+.concept-code-group > div { display: grid; gap: var(--space-2); margin-top: var(--space-2); }
+.concept-code-file { overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-sm); background: #1e1e1e; color: #f1eee8; }
+.concept-code-file > summary {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: .55rem .75rem;
+  cursor: pointer;
+  background: #292929;
+  font-size: .72rem;
+}
+.concept-code-file > summary span { color: #bdb7ae; text-transform: uppercase; letter-spacing: .06em; }
+.concept-code-file pre {
+  max-height: 18rem;
+  margin: 0;
+  padding: .8rem;
+  overflow: auto;
+  white-space: pre;
+  font: .72rem/1.55 ui-monospace, SFMono-Regular, "Cascadia Mono", Menlo, monospace;
+}
+.concept-code-file > p { margin: 0; padding: .5rem .8rem; color: #c8c2b9; }
+.concept-generation-events { display: grid; gap: .4rem; margin: 0; padding: var(--space-3); border-radius: var(--radius-sm); background: var(--surface-inset); list-style: none; }
+.concept-generation-events li { display: grid; grid-template-columns: 5.5rem minmax(0, 1fr); gap: var(--space-2); font-size: .72rem; }
+.concept-generation-events time { color: var(--ink-tertiary); font-variant-numeric: tabular-nums; }
+
+@keyframes concept-progress-spin { to { transform: rotate(360deg); } }
+
 @media (max-width: 900px) {
   .live-concept-grid { grid-template-columns: 1fr; }
   .live-concept-masthead,
@@ -258,6 +336,8 @@
   .concept-thumbnail img,
   .live-concept-browser,
   .concept-generation-progress span { transition: none; }
+  .concept-generation-now .concept-generation-dot,
+  .concept-generation-activity .concept-generation-dot { animation: none; }
 }
 
 .studio-board {

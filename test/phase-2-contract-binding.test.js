@@ -377,6 +377,26 @@ test("Phase 2 binds an omitted trace only to a file that preserves its subject",
   assert.equal(unchanged.files[0].contractRequirementIds.includes(missingId), false);
 });
 
+test("Phase 2 reconstructs a missing claim from its existing approved file trace", () => {
+  const contract = contractFixture();
+  const plan = validPlan(contract);
+  const missingClaim = plan.requirementClaims.pop();
+  assert(
+    plan.files.some((file) =>
+      file.contractRequirementIds.includes(missingClaim.requirementId),
+    ),
+  );
+  for (const file of plan.files) {
+    file.content = "mechanical fixture content with no requirement subject words";
+  }
+  const bound = bindMissingApprovedRequirementTraces(plan, contract);
+  assert(
+    bound.requirementClaims.some(
+      (claim) => claim.requirementId === missingClaim.requirementId,
+    ),
+  );
+});
+
 test("Phase 2 normalizes mechanical generation bookkeeping before semantic admission", () => {
   const contract = contractFixture();
   const plan = validPlan(contract);

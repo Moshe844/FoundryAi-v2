@@ -23,7 +23,46 @@ import {
   prototypeModelsInCooldown,
   modelsTimedOutForWorkload,
   rankPrototypeCandidates,
+  routingPreferencesForRequest,
 } from "../src/work-plane/model-gateway.js";
+
+test("two-minute simple production prefers a fast capable generation route", () => {
+  assert.deepEqual(
+    routingPreferencesForRequest({
+      taskClass: ModelTaskClass.FILE_GENERATION,
+      purpose:
+        "Adaptive production policy: SIMPLE complexity with a 2-minute completion target.",
+      selectedTier: "STANDARD_ENGINEERING",
+    }),
+    {
+      priority: "FAST_RESPONSE",
+      preferredLatencyProfile: "FAST",
+    },
+  );
+  assert.deepEqual(
+    routingPreferencesForRequest({
+      taskClass: ModelTaskClass.FILE_GENERATION,
+      purpose:
+        "Adaptive production policy: SIMPLE complexity with a 2-minute completion target. Use a server-validated session and a high-entropy session token for credentials.",
+      selectedTier: "STANDARD_ENGINEERING",
+    }),
+    {
+      priority: "LOW_COST",
+      preferredLatencyProfile: "BALANCED",
+    },
+  );
+  assert.deepEqual(
+    routingPreferencesForRequest({
+      taskClass: ModelTaskClass.FILE_GENERATION,
+      purpose: "Generate a complex production bundle.",
+      selectedTier: "STANDARD_ENGINEERING",
+    }),
+    {
+      priority: "LOW_COST",
+      preferredLatencyProfile: "BALANCED",
+    },
+  );
+});
 
 function concept(conceptId = "concept-editorial") {
   return createConceptPrototypeContract({
@@ -418,7 +457,71 @@ test("an unsafe prototype is told where the violation is and what to do", async 
   assert.match(source, /Move those declarations into styles\.css/u);
   assert.match(source, /CSS gradients, shapes, or inline SVG/u);
   assert.match(source, /Toggle a class or a data attribute/u);
+  assert.match(source, /\.setAttribute\\\(\\s\*\["'\]style/u);
+  assert.match(source, /native <progress max=/u);
+  assert.match(source, /prototype-file-correction/u);
   assert.match(source, /UNSAFE_REMEDY\[unsafe\.reason\]/u);
+  assert.match(
+    source,
+    /Never use eval, new Function, Function\(\), or any string-to-code execution/u,
+    "the first calculator attempt must receive the rule that previously cost every direction a retry",
+  );
+});
+
+test("inline-style output receives one scoped correction before browser admission", async () => {
+  const root = mkdtempSync(join(tmpdir(), "foundry-generation-scoped-correction-"));
+  const calls = [];
+  try {
+    const workspaceService = createPrototypeWorkspaceService({ prototypeRoot: root });
+    const unsafe = structuredClone(generated);
+    unsafe.files.find((file) => file.path === "concept.js").content =
+      "document.querySelector('.progress').setAttribute('style', 'width: 50%')";
+    const generation = createPrototypeGenerationService({
+      workspaceService,
+      modelGateway: {
+        async request(input) {
+          calls.push(input);
+          if (input.requestId.endsWith("prototype-file-correction")) {
+            return {
+              requestId: input.requestId,
+              structuredOutput: {
+                files: [
+                  {
+                    path: "concept.js",
+                    content:
+                      "const progress=document.querySelector('progress');if(progress)progress.value=50;",
+                  },
+                ],
+              },
+              tokenMetadata: { inputTokens: 100, outputTokens: 80 },
+              costMetadata: { costUsd: 0.001 },
+            };
+          }
+          return {
+            requestId: input.requestId,
+            structuredOutput: unsafe,
+            tokenMetadata: { inputTokens: 500, outputTokens: 400 },
+            costMetadata: { costUsd: 0.01 },
+          };
+        },
+      },
+    });
+    const result = await generation.generate({
+      conceptContract: concept("concept-scoped-correction"),
+    });
+
+    assert.equal(calls.length, 2);
+    assert.match(calls[1].requestId, /prototype-file-correction$/u);
+    assert.match(calls[1].purpose, /native progress element/u);
+    assert.equal(result.workspace.status, "FINALIZED");
+    assert.equal(result.usage.costUsd, 0.011);
+    assert.doesNotMatch(
+      readFileSync(join(result.workspace.sourcePath, "concept.js"), "utf8"),
+      /setAttribute\(['"]style/iu,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("a concept with no heading is refused before it costs a browser round trip", async () => {

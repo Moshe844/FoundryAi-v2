@@ -13,8 +13,7 @@ export function createPrototypeFidelityService({ workspaceService, browserVerifi
   }
   if (typeof browserVerifier?.verify !== "function") fail("browserVerifier is required.");
 
-  async function verify({ approvedDesignContract: input, productionPreviewUrl }) {
-    const approvedDesignContract = normalizeApprovedDesignContract(input);
+  function approvedWorkspace(approvedDesignContract) {
     const workspace = workspaceService.list(approvedDesignContract.missionId).find((entry) =>
       entry.conceptId === approvedDesignContract.selectedConceptId &&
       entry.conceptVersion === approvedDesignContract.selectedConceptVersion,
@@ -25,6 +24,38 @@ export function createPrototypeFidelityService({ workspaceService, browserVerifi
     if (workspace.contentHash !== approvedDesignContract.prototypeContentHash) {
       fail("approved prototype workspace content hash changed.");
     }
+    return workspace;
+  }
+
+  function loadApprovedPrototypeSource({ approvedDesignContract: input }) {
+    if (typeof workspaceService.readSourceFile !== "function") {
+      fail("approved prototype source reader is unavailable.");
+    }
+    const approvedDesignContract = normalizeApprovedDesignContract(input);
+    const workspace = approvedWorkspace(approvedDesignContract);
+    const conceptContract = workspaceService.loadContractAt(workspace.rootPath);
+    const files = approvedDesignContract.prototypeFileManifest.map((entry) => {
+      const content = workspaceService.readSourceFile(conceptContract, entry.path);
+      const contentHash = createHash("sha256").update(content).digest("hex");
+      if (contentHash !== entry.contentHash || content.length !== entry.size) {
+        fail(`approved prototype source "${entry.path}" does not match its immutable manifest.`);
+      }
+      return Object.freeze({
+        path: entry.path,
+        content: content.toString("utf8"),
+        contentHash,
+      });
+    });
+    return Object.freeze({
+      approvedDesignId: approvedDesignContract.approvedDesignId,
+      prototypeContentHash: approvedDesignContract.prototypeContentHash,
+      files: Object.freeze(files),
+    });
+  }
+
+  async function verify({ approvedDesignContract: input, productionPreviewUrl }) {
+    const approvedDesignContract = normalizeApprovedDesignContract(input);
+    const workspace = approvedWorkspace(approvedDesignContract);
     const conceptContract = workspaceService.loadContractAt(workspace.rootPath);
     const reference = approvedDesignContract.browserEvidenceReferences[0];
     if (typeof reference !== "string" || !reference.startsWith("evidence/")) {
@@ -55,5 +86,5 @@ export function createPrototypeFidelityService({ workspaceService, browserVerifi
     });
   }
 
-  return Object.freeze({ verify });
+  return Object.freeze({ loadApprovedPrototypeSource, verify });
 }

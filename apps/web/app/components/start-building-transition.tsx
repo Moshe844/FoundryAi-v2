@@ -16,12 +16,14 @@ const PHASES = [
 
 export function StartBuildingTransition({
   activityArrived,
+  executionStarted,
   onComplete,
   onStop,
   projectName,
   startedAt,
 }: Readonly<{
   activityArrived: boolean;
+  executionStarted: boolean;
   onComplete: () => void;
   onStop: () => void;
   projectName: string;
@@ -39,11 +41,11 @@ export function StartBuildingTransition({
   }, [startedAt]);
 
   useEffect(() => {
-    if (!activityArrived) return;
+    if (!activityArrived || !executionStarted) return;
     const elapsed = Date.now() - startedAt;
     const timer = window.setTimeout(onComplete, Math.max(0, 1_200 - elapsed));
     return () => window.clearTimeout(timer);
-  }, [activityArrived, onComplete, startedAt]);
+  }, [activityArrived, executionStarted, onComplete, startedAt]);
 
   return (
     <section className="act start-transition" aria-live="polite">

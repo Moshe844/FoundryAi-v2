@@ -19,8 +19,11 @@ test("new Phase 3 presents one progressive working-session stage", async () => {
   assert.match(discovery, /stageId === "review"/u);
   assert.match(composer, /Tell Foundry anything else/u);
   assert.match(composer, /Send and revise/u);
+  assert.match(composer, /<details className="discovery-companion">/u);
+  assert.match(composer, /Add a note or correction/u);
   assert.match(styles, /\.discovery-workspace/u);
-  assert.match(styles, /grid-template-columns: minmax\(0, 1fr\) minmax\(290px, 360px\)/u);
+  assert.match(styles, /grid-template-columns: minmax\(0, 1fr\)/u);
+  assert.doesNotMatch(styles, /\.discovery-companion \{[\s\S]{0,180}position: sticky/u);
   assert.match(styles, /@media \(max-width: 1099px\)/u);
 });
 

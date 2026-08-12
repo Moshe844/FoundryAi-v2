@@ -3,8 +3,18 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
+  ProductionComplexity,
+  foundryObservationHarness,
+  isFoundryOwnedBrowserHealthObligation,
+  obligationRequiresAuthenticationErrorProof,
+  obligationRequiresAuthenticatedSurface,
+  obligationRequiresCredentialLoginProof,
   productionBrowserRepairPolicy,
+  productionPerformancePolicy,
+  productionRepairModelTimeoutMs,
   productionRepairBudgets,
+  responsiveBrowserCheckIdsForContract,
+  validateBrowserObservationTestSource,
 } from "../src/work-plane/production-mission-service.js";
 
 test("production repair budgets allow bounded evidence-backed recovery", () => {
@@ -22,6 +32,505 @@ test("production repair budgets allow bounded evidence-backed recovery", () => {
     designFidelityRepairCalls: 4,
     runtimeRestarts: 2,
   });
+});
+
+test("procedure repair rounds can correct a cross-file defect without charging per file", async () => {
+  const source = await readFile(
+    new URL("../src/work-plane/production-mission-service.js", import.meta.url),
+    "utf8",
+  );
+  const procedureRepair = source.slice(
+    source.indexOf("const priorRepairs = execution"),
+    source.indexOf("async function rehydrateRestoredWorkspace"),
+  );
+  assert.match(
+    procedureRepair,
+    /priorRepairCalls\.length >= repairBudgets\.procedureRepairCalls/u,
+  );
+  assert.doesNotMatch(
+    procedureRepair,
+    /priorRepairs\.length >= repairBudgets\.procedureRepairCalls/u,
+  );
+  assert.match(
+    procedureRepair,
+    /return a files array containing the complete corrected content of every implicated/u,
+  );
+  assert.match(procedureRepair, /validateGeneratedRepairSet\(\{/u);
+  assert.match(procedureRepair, /for \(const repairFile of repairFiles\)/u);
+});
+
+test("production time and repair policy follows product complexity", () => {
+  const simple = productionPerformancePolicy({
+    profile: {
+      primaryJourneys: [{ id: "calculate" }],
+      secondaryJourneys: [{ id: "reset" }],
+      requiredSurfaces: [{ id: "calculator" }],
+      primaryActors: [{ id: "visitor" }],
+    },
+    approvedContract: {
+      productBlueprint: {
+        primaryWorkflows: [{ id: "calculate" }],
+        supportingWorkflows: [{ id: "reset" }],
+        requiredSurfaces: [{ id: "calculator" }],
+      },
+      audiences: [{ id: "visitor" }],
+      acceptedRecommendations: [],
+      acceptanceObligations: Array.from({ length: 15 }, (_, index) => ({
+        obligationId: `obligation-${index + 1}`,
+      })),
+    },
+  });
+  assert.deepEqual(simple, {
+    complexity: ProductionComplexity.SIMPLE,
+    targetDurationMs: 120_000,
+    browserCheckBudgetMs: 8_000,
+    browserVerificationBudgetMs: 60_000,
+    browserObservationAttempts: 2,
+    browserRepairCalls: 1,
+    designFidelityRepairCalls: 1,
+    runtimeRestarts: 2,
+  });
+  assert.deepEqual(
+    productionRepairBudgets({ approvedPrototype: true, performancePolicy: simple }),
+    {
+      generationCorrectionCalls: 2,
+      procedureRepairCalls: 2,
+      browserRepairCalls: 1,
+      designFidelityRepairCalls: 1,
+      runtimeRestarts: 2,
+    },
+  );
+
+  const focusedAuthentication = productionPerformancePolicy({
+    profile: {
+      primaryJourneys: [
+        "A visitor creates an account.",
+        "A returning user signs in, refreshes the session, and signs out.",
+        "A user corrects invalid credentials.",
+      ],
+      secondaryJourneys: [],
+      primaryActors: ["visitor", "returning user"],
+    },
+    approvedContract: {
+      productBlueprint: {
+        primaryWorkflows: [
+          "Create an account",
+          "Sign in and sign out",
+          "Recover from an access error",
+        ],
+        supportingWorkflows: [],
+        requiredSurfaces: Array.from({ length: 5 }, (_, id) => ({ id })),
+      },
+      audiences: ["visitor", "returning user"],
+      acceptedRecommendations: [],
+      acceptanceObligations: Array.from({ length: 13 }, (_, index) => ({
+        statement: `Authentication obligation ${index + 1}`,
+      })),
+    },
+  });
+  assert.equal(focusedAuthentication.complexity, ProductionComplexity.SIMPLE);
+  assert.equal(focusedAuthentication.targetDurationMs, 120_000);
+  assert.equal(focusedAuthentication.browserVerificationBudgetMs, 60_000);
+  assert.equal(productionRepairModelTimeoutMs(focusedAuthentication), 20_000);
+  assert.deepEqual(
+    productionRepairBudgets({
+      performancePolicy: focusedAuthentication,
+      stateful: true,
+    }),
+    {
+      generationCorrectionCalls: 1,
+      procedureRepairCalls: 1,
+      browserRepairCalls: 1,
+      designFidelityRepairCalls: 1,
+      runtimeRestarts: 2,
+    },
+  );
+
+  const complex = productionPerformancePolicy({
+    profile: {
+      primaryJourneys: Array.from({ length: 9 }, (_, id) => ({ id })),
+      secondaryJourneys: Array.from({ length: 5 }, (_, id) => ({ id })),
+      requiredSurfaces: Array.from({ length: 18 }, (_, id) => ({ id })),
+      primaryActors: Array.from({ length: 6 }, (_, id) => ({ id })),
+    },
+  });
+  assert.equal(complex.complexity, ProductionComplexity.COMPLEX);
+  assert.equal(complex.targetDurationMs, 720_000);
+  assert.equal(complex.browserCheckBudgetMs, 15_000);
+  assert.equal(complex.browserVerificationBudgetMs, 180_000);
+  assert.equal(complex.browserObservationAttempts, 6);
+
+  const compactStateful = productionPerformancePolicy({
+    profile: {
+      primaryJourneys: [{ id: "create-account" }, { id: "manage-todos" }],
+      secondaryJourneys: [{ id: "return-after-refresh" }],
+      requiredSurfaces: [{ id: "auth" }, { id: "todo-dashboard" }],
+      primaryActors: [{ id: "member" }],
+    },
+    approvedContract: {
+      productBlueprint: {
+        primaryWorkflows: [{ id: "create-account" }, { id: "manage-todos" }],
+        supportingWorkflows: [{ id: "return-after-refresh" }],
+        requiredSurfaces: [{ id: "auth" }, { id: "todo-dashboard" }],
+      },
+      audiences: [{ id: "member" }],
+      acceptedRecommendations: [],
+      acceptanceObligations: [
+        { statement: "A member can create an account and sign in again." },
+        { statement: "Saved todo lists remain after a browser refresh." },
+      ],
+    },
+  });
+  assert.equal(compactStateful.complexity, ProductionComplexity.SIMPLE);
+  assert.equal(compactStateful.browserCheckBudgetMs, 8_000);
+  assert.equal(compactStateful.browserVerificationBudgetMs, 60_000);
+  assert.equal(compactStateful.browserObservationAttempts, 2);
+  assert.equal(compactStateful.browserRepairCalls, 1);
+  assert.equal(compactStateful.designFidelityRepairCalls, 1);
+  assert.equal(productionRepairModelTimeoutMs(compactStateful), 20_000);
+  assert.deepEqual(
+    productionRepairBudgets({
+      performancePolicy: compactStateful,
+      stateful: true,
+    }),
+    {
+      generationCorrectionCalls: 1,
+      procedureRepairCalls: 1,
+      browserRepairCalls: 1,
+      designFidelityRepairCalls: 1,
+      runtimeRestarts: 2,
+    },
+  );
+});
+
+test("browser observation admission rejects reusable identities and ambiguous strict locators", () => {
+  const harness = foundryObservationHarness(["check-ready"]);
+  assert.throws(
+    () =>
+      validateBrowserObservationTestSource(
+        `${harness}\nconst accountEmail=\`person+${Date.now()}@example.test\`;`,
+        ["check-ready"],
+      ),
+    /declares persistent identity "accountEmail" once at module load/u,
+  );
+  assert.throws(
+    () =>
+      validateBrowserObservationTestSource(
+        `${harness}\nasync function act(page){await page.locator('.primary').click();}`,
+        ["check-ready"],
+      ),
+    /unscoped class locator/u,
+  );
+  assert.throws(
+    () =>
+      validateBrowserObservationTestSource(
+        `${harness}\nasync function submit(page){await page.getByRole('form').getByRole('button',{name:'Create account',exact:true}).click();}`,
+        ["check-ready"],
+      ),
+    /unnamed HTML form/u,
+  );
+  assert.doesNotThrow(() =>
+    validateBrowserObservationTestSource(
+      `${harness}\nasync function submit(page){await page.locator('form').getByRole('button',{name:'Create account',exact:true}).click();}`,
+      ["check-ready"],
+    ),
+  );
+  assert.doesNotThrow(() =>
+    validateBrowserObservationTestSource(
+      `${harness}\nasync function measure(page){return page.locator('.snapshot').evaluate((element)=>getComputedStyle(element).backgroundColor);}`,
+      ["check-ready"],
+    ),
+  );
+  assert.throws(
+    () =>
+      validateBrowserObservationTestSource(
+        `${harness}\nasync function create(page){await page.getByLabel('Todo').fill('One thing');}`,
+        ["check-ready"],
+      ),
+    /without exact matching/u,
+  );
+  assert.throws(
+    () =>
+      validateBrowserObservationTestSource(
+        `${harness}\nexport const obligationChecks = { "check-ready": async ({ page }) => { const heading = page.getByRole("heading", { name: "Dashboard" }); const passed = await heading.isVisible(); return { passed, diagnostics: { dashboardVisible: passed } }; } };`,
+        ["check-ready"],
+        { authenticatedCheckIds: ["check-ready"] },
+      ),
+    /does not establish its own account\/session/u,
+  );
+  assert.doesNotThrow(() =>
+    validateBrowserObservationTestSource(
+      `${harness}\nconst uniqueEmail=(suffix:string)=>\`person-\${suffix}-\${Date.now()}-\${Math.random()}@test.dev\`;const enroll=async(context:any):Promise<{email:string;password:string}>=>{const email=uniqueEmail('enroll');const password='saved-password';await context.page.goto('/');await context.page.getByLabel('Email address',{exact:true}).fill(email);await context.page.getByRole('button',{name:'Create account',exact:true}).click();await context.page.getByRole('heading',{name:'Dashboard',exact:true}).waitFor();return{email,password}};\nexport const obligationChecks = { "check-ready": async (context): Promise<any> => { await enroll(context); const heading = context.page.getByRole("heading", { name: "Dashboard" }); const passed = await heading.isVisible(); return { passed, diagnostics: { dashboardVisible: passed } }; } };`,
+      ["check-ready"],
+      { authenticatedCheckIds: ["check-ready"] },
+    ),
+  );
+  assert.doesNotThrow(() =>
+    validateBrowserObservationTestSource(
+      `${harness}\nconst enroll=async(context:any):Promise<void>=>{const email=\`person${Date.now()}${Math.random()}@test.dev\`;await context.page.getByLabel('Email address',{exact:true}).fill(email);await context.page.getByRole('button',{name:'Create account',exact:true}).click()};const check=(work:(context:any)=>Promise<boolean>)=>async(context:any)=>({passed:await work(context),diagnostics:{}});export const obligationChecks={"check-ready":check(async context=>{await enroll(context);return await context.page.getByRole('heading',{name:'Dashboard'}).isVisible()})};`,
+      ["check-ready"],
+      { authenticatedCheckIds: ["check-ready"] },
+    ),
+  );
+  assert.throws(
+    () =>
+      validateBrowserObservationTestSource(
+        `${harness}\nexport const obligationChecks = {}; for (const id of ["check-ready"]) obligationChecks[id] = async (context) => ({ passed: await context.page.locator("main").isVisible(), diagnostics: {} });`,
+        ["check-ready"],
+        { authenticatedCheckIds: ["check-ready"] },
+      ),
+    /generated through an opaque shared loop/u,
+  );
+  const twoCheckHarness = foundryObservationHarness(["check-one", "check-two"]);
+  assert.throws(
+    () =>
+      validateBrowserObservationTestSource(
+        `${twoCheckHarness}\nexport const obligationChecks = {}; for (const id of ["check-one", "check-two"]) obligationChecks[id] = async (context) => ({ passed: await context.page.locator("main").isVisible(), diagnostics: {} });`,
+        ["check-one", "check-two"],
+        { authenticatedCheckIds: ["check-one", "check-two"] },
+      ),
+    /Browser check "check-one, check-two"/u,
+  );
+  assert.throws(
+    () =>
+      validateBrowserObservationTestSource(
+        `${harness}\nconst enroll=async(context)=>{await context.page.getByRole('button',{name:'Create account'}).click()}; export const obligationChecks={"check-login":async(context)=>{await enroll(context);await context.page.getByRole('button',{name:'Sign out'}).click();await context.page.getByRole('button',{name:'Sign in'}).click();const passed=await context.page.getByRole('heading',{name:'Dashboard'}).isVisible();return{passed,diagnostics:{}}}};`,
+        ["check-login"],
+        {
+          authenticatedCheckIds: ["check-login"],
+          loginCheckIds: ["check-login"],
+        },
+      ),
+    /promises sign-in but does not submit saved credentials/u,
+  );
+  assert.doesNotThrow(() =>
+    validateBrowserObservationTestSource(
+      `${harness}\nconst enroll=async(context)=>{const email=\`person${Date.now()}${Math.random()}@test.dev\`,password='saved-password';await context.page.getByLabel('Email address',{exact:true}).fill(email);await context.page.getByLabel('Password',{exact:true}).fill(password);await context.page.getByRole('button',{name:'Create account',exact:true}).click();return{email,password}};const login=async(context,account)=>{await context.page.getByRole('button',{name:'Sign out',exact:true}).click();await context.page.getByLabel('Email address',{exact:true}).fill(account.email);await context.page.getByLabel('Password',{exact:true}).fill(account.password);await context.page.getByRole('button',{name:'Sign in',exact:true}).click()};export const obligationChecks={"check-login":async(context)=>{const account=await enroll(context);await login(context,account);const passed=await context.page.getByRole('heading',{name:'Dashboard',exact:true}).isVisible();return{passed,diagnostics:{}}}};`,
+      ["check-login"],
+      {
+        authenticatedCheckIds: ["check-login"],
+        loginCheckIds: ["check-login"],
+      },
+    ),
+  );
+});
+
+test("login proof classification does not turn registration outcomes into login journeys", () => {
+  assert.equal(
+    obligationRequiresAuthenticatedSurface(
+      "Durable Authentication preserves accessible keyboard behavior on its login and signup forms.",
+    ),
+    false,
+  );
+  assert.equal(
+    obligationRequiresAuthenticatedSurface(
+      "A person reaches the authenticated account area after login.",
+    ),
+    true,
+  );
+  assert.equal(
+    obligationRequiresCredentialLoginProof(
+      "A person can sign up and an account exists afterward so they can sign in.",
+    ),
+    false,
+  );
+  assert.equal(
+    obligationRequiresCredentialLoginProof(
+      "A person can sign up with an account available for future login.",
+    ),
+    false,
+  );
+  assert.equal(
+    obligationRequiresCredentialLoginProof(
+      "A registered person can log in and reaches their dashboard.",
+    ),
+    true,
+  );
+  assert.equal(
+    obligationRequiresCredentialLoginProof(
+      "A person can sign up, sign out, and then sign in with saved credentials.",
+    ),
+    true,
+  );
+  assert.equal(
+    obligationRequiresCredentialLoginProof(
+      "Secure Account Access implements the approved composition: Centered card with a clear sign-in and sign-up switch.",
+    ),
+    false,
+  );
+  assert.equal(
+    obligationRequiresCredentialLoginProof(
+      "Secure Login and Signup satisfies the approved accessibility design requirements: Keyboard-complete navigation and programmatic labels.",
+    ),
+    false,
+  );
+  assert.equal(
+    obligationRequiresCredentialLoginProof(
+      "People can switch clearly between create-account and sign-in modes on desktop and mobile.",
+    ),
+    false,
+  );
+  assert.equal(
+    obligationRequiresCredentialLoginProof(
+      "A valid sign-in creates a server-validated session that remains active after refresh.",
+    ),
+    true,
+  );
+  assert.equal(
+    obligationRequiresCredentialLoginProof(
+      "Responsive Account Access preserves its approved balanced layout with an obvious sign-in/create-account switch.",
+    ),
+    false,
+  );
+  assert.equal(
+    obligationRequiresCredentialLoginProof(
+      "Submitting valid credentials creates a server-validated session that remains authenticated after refresh.",
+    ),
+    true,
+  );
+});
+
+test("login proof classification treats a responsive sign-in/signup mode switch as navigation", () => {
+  assert.equal(
+    obligationRequiresCredentialLoginProof(
+      "The desktop page presents responsive two-panel sign-in and create-account modes with an obvious mode switch.",
+    ),
+    false,
+  );
+  assert.equal(
+    obligationRequiresCredentialLoginProof(
+      "Submitting valid credentials in sign-in mode creates an authenticated session.",
+    ),
+    true,
+  );
+  assert.equal(
+    obligationRequiresCredentialLoginProof(
+      "A person can clearly choose sign-in or create-account mode in the responsive two-panel page.",
+    ),
+    false,
+  );
+});
+
+test("login proof classification does not turn a Foundry-derived approved design composite into login", () => {
+  assert.equal(
+    obligationRequiresCredentialLoginProof(
+      "Responsive Authentication Page preserves its approved Focused authentication workflow with visible validation and session status feedback.; Prioritize credential entry, errors, and the primary action on mobile.; Keep sign-in and create-account modes visibly switchable without page ambiguity.; and accessible keyboard behavior.",
+    ),
+    false,
+  );
+});
+
+test("authentication error proof classification selects error outcomes, not accessibility prose", () => {
+  assert.equal(
+    obligationRequiresAuthenticationErrorProof(
+      "Invalid, incomplete, duplicate, and incorrect credentials produce useful server-validated errors beside the relevant form.",
+    ),
+    true,
+  );
+  assert.equal(
+    obligationRequiresAuthenticationErrorProof(
+      "All authentication controls are keyboard usable with visible focus, labels, and accessible error announcements.",
+    ),
+    false,
+  );
+  assert.equal(
+    obligationRequiresAuthenticationErrorProof(
+      "Validation errors are announced beside the affected field.",
+    ),
+    true,
+  );
+  const rejectedAuthentication =
+    "Invalid authentication attempts show a clear error without entering the dashboard.";
+  assert.equal(
+    obligationRequiresAuthenticationErrorProof(rejectedAuthentication),
+    true,
+  );
+  assert.equal(
+    obligationRequiresAuthenticatedSurface(rejectedAuthentication),
+    false,
+    "a signed-out rejection check must not be forced to create a session",
+  );
+});
+
+test("Foundry computes whole-run browser health from owned evidence", () => {
+  const statement =
+    "Personal Todo Dashboard completes its primary browser workflow without blocking browser errors.";
+  assert.equal(isFoundryOwnedBrowserHealthObligation(statement), true);
+  assert.equal(
+    isFoundryOwnedBrowserHealthObligation(
+      "A registered person can log in and reaches their dashboard.",
+    ),
+    false,
+  );
+  const harness = foundryObservationHarness(
+    ["workflow-check", "browser-health"],
+    { foundryOwnedBrowserHealthCheckIds: ["browser-health"] },
+  );
+  assert.match(
+    harness,
+    /const foundryOwnedBrowserHealthCheckIds = \["browser-health"\]/u,
+  );
+  assert.match(
+    harness,
+    /checks\[id\] = workflowsPassed && noBlockingBrowserErrors/u,
+  );
+  assert.match(harness, /viewport: \{ width: 1280, height: 900 \}/u);
+  assert.doesNotMatch(harness, /checks\[id\] = true/u);
+});
+
+test("a dedicated responsive obligation owns phone-layout proof", () => {
+  const obligations = [
+    {
+      obligationId: "combined-design",
+      statement:
+        "The dashboard preserves its approved spacious direction on narrow screens and accessible keyboard behavior.",
+    },
+    {
+      obligationId: "responsive-priority",
+      statement:
+        "The dashboard implements the approved responsive priority: collapse cards into a vertical sequence.",
+    },
+  ];
+  const bindings = {
+    "combined-design": "browser-check",
+    "responsive-priority": "browser-check",
+  };
+  assert.deepEqual(
+    responsiveBrowserCheckIdsForContract(obligations, bindings),
+    ["responsive-priority"],
+  );
+  assert.deepEqual(
+    responsiveBrowserCheckIdsForContract(
+      [
+        {
+          obligationId: "only-responsive",
+          statement: "The interface works on narrow screens without horizontal overflow.",
+        },
+      ],
+      { "only-responsive": "browser-check" },
+    ),
+    ["only-responsive"],
+  );
+});
+
+test("production generation and browser repair guard authenticated session state", async () => {
+  const source = await readFile(
+    new URL("../src/work-plane/production-mission-service.js", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(source, /late signed-out response from overwriting a successful sign-up or sign-in/u);
+  assert.match(source, /Every check that observes a protected or authenticated surface must establish its own unique account\/session/u);
+  assert.match(source, /Shared evidence is never proof of a protected post-authentication surface/u);
+  assert.match(source, /repair tests\/foundry-checks\.ts so that check establishes its own fresh session/u);
+  assert.equal(
+    [...source.matchAll(/authenticatedCheckIds: authenticatedBrowserCheckIds/gu)].length,
+    5,
+  );
+  assert.equal(
+    [...source.matchAll(/loginCheckIds: loginBrowserCheckIds/gu)].length,
+    4,
+  );
 });
 
 test("approved-design semantic admission stays inside the bounded correction loop", async () => {
@@ -67,6 +576,25 @@ test("browser observation and design fidelity repairs have independent budgets",
   });
   assert.equal(browser.maxCalls, fidelity.maxCalls);
   assert.notEqual(browser.requestSegment, fidelity.requestSegment);
+
+  const combined = productionBrowserRepairPolicy(
+    [
+      "The following real browser checks were false: obligation-001.",
+      "Production design fidelity failed against the approved live prototype: spacing.",
+    ].join("\n"),
+    {
+      nonFidelityFailureOutstanding: true,
+      repairBudgets: {
+        browserRepairCalls: 2,
+        designFidelityRepairCalls: 2,
+      },
+    },
+  );
+  assert.deepEqual(combined, {
+    designFidelity: false,
+    requestSegment: "browser-repair",
+    maxCalls: 2,
+  });
 });
 
 test("a patch rejected before it touches a file does not spend the repair budget", async () => {
@@ -162,12 +690,13 @@ test("a proven application is delivered even when its design falls short", async
     "utf8",
   );
 
-  // Behaviour is what must hold: every required check true, and no failure
-  // outstanding other than fidelity.
+  // Behaviour is what must hold: every functional workflow check true, and no
+  // failure outstanding other than fidelity. Derived approved-design checks
+  // are resolved by the prototype comparator, not counted a second time here.
   assert.match(
     source,
-    /const behaviourProven =\s*\n\s*browserResult !== undefined &&\s*\n\s*!nonFidelityFailureOutstanding &&\s*\n\s*requiredBrowserChecks\.every\(\s*\n\s*\(checkId\) => browserResult\.checks\[checkId\] === true,\s*\n\s*\);/u,
-    "acceptance must require every browser check and no non-fidelity failure",
+    /const behaviourProven =\s*\n\s*browserResult !== undefined &&\s*\n\s*!nonFidelityFailureOutstanding &&\s*\n\s*functionalBrowserChecks\.every\(\s*\n\s*\(checkId\) => browserResult\.checks\[checkId\] === true,\s*\n\s*\);/u,
+    "acceptance must require every functional browser check and no non-fidelity failure",
   );
 
   // Only a design-fidelity observation may be waived. Anything else — a false
@@ -177,13 +706,32 @@ test("a proven application is delivered even when its design falls short", async
     /nonFidelityFailureOutstanding = observationFailures\.some\(\s*\n\s*\(failure\) =>\s*\n\s*!\/\^Production design fidelity failed/u,
   );
 
-  // Both places that previously destroyed the build now deliver it first, and
-  // that is asserted by running the policy rather than by reading the loop.
+  // Both places that previously destroyed the build now deliver it. The spent
+  // budget path first restores browser-created data, then accepts the proven
+  // behavior with an explicit fidelity shortfall.
   const budgetGate = source.slice(
     source.indexOf("if (priorRepairCalls.length >= repairPolicy.maxCalls)"),
     source.indexOf("const repairsWereAttempted"),
   );
   assert.match(budgetGate, /if \(behaviourProven\) \{[\s\S]*acceptWithShortfall/u);
+
+  const finalization = source.slice(
+    source.indexOf("const latestObservedRuntime = runtime.getSession"),
+    source.indexOf(
+      "runtime.captureBrowserVerification",
+      source.indexOf("const latestObservedRuntime = runtime.getSession"),
+    ) + "runtime.captureBrowserVerification".length,
+  );
+  assert.match(finalization, /browser\.preWorkCheckpointId/u);
+  assert.match(finalization, /session = await startRuntime\(\)/u);
+  assert.ok(
+    finalization.indexOf("browser.preWorkCheckpointId") <
+      finalization.indexOf("session = await startRuntime()"),
+  );
+  assert.ok(
+    finalization.indexOf("session = await startRuntime()") <
+      finalization.indexOf("runtime.captureBrowserVerification"),
+  );
 
   const { ObservationAction, browserObservationDecision } = await import(
     "../src/domain/browser-observation-policy.js"
@@ -203,9 +751,10 @@ test("a proven application is delivered even when its design falls short", async
   // stays there until verification; asking the orchestrator for
   // EXECUTING -> EXECUTING is rejected outright, and that killed a build whose
   // application had been proven and was about to be delivered.
+  const acceptanceStart = source.indexOf("const acceptWithShortfall =");
   const acceptance = source.slice(
-    source.indexOf("const acceptWithShortfall ="),
-    source.indexOf("previousOutstandingFailures = outstandingFailures"),
+    acceptanceStart,
+    source.indexOf("\n        };", acceptanceStart) + "\n        };".length,
   );
   assert.doesNotMatch(
     acceptance,
@@ -223,7 +772,7 @@ test("a proven application is delivered even when its design falls short", async
   );
 });
 
-test("browser observation is bounded by progress, not by a fixed count", async () => {
+test("browser observation is bounded by complexity and progress", async () => {
   // A ceiling of four came from builds recorded before repairs could correct
   // every file a failure spanned. Once they could, a build converged 5 then 5
   // then 1 outstanding checks, passed them all, and was cut off at a single
@@ -237,8 +786,9 @@ test("browser observation is bounded by progress, not by a fixed count", async (
   assert.match(source, /const MAX_BROWSER_OBSERVATION_ATTEMPTS = 6;/u);
   assert.match(
     source,
-    /for \(let attempt = 0; attempt < MAX_BROWSER_OBSERVATION_ATTEMPTS; attempt \+= 1\)/u,
+    /attempt < performancePolicy\.browserObservationAttempts/u,
   );
+  assert.match(source, /maxAttempts: performancePolicy\.browserObservationAttempts/u);
   // The loop must take its decision from the shared policy, so the replay
   // harness measures the same reasoning the customer's build will use.
   assert.match(source, /const decision = browserObservationDecision\(\{/u);
@@ -277,6 +827,20 @@ test("browser observation is bounded by progress, not by a fixed count", async (
     /broke \$\{nowFalse\.length\} check\(s\) that were passing/u,
   );
   assert.match(source, /do not treat these as pre-existing defects/u);
+});
+
+test("functional and approved-design diagnostics are collected in one browser round", async () => {
+  const source = await readFile(
+    new URL("../src/work-plane/production-mission-service.js", import.meta.url),
+    "utf8",
+  );
+  const fidelityGate = source.slice(
+    source.indexOf("if (\n              exactChecks"),
+    source.indexOf("if (typeof prototypeFidelity?.verify", source.indexOf("if (\n              exactChecks")),
+  );
+  assert.match(fidelityGate, /exactChecks/u);
+  assert.match(fidelityGate, /blockingErrors\.length === 0/u);
+  assert.doesNotMatch(fidelityGate, /observationFailures\.length === 0/u);
 });
 
 test("a repair re-verifies what it changed, and only once", async () => {
@@ -326,6 +890,39 @@ test("a repair re-verifies what it changed, and only once", async () => {
     repair.files.some((file) => !file.repairsTestSource && !file.repairsPlaywrightConfig);
   assert.equal(changed(testOnly), false, "a test-only repair needs no build");
   assert.equal(changed(mixed), true, "a mixed repair still needs the build");
+
+  const { validateBrowserRepairProposal } = await import(
+    "../src/work-plane/production-mission-service.js"
+  );
+  const repairedCheckModule = validateBrowserRepairProposal({
+    structuredOutput: {
+      files: [
+        {
+          path: "tests/foundry-checks.ts",
+          replacements: [
+            {
+              oldText: "locator('.missing').isVisible()",
+              newText: "getByRole('heading', { name: 'Ready' }).isVisible()",
+            },
+          ],
+        },
+      ],
+    },
+    currentFiles: [
+      {
+        path: "tests/foundry-checks.ts",
+        content: [
+          "type C={page:any;expect:any;responsiveEvidence:Record<string,boolean>;accessibilityEvidence:Record<string,boolean>};",
+          "export const obligationChecks:Record<string,(context:C)=>Promise<{passed:boolean;diagnostics:Record<string,boolean|string|number|null>}>>={",
+          "'check-ready':async({page}:C)=>{const visible=await page.locator('.missing').isVisible();return{passed:visible,diagnostics:{visible}}},",
+          "};",
+        ].join("\n"),
+      },
+    ],
+    requiredBrowserCheckIds: ["check-ready"],
+  });
+  assert.equal(repairedCheckModule.files[0].repairsTestSource, true);
+  assert.equal(changed(repairedCheckModule), false);
 });
 
 test("a rejected repair names which protocol rule it broke", async () => {
@@ -448,15 +1045,16 @@ test("a repair that cannot write a patch is asked for whole files instead", asyn
     /do not change the current file/u,
   );
 
-  // The loop reaches for it on the final attempt of a round, not the first:
-  // whole files cost more tokens, so they are the fallback and not the default.
+  // The loop reaches for it after the first mechanical patch rejection. Whole
+  // files cost more tokens, so they remain a fallback, but a third unusable
+  // search/replace proposal should not consume the entire repair round.
   const source = await readFile(
     new URL("../src/work-plane/production-mission-service.js", import.meta.url),
     "utf8",
   );
   assert.match(
     source,
-    /if \(proposalAttempt === MAX_REPAIR_PROPOSALS_PER_ROUND - 1\) \{\s*\n\s*wholeFileFallback = true;/u,
+    /if \(proposalAttempt >= 1\) \{\s*\n\s*wholeFileFallback = true;/u,
   );
   assert.match(source, /await requestBrowserRepair\(\s*\n?\s*semanticRejection,\s*\n?\s*wholeFileFallback,/u);
 });

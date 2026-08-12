@@ -1,0 +1,15 @@
+{
+  "startedAt": "2026-08-11T20:51:14.693Z",
+  "execute": true,
+  "resumed": false,
+  "inputs": [
+    {
+      "input": "Build a polished responsive and accessible login and signup website. People must create durable accounts, sign in later with saved credentials, remain signed in across refresh through secure sessions, sign out with session revocation, switch clearly between sign-in and account-creation modes, use labelled keyboard-accessible forms on phone and desktop, and see useful validation and authentication errors.",
+      "attempts": 1,
+      "error": "Build a polished responsive and accessible login and signup website. People must create durable accounts, sign in later with saved credentials, remain signed in across refresh through secure sessions, sign out with session revocation, switch clearly between sign-in and account-creation modes, use labelled keyboard-accessible forms on phone and desktop, and see useful validation and authentication errors. execution: The generated bundle still failed deterministic admission after 1 paid regenerations: Generated source \"tests/foundry-checks.ts\" has unbalanced JavaScript delimiters: the \"{\" opened at line 30 column 98 is never closed (1 delimiter left open at end of file) — export const obligationChecks: Record<string, (context: Context) => Promise<ObligationResult>> = {. Correct that expression and return the complete file."
+    }
+  ],
+  "completedAt": "2026-08-11T20:53:40.486Z",
+  "passed": 0,
+  "failed": 1
+}

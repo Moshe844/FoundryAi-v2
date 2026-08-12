@@ -116,6 +116,30 @@ const PERSISTED_CREDENTIAL = new RegExp(
 const CREDENTIAL_HASHED =
   /\b(?:bcrypt|argon2|scryptSync|scrypt|pbkdf2Sync|pbkdf2|createHash)\s*\(/u;
 
+// A cookie is a bearer credential. Storing an email address or numeric
+// account identifier in it makes authentication forgeable: the browser can
+// simply replace that value and the server has no secret to validate. The
+// cookie must instead carry an unpredictable token whose server-side session
+// record is looked up (and revoked on sign-out), or a cryptographically signed
+// value verified before use.
+const DIRECT_IDENTITY_SESSION_COOKIE =
+  /\.cookies\.set\(\s*(?:\{[\s\S]{0,240}\bvalue\s*:\s*)?[^,}\r\n]{0,160},?\s*(?:email|user(?:Email|Id)?|account(?:Email|Id)?|user\.(?:email|id)|account\.(?:email|id))\b/iu;
+
+// HTTP DELETE is also the conventional verb for ending a session. That
+// removes a cookie/token, not a customer record, and asking for confirmation
+// before signing out is both misleading and inaccessible friction. Inspect
+// literal fetch targets before applying the destructive-data floor so auth
+// and session termination cannot be confused with record deletion.
+function sourceWithoutSessionTerminationDeletes(source) {
+  return source.replace(
+    /fetch\s*\(\s*(["'`])([^"'`]+)\1\s*,\s*\{[\s\S]{0,600}?\bmethod\s*:\s*(["'`])DELETE\3[\s\S]{0,600}?\}\s*\)/giu,
+    (request, _quote, target) =>
+      /\/(?:auth|session|logout|signout)\/?(?:[?#].*)?$/iu.test(target)
+        ? ""
+        : request,
+  );
+}
+
 // Each rule is deliberately a presence-or-absence check over the generated
 // source rather than a dataflow analysis: precise enough to catch the real
 // defect, conservative enough not to fail a correct build.
@@ -137,6 +161,13 @@ const SOURCE_RULES = Object.freeze([
       "Stored credentials must be irreversibly hashed before persistence. Use node:crypto scryptSync (or pbkdf2Sync) with a per-record random salt, and compare with timingSafeEqual; never write a password, passphrase, or access token into storage as given.",
   },
   {
+    id: "session-cookie-is-unforgeable",
+    signals: [EngineeringSignal.CREDENTIALS],
+    violated: (source) => DIRECT_IDENTITY_SESSION_COOKIE.test(source),
+    message:
+      "An authenticated cookie must never contain a plain email address, user ID, or account ID as its bearer value. Generate a high-entropy random session token, persist only its hash with the account reference and expiry, validate that server-side record on every authenticated request, and delete it on sign-out; alternatively use a correctly signed and verified session format.",
+  },
+  {
     id: "destructive-actions-are-confirmed",
     // A delivered build wired a Remove control straight to a DELETE request:
     // one click and the record was gone, with no prompt and no undo. It was
@@ -147,9 +178,10 @@ const SOURCE_RULES = Object.freeze([
     // the source like the credential rule, and costs the browser test nothing.
     signals: [EngineeringSignal.ALWAYS],
     violated: (source) => {
+      const destructiveSource = sourceWithoutSessionTerminationDeletes(source);
       const issuesDelete =
-        /method\s*:\s*["'`]DELETE["'`]/iu.test(source) ||
-        /["'`]DELETE["'`]\s*,/u.test(source);
+        /method\s*:\s*["'`]DELETE["'`]/iu.test(destructiveSource) ||
+        /["'`]DELETE["'`]\s*,/u.test(destructiveSource);
       if (!issuesDelete) return false;
       // Any deliberate second step counts: a native confirm, a dialog, or the
       // state that holds a pending removal until it is approved.

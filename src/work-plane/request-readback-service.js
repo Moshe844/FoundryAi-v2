@@ -1,12 +1,68 @@
 import { ModelTaskClass } from "../domain/execution.js";
 import { ModelExecutionStage } from "./model-gateway.js";
 import {
+  AskDisposition,
   REQUEST_ASKS_SCHEMA,
   REQUEST_READBACK_SCHEMA,
   assertAsksUnchanged,
   citableProposalLines,
   settleRequestReadback,
 } from "../domain/request-readback.js";
+
+const FOCUSED_AUTH_FEATURES = Object.freeze([
+  ["Account creation", /\b(?:create (?:an? )?account|sign[- ]?up|signup|register)\b/iu],
+  ["Credential sign-in", /\b(?:sign[- ]?in|login|log[- ]?in|credentials?)\b/iu],
+  ["Durable accounts", /\b(?:durable|persist\w*|saved account)\b/iu],
+  ["Refresh-safe sessions", /\b(?:refresh|remain signed|stay signed|sessions?)\b/iu],
+  ["Session-revoking sign-out", /\b(?:sign[- ]?out|logout|log[- ]?out|revok\w*)\b/iu],
+  ["Responsive presentation", /\b(?:responsive|mobile|phone|narrow screen)\b/iu],
+  ["Accessible keyboard forms", /\b(?:accessible|accessibility|keyboard|focus|labels?)\b/iu],
+  ["Useful validation and authentication errors", /\b(?:validation|invalid|incorrect|authentication errors?|useful errors?)\b/iu],
+]);
+
+export function deterministicFocusedAuthenticationReadback({
+  originalCustomerRequest,
+  projectDesign,
+  profileVersion = 1,
+}) {
+  const request = String(originalCustomerRequest ?? "").trim();
+  const planText = JSON.stringify(projectDesign ?? {});
+  if (
+    !/\b(?:create (?:an? )?account|sign[- ]?up|signup|register)\b/iu.test(request) ||
+    !/\b(?:sign[- ]?in|login|log[- ]?in|credentials?)\b/iu.test(request) ||
+    !/\b(?:refresh|sessions?|sign[- ]?out|revok\w*)\b/iu.test(request) ||
+    /\b(?:booking|appointments?|dashboard|portal|store|shop|todos?|school|expense|portfolio|assistant|rest api)\b/iu.test(request)
+  ) {
+    return null;
+  }
+  const lines = citableProposalLines(projectDesign);
+  const asks = [];
+  for (const [ask, pattern] of FOCUSED_AUTH_FEATURES) {
+    const requested = pattern.exec(request);
+    if (requested === null) continue;
+    const citation = lines.find((line) => pattern.test(line)) ?? null;
+    asks.push(Object.freeze({
+      ask,
+      quotedFromRequest: requested[0],
+      disposition:
+        citation === null
+          ? AskDisposition.UNACCOUNTED
+          : AskDisposition.BUILDING,
+      citation,
+    }));
+  }
+  if (asks.length < 3 || !/\b(?:account|authenticat|credential|session)\b/iu.test(planText)) {
+    return null;
+  }
+  const settled = settleRequestReadback({ asks }, projectDesign);
+  return Object.freeze({
+    asks: settled.asks,
+    demotions: settled.demotions,
+    originalCustomerRequest: request,
+    profileVersion,
+    deterministicFastLane: true,
+  });
+}
 
 // Two calls, deliberately. The first reads the customer's request and nothing
 // else; the second disposes of exactly what the first found, citing the

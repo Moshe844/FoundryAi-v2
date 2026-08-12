@@ -1,0 +1,15 @@
+{
+  "startedAt": "2026-08-11T14:57:17.858Z",
+  "execute": true,
+  "resumed": true,
+  "inputs": [
+    {
+      "input": "Build a full login and signup page with durable accounts, real session persistence, sign out, accessible responsive forms, and clear validation and authentication errors",
+      "attempts": 1,
+      "error": "Build a full login and signup page with durable accounts, real session persistence, sign out, accessible responsive forms, and clear validation and authentication errors execution: The original generated bundle failed deterministic admission; no paid regeneration was attempted: Browser check \"obligation-001\" observes an authenticated or protected product surface but is generated through an opaque shared loop. Define an explicit object entry for this check so Foundry can verify its independent account/session setup before execution."
+    }
+  ],
+  "completedAt": "2026-08-11T14:59:57.006Z",
+  "passed": 0,
+  "failed": 1
+}

@@ -834,9 +834,9 @@ test("the registry exposes procedures as data and no execution, generation, prev
   }
   assert.equal(control.orchestrator.selectStack, undefined);
   assert.equal(control.ledger.appendRegistryEvent, undefined);
-  assert.equal(control.toolchains.manifestTemplate.procedures.install.executable, "npm");
+  assert.equal(control.toolchains.manifestTemplate.procedures.install.executable, "node");
   assert.deepEqual(
     control.toolchains.manifestTemplate.procedures.install.arguments,
-    ["ci"],
+    ["scripts/foundry-certified-install.mjs"],
   );
 });

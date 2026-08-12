@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  assertObservationIndependence,
   checkBodies,
   collusiveCheckIssues,
 } from "../src/domain/observation-independence.js";
@@ -40,6 +41,28 @@ test("reading back a value the test itself typed is a round trip, not collusion"
   assert.deepEqual(collusiveCheckIssues(roundTrip), []);
 });
 
+test("input passed through a generated interaction helper retains test provenance", () => {
+  // Verbatim shape from a failed calculator build. The check supplied 9, used
+  // Backspace, and independently counted remaining 9 characters. The old
+  // analyzer saw only character==='9', charged for two full-bundle rewrites,
+  // and then exhausted the mission even though 9 came from the test itself.
+  const helperRoundTrip = `
+const press=async(c:Context,keys:string[])=>{for(const key of keys){await c.page.getByRole('button',{name:key}).click()}};
+const checks={
+'obligation-003':async(c:Context)=>{await press(c,['9','Backspace']);const afterBack=await c.page.getByTestId('expression').textContent();return (afterBack??'').split('').filter((character:string)=>character==='9').length===0},
+};`;
+  assert.deepEqual(collusiveCheckIssues(helperRoundTrip), []);
+});
+
+test("an unrelated helper call does not excuse a hard-coded displayed total", () => {
+  const stillCollusive = `
+const choose=async(c:Context,status:string)=>c.page.locator('#status').selectOption(status);
+const checks={
+'obligation-005':async(c:Context)=>{await choose(c,'Pending');return (await c.page.getByTestId('open-count').textContent())==='2'},
+};`;
+  assert.equal(collusiveCheckIssues(stillCollusive).length, 1);
+});
+
 test("a check asserting text that is not a number is untouched", () => {
   const label = `'obligation-003':async({page}:C)=>{return await page.getByRole('heading').textContent().then((s:string|null)=>s==='Tickets')},`;
   assert.deepEqual(collusiveCheckIssues(label), []);
@@ -61,4 +84,23 @@ test("checks are split so one check's derivation cannot excuse another", () => {
   const issues = collusiveCheckIssues(both);
   assert.equal(issues.length, 1);
   assert.match(issues[0], /obligation-005/u);
+});
+
+test("admission reports every colluding check in one correction request", () => {
+  const threeDefects = [
+    `'obligation-001':async({page}:C)=>await page.getByTestId('result').textContent()==='12',`,
+    `'obligation-002':async({page}:C)=>await page.getByTestId('result').textContent()==='0',`,
+    `'obligation-003':async({page}:C)=>await page.getByTestId('result').textContent()==='7',`,
+  ].join("\n");
+
+  assert.throws(
+    () => assertObservationIndependence(threeDefects),
+    (error) => {
+      assert.match(error.message, /contains 3 non-independent checks/u);
+      assert.match(error.message, /1\. Check "obligation-001"/u);
+      assert.match(error.message, /2\. Check "obligation-002"/u);
+      assert.match(error.message, /3\. Check "obligation-003"/u);
+      return true;
+    },
+  );
 });

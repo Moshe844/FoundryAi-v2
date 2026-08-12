@@ -1,0 +1,15 @@
+{
+  "startedAt": "2026-08-11T18:55:51.260Z",
+  "execute": true,
+  "resumed": false,
+  "inputs": [
+    {
+      "input": "Build a polished full login and signup page with a two-panel responsive desktop layout, clear create-account and sign-in modes, durable accounts, real secure server-validated sessions that persist across refresh, sign out that revokes the session, accessible forms, and clear validation and authentication errors",
+      "attempts": 1,
+      "error": "Build a polished full login and signup page with a two-panel responsive desktop layout, clear create-account and sign-in modes, durable accounts, real secure server-validated sessions that persist across refresh, sign out that revokes the session, accessible forms, and clear validation and authentication errors execution: Three browser repair proposals were rejected before pipeline execution: Structured output failed semantic validation: The browser repair removed 2 of the 2 assertions in tests/foundry-checks.ts. Deleting an assertion makes the observation pass without proving anything; correct how the failing one observes — its locator, its wait, or its scope — and keep every assertion."
+    }
+  ],
+  "completedAt": "2026-08-11T19:01:53.988Z",
+  "passed": 0,
+  "failed": 1
+}

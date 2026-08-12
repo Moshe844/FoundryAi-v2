@@ -172,8 +172,15 @@ const MEASURE_EXPRESSION = `(() => {
   const visible = (element) => { const style = getComputedStyle(element); const box = element.getBoundingClientRect(); return style.display !== 'none' && style.visibility !== 'hidden' && box.width > 0 && box.height > 0; };
   const nodes = [...document.querySelectorAll('header,nav,main,section,article,aside,form,table,footer,[role="main"],[role="navigation"]')].filter(visible).slice(0, 80);
   const manifest = nodes.map((element, index) => { const box = element.getBoundingClientRect(); const style = getComputedStyle(element); return { index, tag: element.tagName.toLowerCase(), role: element.getAttribute('role'), id: element.id || null, x: box.x, y: box.y, width: box.width, height: box.height, display: style.display, position: style.position, fontFamily: style.fontFamily, fontSize: style.fontSize, fontWeight: style.fontWeight, backgroundColor: style.backgroundColor, color: style.color }; });
-  const focusable = document.querySelector('a[href],button,input,select,textarea,[tabindex]:not([tabindex="-1"])');
-  focusable?.focus();
+  // Generated responsive navigation often keeps a hidden mobile or desktop
+  // control earlier in the DOM. querySelector picked that hidden (and
+  // occasionally disabled) control, focus() was a no-op, and a perfectly
+  // accessible concept was regenerated three times because BODY stayed
+  // active. Measure the first target a keyboard user can actually reach.
+  const focusables = [...document.querySelectorAll('a[href],button,input,select,textarea,[tabindex]:not([tabindex="-1"])')]
+    .filter((element) => visible(element) && !element.matches(':disabled') && element.tabIndex >= 0);
+  const focusable = focusables[0] ?? null;
+  focusable?.focus({ preventScroll: true });
   const images = [...document.querySelectorAll('img,picture,svg,video')].filter(visible).slice(0, 40).map((element) => { const box = element.getBoundingClientRect(); const style = getComputedStyle(element); return { tag: element.tagName.toLowerCase(), x: box.x, y: box.y, width: box.width, height: box.height, objectFit: style.objectFit, alt: element instanceof HTMLImageElement ? element.alt : null }; });
   const interactions = [...document.querySelectorAll('a[href],button,input,select,textarea,[tabindex]:not([tabindex="-1"])')].filter(visible).slice(0, 80).map((element) => ({ tag: element.tagName.toLowerCase(), type: element.getAttribute('type'), href: element.getAttribute('href'), label: element.getAttribute('aria-label') || element.textContent?.trim().slice(0, 80) || null }));
   const activeStyle = focusable ? getComputedStyle(focusable) : null;
@@ -203,7 +210,7 @@ const MEASURE_EXPRESSION = `(() => {
     scrollHeight: document.documentElement.scrollHeight,
     activeElement: document.activeElement?.tagName ?? null,
     focusVisible: Boolean(focusable?.matches(':focus-visible')) || Boolean(activeStyle && activeStyle.outlineStyle !== 'none' && parseFloat(activeStyle.outlineWidth) > 0),
-    focusableCount: document.querySelectorAll('a[href],button,input,select,textarea,[tabindex]:not([tabindex="-1"])').length,
+    focusableCount: focusables.length,
     navigationPresent: Boolean(document.querySelector('nav,[role="navigation"]')),
     imageCount: images.length,
     images,

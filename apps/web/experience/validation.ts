@@ -650,6 +650,51 @@ function productBlueprint(
 function liveConceptStudio(value: unknown, path: string) {
   const input = object(value, path);
   const generation = object(input.generation, `${path}.generation`);
+  const generationProgress = input.generationProgress === undefined || input.generationProgress === null
+    ? null
+    : (() => {
+        const progress = object(input.generationProgress, `${path}.generationProgress`);
+        return {
+          startedAt: text(progress.startedAt, `${path}.generationProgress.startedAt`),
+          updatedAt: text(progress.updatedAt, `${path}.generationProgress.updatedAt`),
+          concepts: list(progress.concepts, `${path}.generationProgress.concepts`, (entry, itemPath) => {
+            const concept = object(entry, itemPath);
+            return {
+              conceptId: text(concept.conceptId, `${itemPath}.conceptId`),
+              conceptName: text(concept.conceptName, `${itemPath}.conceptName`),
+              attempt: integer(concept.attempt, `${itemPath}.attempt`),
+              maxAttempts: integer(concept.maxAttempts, `${itemPath}.maxAttempts`),
+              phase: text(concept.phase, `${itemPath}.phase`) as
+                | "QUEUED"
+                | "GENERATING_FILES"
+                | "VERIFYING_BROWSER"
+                | "RETRYING"
+                | "ADMITTED"
+                | "FAILED",
+              message: text(concept.message, `${itemPath}.message`),
+              files: list(concept.files, `${itemPath}.files`, (fileEntry, filePath) => {
+                const file = object(fileEntry, filePath);
+                return {
+                  path: text(file.path, `${filePath}.path`),
+                  status: text(file.status, `${filePath}.status`) as "PLANNED" | "WRITTEN",
+                  content: nullableText(file.content, `${filePath}.content`),
+                  truncated: bool(file.truncated, `${filePath}.truncated`),
+                };
+              }),
+              updatedAt: text(concept.updatedAt, `${itemPath}.updatedAt`),
+            };
+          }),
+          events: list(progress.events, `${path}.generationProgress.events`, (entry, itemPath) => {
+            const event = object(entry, itemPath);
+            return {
+              conceptId: text(event.conceptId, `${itemPath}.conceptId`),
+              conceptName: text(event.conceptName, `${itemPath}.conceptName`),
+              at: text(event.at, `${itemPath}.at`),
+              message: text(event.message, `${itemPath}.message`),
+            };
+          }),
+        };
+      })();
   const evolution = input.evolution === undefined
     ? undefined
     : (() => {
@@ -739,6 +784,7 @@ function liveConceptStudio(value: unknown, path: string) {
     evolution,
     error: nullableText(input.error, `${path}.error`),
     generating: bool(input.generating, `${path}.generating`),
+    generationProgress,
     createdAt: text(input.createdAt, `${path}.createdAt`),
     updatedAt: text(input.updatedAt, `${path}.updatedAt`),
   };
@@ -1028,6 +1074,13 @@ export function validateMission(value: unknown, path = "mission"): Mission {
                 rawObservation.corrections,
                 `${path}.executionProjection.observation.corrections`,
               ),
+              correcting:
+                rawObservation.correcting === undefined
+                  ? false
+                  : bool(
+                      rawObservation.correcting,
+                      `${path}.executionProjection.observation.correcting`,
+                    ),
             },
       repair:
         rawRepair === null

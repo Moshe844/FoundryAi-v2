@@ -350,6 +350,21 @@ export function createPrototypeWorkspaceService({ prototypeRoot }) {
     return content;
   }
 
+  function readSourceFile(contractInput, relativePath) {
+    const contract = normalizeConceptPrototypeContract(contractInput);
+    const { paths, state } = readState(contract);
+    if (state.status !== "FINALIZED") fail("source reads require a finalized prototype workspace.");
+    const path = safeSourcePath(paths.sourcePath, relativePath);
+    if (!existsSync(path) || !statSync(path).isFile() || lstatSync(path).isSymbolicLink()) {
+      fail(`source file "${relativePath}" is missing or unsafe.`);
+    }
+    const content = readFileSync(path);
+    if (content.length > MAX_FILE_BYTES) {
+      fail(`source file "${relativePath}" exceeds the read limit.`);
+    }
+    return content;
+  }
+
   return Object.freeze({
     provision,
     writeFiles,
@@ -361,5 +376,6 @@ export function createPrototypeWorkspaceService({ prototypeRoot }) {
     saveRuntimeRecord,
     writeEvidenceFiles,
     readEvidenceFile,
+    readSourceFile,
   });
 }

@@ -23,15 +23,29 @@ import {
   parseBrowserResult,
 } from "../src/index.js";
 import {
+  admissionCorrectionPaths,
+  bindCertifiedAccessibilityChecks,
+  bindCertifiedResponsiveChecks,
+  checkComputationSources,
   ProductionRepairScope,
   classifyProductionFailure,
   ensureCertifiedStackScaffold,
+  foundryObservationHarness,
   generatedFileReconciliationAction,
   hasBalancedJavaScriptDelimiters,
   hasBalancedJsxTags,
+  mergeAdmissionCorrection,
+  mergeCompleteAdmissionCorrection,
+  reconstructGenerationOutput,
   repairScopeForPath,
+  runtimeRestartCountForRecords,
+  stabilizeGeneratedAuthHydration,
+  stabilizeGeneratedBrowserCheckTiming,
+  stabilizeGeneratedNarrowLayout,
+  stabilizeGeneratedSqliteRowMaps,
   validateGeneratedRepairPath,
   validateGeneratedRepairProposal,
+  validateGeneratedRepairSet,
   verificationTargetsForProcedure,
   validateBrowserRepairProposal,
   validateBrowserObservationTestSource,
@@ -43,6 +57,13 @@ import { modelRequestTimeoutMs } from "../src/capability-plane/live-ai-adapters.
 test("live model requests use one adequate timeout instead of short-call retry pressure", () => {
   assert.equal(modelRequestTimeoutMs({ taskClass: "PROJECT_UNDERSTANDING" }), 120_000);
   assert.equal(modelRequestTimeoutMs({ taskClass: "FILE_GENERATION" }), 300_000);
+  assert.equal(
+    modelRequestTimeoutMs({
+      taskClass: "REPAIR_IMPLEMENTATION",
+      requestTimeoutMs: 60_000,
+    }),
+    60_000,
+  );
 });
 
 test("repository test commands exclude generated customer workspaces", () => {
@@ -115,13 +136,13 @@ test("certified stack scaffold pins packages and shares measured quality probes 
             test: "playwright test",
           },
           dependencies: {
-            next: "15.4.4",
+            next: "15.5.23",
             react: "19.1.0",
             "react-dom": "19.1.0",
             "better-sqlite3": "13.0.1",
           },
           devDependencies: {
-            "@playwright/test": "1.54.2",
+            "@playwright/test": "1.62.1",
             "@types/react-dom": "19.1.0",
             typescript: "5.8.3",
           },
@@ -355,6 +376,7 @@ test("certified stack scaffold excludes Next's hidden route announcer from alert
       content: [
         "const captureProbeErrors: string[] = []; const consoleErrors: string[] = []; const pageErrors: string[] = [];",
         "try { const errorVisible = await page.locator('[role=\"alert\"]').isVisible(); }",
+        "try { const contextualError = await context.page.getByRole('alert').isVisible(); }",
         "finally { console.log('FOUNDRY_BROWSER_RESULT:'); }",
       ].join("\n"),
     },
@@ -362,6 +384,104 @@ test("certified stack scaffold excludes Next's hidden route announcer from alert
   const browserTest = files.find((file) => file.path === "tests/error.spec.ts");
   assert.match(browserTest.content, /:not\(#__next-route-announcer__\)/u);
   assert.match(browserTest.content, /\.first\(\)\.isVisible\(\)/u);
+  assert.doesNotMatch(browserTest.content, /getByRole\(["']alert/u);
+});
+
+test("certified auth scaffold binds session reads and waits for the resolving screen", () => {
+  const files = ensureCertifiedStackScaffold([
+    {
+      path: "app/api/auth/route.ts",
+      content:
+        "export async function GET(){return Response.json({user:null,session:null})}",
+    },
+    {
+      path: "app/api/health/route.ts",
+      content: "export function GET(){return Response.json({status:'ready'})}",
+    },
+    {
+      path: "app/page.tsx",
+      content:
+        "'use client';const [user,setUser]=useState<User|null|undefined>(undefined);useEffect(()=>{fetch('/api/health').then(r=>r.json()).then(x=>setUser(x.user))},[]);if(user===undefined)return <main aria-busy=\"true\">Resolving</main>;return <form><input type=\"email\"/></form>",
+    },
+    {
+      path: "tests/foundry-checks.ts",
+      content:
+        "const check=async(x:any)=>{await x.page.goto('/',{waitUntil:'domcontentloaded'});const count=await x.page.getByRole('button').count();return count>0}",
+    },
+    {
+      path: "tests/foundry-observation.spec.ts",
+      content: foundryObservationHarness(["obligation-ready"]),
+    },
+  ]);
+  const page = files.find((file) => file.path === "app/page.tsx");
+  const checks = files.find((file) => file.path === "tests/foundry-checks.ts");
+  const harness = files.find(
+    (file) => file.path === "tests/foundry-observation.spec.ts",
+  );
+  assert.match(page.content, /fetch\('\/api\/auth'\)/u);
+  assert.match(
+    checks.content,
+    /page\.goto\([^;]+;await x\.page\.locator\('form:visible, input:visible, button:visible'\)\.first\(\)\.waitFor/u,
+  );
+  assert.match(
+    harness.content,
+    /page\.goto\([^;]+;await page\.locator\('form:visible, input:visible, button:visible'\)\.first\(\)\.waitFor/u,
+  );
+
+  const readyFiles = ensureCertifiedStackScaffold([
+    {
+      path: "app/page.tsx",
+      content:
+        "'use client';const [ready,setReady]=useState(false);useEffect(()=>{fetch('/api/auth/session').finally(()=>setReady(true))},[]);async function out(){await fetch('/api/auth/signout',{method:'POST'})}if(!ready)return <main>Checking session</main>;return <main><div aria-label=\"Authentication choice\"><button>Sign in</button></div><form><button>Sign in</button></form></main>",
+    },
+    {
+      path: "tests/foundry-checks.ts",
+      content:
+        "const check=async(c:C,work:(c:C)=>Promise<Record<string,boolean>>):Promise<{passed:boolean}>=>{const result=await work(c);return {passed:true}};const switchMode=async(c:C)=>c.page.getByRole('button',{name:'Sign in',exact:true}).click();const color=async(c:C)=>c.page.locator('button').first().evaluate((element:Element)=>getComputedStyle(element).backgroundColor);",
+    },
+  ]);
+  const readyPage = readyFiles.find((file) => file.path === "app/page.tsx");
+  const readyChecks = readyFiles.find(
+    (file) => file.path === "tests/foundry-checks.ts",
+  );
+  assert.match(readyPage.content, /body:'\{\}'/u);
+  assert.match(
+    readyChecks.content,
+    /=>\{await c\.page\.locator\('form:visible, input:visible, button:visible'\)\.first\(\)\.waitFor/u,
+  );
+  assert.match(
+    readyChecks.content,
+    /page\.locator\("\[aria-label=\\"Authentication choice\\"\]"\)\.getByRole\('button', \{ name: 'Sign in', exact: true \}\)/u,
+  );
+  assert.match(
+    readyChecks.content,
+    /page\.locator\('form'\)\.getByRole\('button'\)\.evaluate/u,
+  );
+});
+
+test("efficiency metrics exclude the mandatory independent verification runtime", () => {
+  const startup = (sessionId) => ({ eventType: "STARTUP", sessionId });
+  const observation = (sessionId) => ({
+    eventType: "BROWSER_OBSERVATION",
+    sessionId,
+  });
+  assert.equal(
+    runtimeRestartCountForRecords([
+      startup("execution-1"),
+      startup("authority-capture"),
+      observation("authority-capture"),
+    ]),
+    0,
+  );
+  assert.equal(
+    runtimeRestartCountForRecords([
+      startup("execution-1"),
+      startup("execution-retry"),
+      startup("authority-capture"),
+      observation("authority-capture"),
+    ]),
+    1,
+  );
 });
 
 test("certified stack scaffold disambiguates text actions from repeated headings", () => {
@@ -379,6 +499,542 @@ test("certified stack scaffold disambiguates text actions from repeated headings
   assert.match(
     browserTest.content,
     /getByRole\('button', \{ name: 'Add Record', exact: true \}\)\.click\(\)/u,
+  );
+});
+
+test("certified stack scaffold closes a malformed Promise arrow locally", () => {
+  const files = ensureCertifiedStackScaffold([
+    {
+      path: "tests/foundry-checks.ts",
+      content:
+        "type R={passed:boolean}; const check=async():Promise<R=>{return {passed:false}};",
+    },
+  ]);
+  const browserChecks = files.find(
+    (file) => file.path === "tests/foundry-checks.ts",
+  );
+  assert.doesNotMatch(browserChecks.content, /Promise<R=>/u);
+  assert.match(browserChecks.content, /Promise<R>=>/u);
+
+  const nested = ensureCertifiedStackScaffold([
+    {
+      path: "tests/foundry-checks.ts",
+      content:
+        "const check=async(c:C,work:(c:C)=>Promise<Record<string,boolean>>):Promise<{passed:boolean;diagnostics:Record<string,boolean>}>{let diagnostics={};return {passed:false,diagnostics}};",
+    },
+  ]).find((file) => file.path === "tests/foundry-checks.ts");
+  assert.match(
+    nested.content,
+    /Promise<\{passed:boolean;diagnostics:Record<string,boolean>\}>=>\{let/u,
+  );
+
+  const declaration = ensureCertifiedStackScaffold([
+    {
+      path: "tests/foundry-checks.ts",
+      content:
+        "async function account(c:C):Promise<{email:string,password:string}>=>{return {email:'a',password:'b'}}",
+    },
+  ]).find((file) => file.path === "tests/foundry-checks.ts");
+  assert.doesNotMatch(declaration.content, /Promise<[^\r\n]+>=>\{/u);
+  assert.match(
+    declaration.content,
+    /async function account\(c:C\):Promise<\{email:string,password:string\}>\{/u,
+  );
+});
+
+test("certified stack scaffold removes recurring local auth and input traps", () => {
+  const files = ensureCertifiedStackScaffold([
+    {
+      path: "tests/foundry-checks.ts",
+      content:
+        "const setup=async(c:any)=>{await c.page.getByLabel('Password',{exact:true}).fill('password88')};",
+    },
+    {
+      path: "lib/db.ts",
+      content:
+        'import Database from "better-sqlite3"; const db=new Database("data/app.db"); db.exec("CREATE TABLE todos(created_at TEXT DEFAULT datetime(\'now\'))")',
+    },
+    {
+      path: "app/globals.css",
+      content: ".sr{font-size:0} input{font:inherit}",
+    },
+  ]);
+  assert.match(
+    files.find((file) => file.path === "tests/foundry-checks.ts").content,
+    /page\.locator\('input\[name="password"\]:visible'\)\.fill/u,
+  );
+  assert.match(
+    files.find((file) => file.path === "lib/db.ts").content,
+    /DEFAULT \(datetime\('now'\)\)/u,
+  );
+  assert.match(
+    files.find((file) => file.path === "app/globals.css").content,
+    /\.sr input, \.sr textarea \{ font-size: 1rem; \}/u,
+  );
+  assert.ok(files.some((file) => file.path === "data/.gitkeep"));
+});
+
+test("certified stack scaffold preserves a data root used through path.join", () => {
+  const files = ensureCertifiedStackScaffold([
+    {
+      path: "lib/db.ts",
+      content:
+        "import Database from 'better-sqlite3'; import path from 'node:path'; export const db=()=>new Database(path.join(process.cwd(),'data','accounts.db'));",
+    },
+  ]);
+  assert.ok(files.some((file) => file.path === "data/.gitkeep"));
+});
+
+test("certified stack scaffold keeps Foundry-owned tests outside application lint", () => {
+  const files = ensureCertifiedStackScaffold([
+    {
+      path: "eslint.config.mjs",
+      content:
+        "export default [{ ignores: ['.next/**'] }, ...compat.extends('next/typescript')];",
+    },
+  ]);
+  const eslintConfig = files.find((file) => file.path === "eslint.config.mjs");
+  assert.match(
+    eslintConfig.content,
+    /"\.next\/\*\*", "next-env\.d\.ts", "tests\/\*\*"/u,
+  );
+  assert.match(eslintConfig.content, /export default config/u);
+});
+
+test("certified stack prevents a late initial session response from erasing sign-in", () => {
+  const generated = `'use client';
+import { FormEvent, useEffect, useState } from 'react';
+type User={email:string};
+const call=async(path:string,body?:object)=>fetch(path).then(r=>r.json());
+export default function Page(){
+ const [user,setUser]=useState<User|null|undefined>(undefined);
+ async function load() { const session=await call('/api/auth'); if(session.user)setUser(session.user);else setUser(null); }
+ useEffect(()=>{void load();},[]);
+ async function auth(event:FormEvent<HTMLFormElement>){event.preventDefault();const result=await call('/api/auth',{action:'login'});setUser(result.user??null);}
+ return <main>{user?.email}</main>;
+}`;
+  const corrected = stabilizeGeneratedAuthHydration(generated);
+  assert.match(corrected, /useRef/u);
+  assert.match(corrected, /const foundryAuthEpoch=useRef\(0\)/u);
+  assert.match(
+    corrected,
+    /load\s*\(foundryExpectedAuthEpoch=foundryAuthEpoch\.current\)/u,
+  );
+  assert.match(
+    corrected,
+    /await call\('\/api\/auth'\);if\(foundryExpectedAuthEpoch!==foundryAuthEpoch\.current\)return;/u,
+  );
+  assert.match(
+    corrected,
+    /function auth\([^)]*\)\{foundryAuthEpoch\.current\+=1;/u,
+  );
+  assert.doesNotThrow(() =>
+    validateProjectBundleForStack(
+      ensureCertifiedStackScaffold([
+        { path: "app/page.tsx", content: generated },
+        {
+          path: "package.json",
+          content: JSON.stringify({
+            scripts: {
+              build: "next build",
+              start: "next start -p $PORT",
+              typecheck: "tsc --noEmit",
+              lint: "next lint",
+              test: "playwright test",
+            },
+            dependencies: {
+              "@playwright/test": "1.62.1",
+              "better-sqlite3": "12.2.0",
+              eslint: "9.32.0",
+              next: "15.4.6",
+              react: "19.1.1",
+              "react-dom": "19.1.1",
+              typescript: "5.9.2",
+            },
+          }),
+        },
+        { path: "app/layout.tsx", content: "export default function Layout({children}:any){return <html><body>{children}</body></html>}" },
+        { path: "app/globals.css", content: "body{margin:0}" },
+        { path: "app/api/health/route.ts", content: "export function GET(){return Response.json({status:'ready'})}" },
+        { path: "playwright.config.ts", content: "export default {use:{baseURL:process.env.FOUNDRY_PREVIEW_URL,channel:'chrome'}}" },
+        { path: "tests/app.spec.ts", content: "const captureProbeErrors=[];const checks={};const diagnostics={};const consoleErrors=[];const pageErrors=[];try{}finally{console.log('FOUNDRY_BROWSER_RESULT:'+JSON.stringify({captureProbeErrors,checks,diagnostics,consoleErrors,pageErrors}))}" },
+      ]),
+      [],
+      null,
+      {},
+    ),
+  );
+});
+
+test("certified stack scaffold stabilizes generated authentication navigation", () => {
+  const files = ensureCertifiedStackScaffold([
+    {
+      path: "app/page.tsx",
+      content:
+        "const signOut=async()=>{await fetch('/api/auth',{method:'DELETE'});router.push('/login')};",
+    },
+    {
+      path: "tests/foundry-checks.ts",
+      content: [
+        "const first=async({page}:any)=>{let moved=false;await page.getByRole('link',{name:'Sign in',exact:true}).click();moved=await page.getByRole('heading',{name:/Welcome back/}).isVisible();return moved};",
+        "const login=async({page}:any)=>{await page.getByRole('button',{name:'Sign out',exact:true}).click();await page.getByRole('link',{name:'Sign in',exact:true}).click();await page.getByLabel('Email address',{exact:true}).fill('person@test.local')};",
+      ].join("\n"),
+    },
+  ]);
+  const browserChecks = files.find(
+    (file) => file.path === "tests/foundry-checks.ts",
+  ).content;
+  assert.doesNotMatch(
+    browserChecks,
+    /Sign out[\s\S]{0,200}getByRole\('link',\{name:'Sign in'/u,
+  );
+  assert.match(
+    browserChecks,
+    /getByRole\('heading',\{name:\/Welcome back\/\}\)\.waitFor\(\{ state: 'visible' \}\)\.then\(\(\) => true\)/u,
+  );
+});
+
+test("certified auth checks scope duplicate mode actions through the labelled container", () => {
+  const files = ensureCertifiedStackScaffold([
+    {
+      path: "app/page.tsx",
+      content:
+        "export default function Page(){return <main><div role='tablist' aria-label='Access mode'><button>Sign in</button><button>Create account</button></div><form><button>Sign in</button></form></main>}",
+    },
+    {
+      path: "tests/foundry-checks.ts",
+      content:
+        "export const obligationChecks={one:async({page}:any)=>{await page.getByRole('button',{name:'Create account',exact:true}).click();return{passed:true,diagnostics:{observed:true}}}};",
+    },
+  ]);
+  const browserChecks = files.find(
+    (file) => file.path === "tests/foundry-checks.ts",
+  ).content;
+  assert.match(
+    browserChecks,
+    /page\.locator\("\[aria-label=\\"Access mode\\"\]"\)\.getByRole\('button', \{ name: 'Create account', exact: true \}\)/u,
+  );
+  assert.doesNotMatch(browserChecks, /page\.getByLabel\('Access mode'/u);
+});
+
+test("certified browser checks make reassigned boolean accumulators mutable", () => {
+  const files = ensureCertifiedStackScaffold([
+    {
+      path: "tests/foundry-checks.ts",
+      content:
+        "export const obligationChecks={one:async()=>{const passed=false;try{passed=true}catch{}return{passed,diagnostics:{observed:passed}}}};",
+    },
+  ]);
+  const browserChecks = files.find(
+    (file) => file.path === "tests/foundry-checks.ts",
+  ).content;
+  assert.match(browserChecks, /let passed=false;/u);
+  assert.doesNotMatch(browserChecks, /const passed=false;/u);
+});
+
+test("certified browser checks expand opaque obligation loops into explicit entries", () => {
+  const files = ensureCertifiedStackScaffold([
+    {
+      path: "tests/foundry-checks.ts",
+      content:
+        "async function check(c:C,k:string){return{passed:true,diagnostics:{key:k}}}export const obligationChecks:Record<string,(context:C)=>Promise<unknown>>=Object.fromEntries(['obligation-001','obligation-002','obligation-003'].map((k:string)=>[k,async(c:C)=>check(c,k)]));",
+    },
+  ]);
+  const browserChecks = files.find(
+    (file) => file.path === "tests/foundry-checks.ts",
+  ).content;
+  assert.doesNotMatch(browserChecks, /Object\.fromEntries/u);
+  for (const id of ["obligation-001", "obligation-002", "obligation-003"]) {
+    assert.ok(
+      browserChecks.includes(`"${id}":async(c:C)=>check(c,"${id}")`),
+    );
+  }
+});
+
+test("certified browser checks expand assignment loops into inspectable entries", () => {
+  const files = ensureCertifiedStackScaffold([
+    {
+      path: "tests/foundry-checks.ts",
+      content:
+        "type C={page:any};type R={passed:boolean;diagnostics:Record<string,string>};const checks:Record<string,(c:C)=>Promise<R>>={};for(const id of ['obligation-001','obligation-002'])checks[id]=async(c:C)=>{const ok=id==='obligation-001'&&await c.page.locator('main').isVisible();return{passed:ok,diagnostics:{id}}};export const obligationChecks=checks;",
+    },
+  ]);
+  const browserChecks = files.find(
+    (file) => file.path === "tests/foundry-checks.ts",
+  ).content;
+  assert.doesNotMatch(browserChecks, /for\s*\(const id of/u);
+  assert.doesNotMatch(browserChecks, /obligationChecks=checks/u);
+  assert.match(browserChecks, /"obligation-001":async\(c:C\)/u);
+  assert.match(browserChecks, /"obligation-002":async\(c:C\)/u);
+  assert.match(browserChecks, /"obligation-001"==='obligation-001'/u);
+  assert.match(browserChecks, /diagnostics:\{id:"obligation-002"\}/u);
+});
+
+test("certified login obligations always exercise saved credentials through the UI", () => {
+  const files = ensureCertifiedStackScaffold(
+    [
+      {
+        path: "tests/foundry-checks.ts",
+        content:
+          "export const obligationChecks={'obligation-login':async(context:any)=>({passed:await context.page.locator('.shell').isVisible(),diagnostics:{}}),'obligation-other':async()=>({passed:true,diagnostics:{}})};",
+      },
+    ],
+    [],
+    { loginCheckIds: ["obligation-login"] },
+  );
+  const browserChecks = files.find(
+    (file) => file.path === "tests/foundry-checks.ts",
+  ).content;
+  assert.match(browserChecks, /foundry-login-/u);
+  assert.match(browserChecks, /name:'Create account'/u);
+  assert.match(browserChecks, /name:'Sign out'/u);
+  assert.match(browserChecks, /name:'Sign in'/u);
+  assert.match(
+    browserChecks,
+    /getByRole\('button',\{name:\/sign in\/i\}\)\.first\(\)\.click\(\)/u,
+  );
+  assert.match(browserChecks, /name:'Sign out',exact:true\}\)\.first\(\)/u);
+  assert.match(browserChecks, /page\.reload/u);
+  assert.match(browserChecks, /refreshPersistence:true/u);
+  assert.match(browserChecks, /savedCredentialLogin:passed/u);
+  assert.match(browserChecks, /obligation-other/u);
+});
+
+test("certified authentication errors submit rejected credentials and observe the alert", () => {
+  const files = ensureCertifiedStackScaffold(
+    [
+      {
+        path: "app/page.tsx",
+        content:
+          "export default function Page(){return <><div aria-label='Account access mode'><button>Sign in</button><button>Create account</button></div><form><input type='email'/><input name='password' type='password'/><button>Sign in</button><p role='alert'>Incorrect credentials</p></form></>}",
+      },
+      {
+        path: "tests/foundry-checks.ts",
+        content:
+          "export const obligationChecks={'auth-error':async(context:any)=>({passed:await context.page.locator('.error').isVisible(),diagnostics:{}})};",
+      },
+    ],
+    [],
+    { authenticationErrorCheckIds: ["auth-error"] },
+  );
+  const browserChecks = files.find(
+    (file) => file.path === "tests/foundry-checks.ts",
+  ).content;
+  assert.match(browserChecks, /foundry-missing-/u);
+  assert.match(browserChecks, /locator\('form'\)\.getByRole\('button'/u);
+  assert.match(browserChecks, /form \[role="alert"\]:visible/u);
+  assert.match(browserChecks, /accessibleError:passed/u);
+  assert.match(browserChecks, /sensitivePasswordAbsent/u);
+});
+
+test("certified accessibility checks measure labels and keyboard focus", () => {
+  const source =
+    "export const obligationChecks={'accessibility':async(context:any)=>({passed:await context.page.locator('main').isVisible(),diagnostics:{}})};";
+  const browserChecks = bindCertifiedAccessibilityChecks(source, [
+    "accessibility",
+  ], [], ["accessibility"]);
+  assert.match(browserChecks, /keyboard\.press\('Tab'\)/u);
+  assert.match(browserChecks, /document\.activeElement/u);
+  assert.match(browserChecks, /:focus-visible/u);
+  assert.match(browserChecks, /label,button\[aria-label\]/u);
+  assert.match(browserChecks, /labelled>0/u);
+  assert.match(browserChecks, /accessibilityEvidence\.focus===true/u);
+  assert.match(browserChecks, /accessibilityEvidence\.labels===true/u);
+  assert.match(browserChecks, /scrollWidth<=layout\.clientWidth/u);
+  assert.match(browserChecks, /responsiveEvidence\.phone===true/u);
+  assert.equal(hasBalancedJavaScriptDelimiters(browserChecks), true);
+});
+
+test("certified authenticated accessibility checks retain their fresh-account helper", () => {
+  const source = `
+const createAuthenticatedAccount = async (page: any, prefix: string) => {
+  const email = \`${"${prefix}"}${"${Date.now()}"}@test.dev\`;
+  await page.getByRole('tab', { name: 'Create account', exact: true }).click();
+  await page.getByLabel('Email', { exact: true }).fill(email);
+  await page.getByLabel('Password', { exact: true }).fill('password88');
+  await page.locator('form').getByRole('button', { name: /Continue/ }).click();
+};
+export const obligationChecks = {
+  'obligation-accessibility': async ({ page }: any) => {
+    await createAuthenticatedAccount(page, 'accessibility');
+    await page.keyboard.press('Tab');
+    const labelled = await page.locator('label').count();
+    const focused = await page.evaluate(() => document.activeElement !== document.body);
+    return { passed: labelled > 0 && focused, diagnostics: { labelled, focused } };
+  }
+};`;
+  const browserChecks = bindCertifiedAccessibilityChecks(
+    source,
+    ["obligation-accessibility"],
+    ["obligation-accessibility"],
+  );
+  assert.match(
+    browserChecks,
+    /await createAuthenticatedAccount\(page, 'accessibility'\);/u,
+  );
+  assert.doesNotThrow(() =>
+    validateBrowserObservationTestSource(
+      `${foundryObservationHarness(["obligation-accessibility"])}\n${browserChecks}`,
+      ["obligation-accessibility"],
+      {
+        accessibilityCheckIds: ["obligation-accessibility"],
+        authenticatedCheckIds: ["obligation-accessibility"],
+      },
+    ),
+  );
+});
+
+test("certified responsive checks use the canonical page alias and real phone measurements", () => {
+  const source = `
+const account=async(p:any)=>{await p.getByRole('button',{name:'Create account'}).click()};
+export const obligationChecks={
+  'responsive':async({page:p}:any)=>{await account(p);const row=await p.locator('.row').isVisible();return{passed:row,diagnostics:{row}}}
+};`;
+  const browserChecks = bindCertifiedResponsiveChecks(
+    source,
+    ["responsive"],
+    ["responsive"],
+  );
+  assert.match(browserChecks, /await account\(page\)/u);
+  assert.doesNotMatch(browserChecks, /await account\(p\)/u);
+  assert.match(browserChecks, /setViewportSize\(\{width:390,height:844\}\)/u);
+  assert.match(browserChecks, /scrollWidth<=layout\.clientWidth/u);
+  assert.match(browserChecks, /interactionCount<=100/u);
+});
+
+test("certified todo checks wait for observable state instead of fixed delays", () => {
+  const source = `
+async function dashboardVisible(page){return true}
+async function check(context, page, control, task){
+  await page.waitForTimeout(100);
+  if (!(await dashboardVisible(page))) throw new Error('late dashboard');
+  await context.page.reload();
+  const persistedTodo = await visible(context.page, \`text=${"${task}"}\`);
+  await control.check();
+  const checked = await control.isChecked();
+  await context.page.getByRole('button',{name:/sign out|log out/i}).first().click();
+  await p.getByRole('button',{name:'Confirm delete',exact:true}).click();
+  ok=await p.getByText('Disposable task',{exact:true}).count()===0;
+  await p.getByRole('button',{name:'Complete',exact:true}).click();
+  ok=await p.getByText('Done',{exact:true}).isVisible();
+  return {persistedTodo,checked};
+}`;
+  const stabilized = stabilizeGeneratedBrowserCheckTiming(source);
+  assert.doesNotMatch(stabilized, /waitForTimeout\(100\)/u);
+  assert.match(stabilized, /waitForFunction/u);
+  assert.match(stabilized, /getByText\(task,\{exact:true\}\).*waitFor/u);
+  assert.match(stabilized, /deadline=Date\.now\(\)\+5000/u);
+  assert.match(stabilized, /form:visible/u);
+  assert.match(stabilized, /screen-02-overview/u);
+  assert.match(stabilized, /state:'detached'/u);
+  assert.match(stabilized, /Completed tasks/u);
+  assert.match(stabilized, /data-completed/u);
+  assert.doesNotMatch(stabilized, /getByText\('Done'[^;]+isVisible/u);
+});
+
+test("certified todo layouts receive narrow-screen overflow guardrails once", () => {
+  const source = ".authcard{display:flex;flexDirection:column}.controls input{flex:1}";
+  const stabilized = stabilizeGeneratedNarrowLayout(source);
+  assert.match(stabilized, /overflow-wrap: anywhere/u);
+  assert.match(stabilized, /input, textarea, select \{ min-width: 0/u);
+  assert.match(stabilized, /@media \(max-width: 560px\)/u);
+  assert.doesNotMatch(stabilized, /flexDirection/u);
+  assert.match(stabilized, /\.auth[^\n]+width:\s*min\(100%,\s*480px\)/u);
+  assert.equal(stabilizeGeneratedNarrowLayout(stabilized), stabilized);
+});
+
+test("certified SQLite row maps narrow unknown query results without a model call", () => {
+  const source =
+    "return db.prepare('SELECT id,title,done FROM todos').all(user).map((row:{id:number;title:string;done:number})=>({id:row.id,title:row.title,done:Boolean(row.done)}))";
+  const stabilized = stabilizeGeneratedSqliteRowMaps(source);
+  assert.match(
+    stabilized,
+    /\.all\(user\) as \{id:number;title:string;done:number\}\[\]\)\.map\(\(row\)=>/u,
+  );
+  assert.doesNotMatch(stabilized, /\(row:\{id:number/u);
+  assert.equal(hasBalancedJavaScriptDelimiters(stabilized), true);
+});
+
+test("certified login proof is added when the generated checks omitted it", () => {
+  const files = ensureCertifiedStackScaffold(
+    [
+      {
+        path: "tests/foundry-checks.ts",
+        content:
+          "export const obligationChecks={'obligation-other':async()=>({passed:true,diagnostics:{}})};",
+      },
+    ],
+    [],
+    { loginCheckIds: ["obligation-login"] },
+  );
+  const browserChecks = files.find(
+    (file) => file.path === "tests/foundry-checks.ts",
+  ).content;
+  assert.match(browserChecks, /"obligation-login":async\(context\)/u);
+  assert.match(browserChecks, /savedCredentialLogin:passed/u);
+  assert.match(browserChecks, /obligation-other/u);
+});
+
+test("certified auth selectors keep mode tabs separate from form submission", () => {
+  const files = ensureCertifiedStackScaffold([
+    {
+      path: "app/page.tsx",
+      content:
+        "export default function Page(){return <><div role='tablist' aria-label='Account access'><button role='tab'>Create account</button><button role='tab'>Sign in</button></div><form><button>Create account</button></form></>}",
+    },
+    {
+      path: "tests/foundry-checks.ts",
+      content:
+        "async function signup(page:any){await page.locator('input[type=email]').fill('a@example.test');await page.locator('input[type=password]').fill('password');await page.getByRole('button',{name:'Create account',exact:true}).click()}export const obligationChecks={'mode':async({page}:any)=>{await page.getByRole('button',{name:'Sign in',exact:true}).first().click();return{passed:true,diagnostics:{}}}};",
+    },
+  ]);
+  const browserChecks = files.find(
+    (file) => file.path === "tests/foundry-checks.ts",
+  ).content;
+  assert.match(
+    browserChecks,
+    /page\.locator\('form'\)\.getByRole\('button', \{ name: 'Create account'/u,
+  );
+  assert.match(
+    browserChecks,
+    /page\.locator\("\[aria-label=\\"Account access\\"\]"\)\.getByRole\('tab', \{ name: 'Sign in'/u,
+  );
+});
+
+test("certified auth checks normalize DOM submit calls and repeated headings", () => {
+  const files = ensureCertifiedStackScaffold([
+    {
+      path: "tests/foundry-checks.ts",
+      content:
+        "export const obligationChecks={'auth':async({page}:any)=>{await page.locator('form').submit();const visible=await page.locator('.card').getByRole('heading',{name:'Create your account',exact:true}).isVisible();return{passed:visible,diagnostics:{visible}}}};",
+    },
+  ]);
+  const browserChecks = files.find(
+    (file) => file.path === "tests/foundry-checks.ts",
+  ).content;
+  assert.doesNotMatch(browserChecks, /\.submit\(\)/u);
+  assert.match(browserChecks, /HTMLFormElement\)form\.requestSubmit\(\)/u);
+  assert.match(
+    browserChecks,
+    /getByRole\('heading',\{name:'Create your account',exact:true\}\)\.first\(\)\.isVisible/u,
+  );
+});
+
+test("certified stack scaffold makes literal label actions exact", () => {
+  const files = ensureCertifiedStackScaffold([
+    {
+      path: "tests/labels.spec.ts",
+      content: [
+        "const captureProbeErrors: string[] = []; const consoleErrors: string[] = []; const pageErrors: string[] = [];",
+        "try { await page.getByLabel('Todo').fill('One thing'); }",
+        "finally { console.log('FOUNDRY_BROWSER_RESULT:'); }",
+      ].join("\n"),
+    },
+  ]);
+  const browserTest = files.find((file) => file.path === "tests/labels.spec.ts");
+  assert.match(
+    browserTest.content,
+    /getByLabel\('Todo', \{ exact: true \}\)\.fill/u,
   );
 });
 
@@ -488,6 +1144,34 @@ test("certified stack scaffold replaces an unmistakable JavaScript stylesheet st
   assert.doesNotMatch(stylesheet.content, /export|function/u);
   assert.match(stylesheet.content, /box-sizing: border-box/u);
   assert.match(stylesheet.content, /button, input, select, textarea/u);
+});
+
+test("certified scaffold prevents fixed-minimum fractional grids from overflowing tablets", () => {
+  const files = ensureCertifiedStackScaffold([
+    {
+      path: "app/globals.css",
+      content:
+        ".shell{display:grid;grid-template-columns:minmax(360px,1.05fr) minmax(400px,.95fr);padding:28px;gap:28px}",
+    },
+  ]);
+  const stylesheet = files.find((file) => file.path === "app/globals.css");
+  assert.match(
+    stylesheet.content,
+    /grid-template-columns:minmax\(0,1\.05fr\) minmax\(0,\.95fr\)/u,
+  );
+  assert.doesNotMatch(stylesheet.content, /minmax\((?:360|400)px/u);
+});
+
+test("certified auth forms focus their first invalid field before announcing validation", () => {
+  const source =
+    "'use client';import {FormEvent} from 'react';export default function Page(){const[error,setError]=useState('');const submit=async(e:FormEvent<HTMLFormElement>)=>{e.preventDefault();const email='';if(!email.includes('@')){setError('Enter a valid email.');return}};return <form onSubmit={submit}><input/><button type='submit'>Sign in</button>{error}</form>}";
+  const files = ensureCertifiedStackScaffold([
+    { path: "app/page.tsx", content: source },
+  ]);
+  const page = files.find((file) => file.path === "app/page.tsx");
+  assert.match(page.content, /querySelector\('input'\)/u);
+  assert.match(page.content, /firstField\.focus\(\)/u);
+  assert.ok(page.content.indexOf("firstField.focus()") < page.content.indexOf("setError("));
 });
 
 test("certified stack scaffold resets a completed booking flow when its tab is reopened", () => {
@@ -872,12 +1556,12 @@ test("certified-stack bundle admission rejects structural defects before install
       content: JSON.stringify({
         dependencies: {
           "better-sqlite3": "13.0.1",
-          next: "15.4.4",
+          next: "15.5.23",
           react: "19.1.0",
           "react-dom": "19.1.0",
         },
         devDependencies: {
-          "@playwright/test": "1.54.2",
+          "@playwright/test": "1.62.1",
           typescript: "5.8.3",
         },
         scripts: {
@@ -919,6 +1603,110 @@ test("certified-stack bundle admission rejects structural defects before install
   assert.equal(
     validateProjectBundleForStack(baseFiles, ["check-visible"]).length,
     baseFiles.length,
+  );
+  const routeHelperBundle = [
+    ...baseFiles,
+    {
+      path: "app/api/auth/route.ts",
+      content:
+        "export const userId=()=>1; export async function POST(){return Response.json({ok:true})}",
+    },
+    {
+      path: "app/api/todos/route.ts",
+      content:
+        "import {userId} from '@/app/api/auth/route'; export async function GET(){return Response.json({user:userId()})}",
+    },
+  ];
+  assert.throws(
+    () => validateProjectBundleForStack(routeHelperBundle, ["check-visible"]),
+    /route module "app\/api\/auth\/route\.ts" exports unsupported application helper: userId[\s\S]*Move shared helpers into a non-route module/u,
+  );
+  assert.throws(
+    () =>
+      validateProjectBundleForStack(
+        routeHelperBundle.map((file) =>
+          file.path === "app/api/auth/route.ts"
+            ? {
+                ...file,
+                content:
+                  "const userId=()=>1; export async function POST(){return Response.json({ok:true})}",
+              }
+            : file,
+        ),
+        ["check-visible"],
+      ),
+    /imports application logic from a Next\.js route entry module/u,
+  );
+  assert.throws(
+    () =>
+      validateProjectBundleForStack(
+        baseFiles.map((file) =>
+          file.path === "app/page.tsx"
+            ? {
+                ...file,
+                content:
+                  "export default function Page() { return Function('return 2 + 3')(); }",
+              }
+            : file,
+        ),
+        ["check-visible"],
+      ),
+    /unsafe string-to-code execution/u,
+  );
+  const racySessionPage = [
+    '"use client";',
+    "import { useEffect, useState } from 'react';",
+    "export default function Page(){",
+    "const [user,setUser]=useState(null);",
+    "const load=async()=>{const response=await fetch('/api/auth');setUser(await response.json());};",
+    "useEffect(()=>{void load();},[]);",
+    "const signup=async()=>{const response=await fetch('/api/auth',{method:'POST'});setUser(await response.json());};",
+    "return <button onClick={signup}>{user?'Dashboard':'Sign up'}</button>;",
+    "}",
+  ].join("\n");
+  assert.throws(
+    () =>
+      validateProjectBundleForStack(
+        baseFiles.map((file) =>
+          file.path === "app/page.tsx"
+            ? { ...file, content: racySessionPage }
+            : file,
+        ),
+        ["check-visible"],
+      ),
+    /late signed-out response can erase a successful authentication/u,
+  );
+  assert.doesNotThrow(() =>
+    validateProjectBundleForStack(
+      baseFiles.map((file) =>
+        file.path === "app/page.tsx"
+          ? {
+              ...file,
+              content: racySessionPage.replace(
+                "const [user,setUser]=useState(null);",
+                "const [user,setUser]=useState(null); const [hydrating,setHydrating]=useState(true);",
+              ),
+            }
+          : file,
+      ),
+      ["check-visible"],
+    ),
+  );
+  assert.throws(
+    () =>
+      validateProjectBundleForStack(
+        baseFiles.map((file) =>
+          file.path === "app/page.tsx"
+            ? {
+                ...file,
+                content:
+                  "const act = async (): Promise<void=> {}; export default function Page() { return null; }",
+              }
+            : file,
+        ),
+        ["check-visible"],
+      ),
+    /malformed Promise return type/u,
   );
   assert.throws(
     () =>
@@ -1088,6 +1876,189 @@ test("certified-stack bundle admission rejects structural defects before install
   );
 });
 
+test("one bounded procedure-repair round can resolve a cross-file architecture defect", () => {
+  const currentFiles = [
+    {
+      path: "app/api/auth/route.ts",
+      content: "export const userId=()=>1; export function POST(){}",
+    },
+    {
+      path: "app/api/todos/route.ts",
+      content: "import {userId} from '@/app/api/auth/route'; export function GET(){return userId()}",
+    },
+    { path: "lib/db.ts", content: "export const db=()=>({});" },
+  ];
+  const files = validateGeneratedRepairSet({
+    structuredOutput: {
+      files: [
+        {
+          path: "app/api/auth/route.ts",
+          content: "import {userId} from '@/lib/auth'; export function POST(){return userId()}",
+        },
+        {
+          path: "app/api/todos/route.ts",
+          content: "import {userId} from '@/lib/auth'; export function GET(){return userId()}",
+        },
+        {
+          path: "lib/auth.ts",
+          content: "export const userId=()=>1;",
+        },
+      ],
+    },
+    currentFiles,
+  });
+  assert.deepEqual(
+    files.map((file) => file.path),
+    ["app/api/auth/route.ts", "app/api/todos/route.ts", "lib/auth.ts"],
+  );
+});
+
+test("admission correction stays scoped and reconstructs after restart", () => {
+  const plan = {
+    contractHash: "a".repeat(64),
+    files: [
+      {
+        path: "app/page.tsx",
+        content: "before page",
+        contractRequirementIds: ["obligation-001"],
+      },
+      {
+        path: "tests/foundry-checks.ts",
+        content: "before checks",
+        contractRequirementIds: ["obligation-001"],
+      },
+      {
+        path: "app/globals.css",
+        content: "unchanged",
+        contractRequirementIds: ["obligation-002"],
+      },
+    ],
+  };
+  const error = new TypeError(
+    'Generated source "app/page.tsx" uses unsafe string-to-code execution.\n' +
+      'Generated source "tests/foundry-checks.ts" has a malformed Promise return type.',
+  );
+  const paths = admissionCorrectionPaths(error, plan.files);
+  assert.deepEqual(paths, ["app/page.tsx", "tests/foundry-checks.ts"]);
+
+  // Browser admission describes these as `Browser check`, not `Check`.
+  // Missing that lowercase form widened a one-file test correction into a
+  // complete bundle regeneration, which discarded otherwise-valid contract
+  // traces and exhausted the admission budget before installation.
+  assert.deepEqual(
+    admissionCorrectionPaths(
+      new TypeError(
+        'Browser check "obligation-001" uses an opaque shared loop.',
+      ),
+      plan.files,
+    ),
+    ["tests/foundry-checks.ts"],
+  );
+
+  const scoped = {
+    files: [
+      { path: "app/page.tsx", content: "after page" },
+      { path: "tests/foundry-checks.ts", content: "after checks" },
+    ],
+  };
+  const merged = mergeAdmissionCorrection(plan, scoped, paths);
+  assert.deepEqual(
+    merged.files.map(({ path, content, contractRequirementIds }) => ({
+      path,
+      content,
+      contractRequirementIds,
+    })),
+    [
+      {
+        path: "app/page.tsx",
+        content: "after page",
+        contractRequirementIds: ["obligation-001"],
+      },
+      {
+        path: "tests/foundry-checks.ts",
+        content: "after checks",
+        contractRequirementIds: ["obligation-001"],
+      },
+      {
+        path: "app/globals.css",
+        content: "unchanged",
+        contractRequirementIds: ["obligation-002"],
+      },
+    ],
+  );
+  assert.deepEqual(
+    reconstructGenerationOutput([
+      { structuredOutput: plan },
+      { structuredOutput: scoped },
+    ]),
+    merged,
+  );
+
+  const planWithClaims = {
+    ...plan,
+    explicitExclusionIds: ["excluded-001"],
+    requirementClaims: [
+      {
+        requirementId: "obligation-001",
+        implementationSummary: "old page implementation",
+      },
+      {
+        requirementId: "obligation-002",
+        implementationSummary: "approved flat surface styling",
+      },
+    ],
+  };
+  const completeCorrection = {
+    contractHash: "a".repeat(64),
+    explicitExclusionIds: [],
+    requirementClaims: [
+      {
+        requirementId: "obligation-001",
+        implementationSummary: "corrected page implementation",
+      },
+    ],
+    files: [
+      {
+        path: "app/page.tsx",
+        content: "complete corrected page",
+        contractRequirementIds: ["obligation-001"],
+      },
+      {
+        path: "app/globals.css",
+        content: "complete corrected styles",
+        contractRequirementIds: [],
+      },
+    ],
+  };
+  const complete = mergeCompleteAdmissionCorrection(
+    planWithClaims,
+    completeCorrection,
+  );
+  assert.deepEqual(complete.explicitExclusionIds, ["excluded-001"]);
+  assert.deepEqual(complete.requirementClaims, [
+    {
+      requirementId: "obligation-001",
+      implementationSummary: "corrected page implementation",
+    },
+    {
+      requirementId: "obligation-002",
+      implementationSummary: "approved flat surface styling",
+    },
+  ]);
+  assert.deepEqual(
+    complete.files.find((file) => file.path === "app/globals.css")
+      .contractRequirementIds,
+    ["obligation-002"],
+  );
+  assert.deepEqual(
+    reconstructGenerationOutput([
+      { structuredOutput: planWithClaims },
+      { structuredOutput: completeCorrection },
+    ]),
+    complete,
+  );
+});
+
 test("browser observation protocol remains inspectable when a browser action throws", () => {
   const valid =
     "const captureProbeErrors: string[] = []; const consoleErrors: string[] = []; const pageErrors: string[] = []; const checks = {'check-visible': false}; const observedVisible = document.title.length > 0; try { checks['check-visible'] = observedVisible; } finally { console.log('FOUNDRY_BROWSER_RESULT:' + JSON.stringify({captureProbeErrors, checks, consoleErrors, pageErrors})); }";
@@ -1123,6 +2094,39 @@ test("browser observation rejects literal verdicts and requires measured respons
   assert.doesNotThrow(() =>
     validateBrowserObservationTestSource(
       measuredResponsive,
+      ["check-phone"],
+      { responsiveCheckIds: ["check-phone"] },
+    ),
+  );
+  const modernExportedResponsive = measuredResponsive.replace(
+    "try { checks['check-phone'] = layout.noOverflow && layout.boundedHeight && phoneInteractionDensityOk; } finally",
+    "const record = (id, value) => { checks[id] = value; }; export const obligationChecks = {'\u200bcheck-phone': async (context) => { let passed = false; const grid = await context.page.locator('.split').evaluate((element) => getComputedStyle(element).gridTemplateColumns); passed = grid.split(' ').length === 1 && context.responsiveEvidence.phone; return { passed, diagnostics: { grid, phone: context.responsiveEvidence.phone } }; }}; try {} finally",
+  );
+  const normalizedModernResponsive = ensureCertifiedStackScaffold([
+    { path: "tests/foundry-checks.ts", content: modernExportedResponsive },
+  ]).find((file) => file.path === "tests/foundry-checks.ts").content;
+  assert.doesNotMatch(normalizedModernResponsive, /\u200b/u);
+  assert.match(
+    checkComputationSources(normalizedModernResponsive, "check-phone")[0],
+    /responsiveEvidence\.phone/u,
+  );
+  assert.doesNotThrow(() =>
+    validateBrowserObservationTestSource(
+      normalizedModernResponsive,
+      ["check-phone"],
+      { responsiveCheckIds: ["check-phone"] },
+    ),
+  );
+  const sharedWrapperResponsive = normalizedModernResponsive.replace(
+    "export const obligationChecks =",
+    "const sharedCheck = async (work) => { const passed = await work(); const unrelated = await page.locator('.desktop-only').isVisible(); return { passed, diagnostics: { unrelated } }; }; export const obligationChecks =",
+  ).replace(
+    "async (context) => { let passed = false; const grid = await context.page.locator('.split').evaluate((element) => getComputedStyle(element).gridTemplateColumns); passed = grid.split(' ').length === 1 && context.responsiveEvidence.phone; return { passed, diagnostics: { grid, phone: context.responsiveEvidence.phone } }; }",
+    "async (context) => sharedCheck(async () => { let passed = false; const grid = await context.page.locator('.split').evaluate((element) => getComputedStyle(element).gridTemplateColumns); passed = grid.split(' ').length === 1 && context.responsiveEvidence.phone; return passed; })",
+  );
+  assert.doesNotThrow(() =>
+    validateBrowserObservationTestSource(
+      sharedWrapperResponsive,
       ["check-phone"],
       { responsiveCheckIds: ["check-phone"] },
     ),
@@ -1243,6 +2247,17 @@ test("accessibility browser checks require real labels and keyboard focus", () =
   assert.doesNotThrow(() =>
     validateBrowserObservationTestSource(
       accessible,
+      ["check-access"],
+      { accessibilityCheckIds: ["check-access"] },
+    ),
+  );
+  const helperAccessible = accessible.replace(
+    "try { checks['check-access'] = focused && labelsPresent; } finally",
+    "async function inspect(context, kind) { let passed = false; if (kind === 'error') passed = context.accessibilityEvidence.focus && context.accessibilityEvidence.labels; return { passed, diagnostics: { focus: context.accessibilityEvidence.focus, labels: context.accessibilityEvidence.labels } }; } const record = (id, value) => { checks[id] = value; }; export const obligationChecks = {'check-access': async (context) => inspect(context, 'error')}; try {} finally",
+  );
+  assert.doesNotThrow(() =>
+    validateBrowserObservationTestSource(
+      helperAccessible,
       ["check-access"],
       { accessibilityCheckIds: ["check-access"] },
     ),

@@ -11,6 +11,26 @@
   color: var(--fault);
 }
 
+.concept-failure-details {
+  max-width: 760px;
+  color: var(--ink-secondary);
+  font: 400 13px/20px var(--font-text);
+}
+
+.concept-failure-details summary {
+  width: fit-content;
+  color: var(--ink-tertiary);
+  cursor: pointer;
+}
+
+.concept-failure-details p {
+  margin-top: var(--space-2);
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  overflow-wrap: anywhere;
+}
+
 .design-quality-issues {
   display: grid;
   gap: var(--space-2);

@@ -66,6 +66,61 @@ export function runtimeSourceManifest(checkpoint) {
   );
 }
 
+export function browserCertificationCheckpoint({
+  startedCheckpoint,
+  observedCheckpoint,
+  currentCheckpoint,
+}) {
+  const checkpoints = [
+    startedCheckpoint,
+    observedCheckpoint,
+    currentCheckpoint,
+  ];
+  const sourceManifests = checkpoints.map((checkpoint) =>
+    checkpoint === undefined ? null : runtimeSourceManifest(checkpoint),
+  );
+  if (
+    sourceManifests.some((manifest) => manifest === null) ||
+    new Set(sourceManifests).size !== 1
+  ) {
+    throw new BrowserObservationError(
+      "Browser command checkpoint differs from the running artifact.",
+    );
+  }
+  return currentCheckpoint.checkpointId;
+}
+
+export function resolveAuthoritativeBrowserChecks(
+  rawChecks,
+  authoritativeCheckOverrides = {},
+) {
+  if (
+    rawChecks === null ||
+    typeof rawChecks !== "object" ||
+    Array.isArray(rawChecks) ||
+    authoritativeCheckOverrides === null ||
+    typeof authoritativeCheckOverrides !== "object" ||
+    Array.isArray(authoritativeCheckOverrides)
+  ) {
+    throw new RuntimeValidationError(
+      "Browser checks and authoritativeCheckOverrides must be check-to-boolean objects.",
+    );
+  }
+  for (const [checkId, passed] of Object.entries(
+    authoritativeCheckOverrides,
+  )) {
+    if (!Object.hasOwn(rawChecks, checkId) || passed !== true) {
+      throw new RuntimeValidationError(
+        "Authoritative browser overrides may only promote an observed check to true.",
+      );
+    }
+  }
+  return Object.freeze({
+    ...rawChecks,
+    ...authoritativeCheckOverrides,
+  });
+}
+
 async function allocatePort(requestedPort) {
   if (
     requestedPort !== null &&
@@ -624,30 +679,41 @@ export function createRuntimePreviewService({
         "Browser command evidence is missing or bound to another state.",
       );
     }
-    const targetCheckpoint = commandEvidence.workspaceCheckpointReference;
-    if (targetCheckpoint !== session.checkpointId) {
-      const checkpoints = workspaces.listMissionCheckpoints(input.missionId);
-      const startedCheckpoint = checkpoints.find(
-        (checkpoint) => checkpoint.checkpointId === session.checkpointId,
-      );
-      const observedCheckpoint = checkpoints.find(
-        (checkpoint) => checkpoint.checkpointId === targetCheckpoint,
-      );
-      if (
-        startedCheckpoint === undefined ||
-        observedCheckpoint === undefined ||
-        runtimeSourceManifest(startedCheckpoint) !==
-          runtimeSourceManifest(observedCheckpoint)
-      ) {
-        throw new BrowserObservationError(
-          "Browser command checkpoint differs from the running artifact.",
-        );
-      }
-    }
+    const observedCheckpointId =
+      commandEvidence.workspaceCheckpointReference;
+    // Browser checks are intentionally isolated: they may create accounts,
+    // rows, screenshots, and other observation output. The production mission
+    // restores the clean pre-check checkpoint before it certifies or hands the
+    // preview to the customer. Keep the command's post-check checkpoint as
+    // immutable audit provenance, but bind the derived verdict to the current
+    // clean checkpoint only after proving that all three states contain the
+    // same runtime source.
+    const currentCheckpointId =
+      workspaces.getWorkspace(input.missionId).currentCheckpointId;
+    const checkpoints = workspaces.listMissionCheckpoints(input.missionId);
+    const checkpointById = new Map(
+      checkpoints.map((checkpoint) => [checkpoint.checkpointId, checkpoint]),
+    );
+    const startedCheckpoint = checkpointById.get(session.checkpointId);
+    const observedCheckpoint = checkpointById.get(observedCheckpointId);
+    const currentCheckpoint = checkpointById.get(currentCheckpointId);
+    const targetCheckpoint = browserCertificationCheckpoint({
+      startedCheckpoint,
+      observedCheckpoint,
+      currentCheckpoint,
+    });
     const allowEmptyChecks = input.allowEmptyChecks === true;
     const result = parseBrowserResult(commandEvidence.payload.stdout, {
       allowEmptyChecks,
     });
+    const authoritativeCheckOverrides =
+      input.authoritativeCheckOverrides === undefined
+        ? {}
+        : input.authoritativeCheckOverrides;
+    const resolvedChecks = resolveAuthoritativeBrowserChecks(
+      result.checks,
+      authoritativeCheckOverrides,
+    );
     const timestamp = clock();
     const common = {
       missionId: input.missionId,
@@ -663,17 +729,21 @@ export function createRuntimePreviewService({
         sessionId: input.sessionId,
         previewUrl: session.previewUrl,
         sourceCommandEvidenceId: commandEvidence.evidenceId,
+        observedCommandCheckpoint: observedCheckpointId,
+        certifiedCurrentCheckpoint: targetCheckpoint,
+        rawChecks: result.checks,
+        authoritativeCheckOverrides,
       },
     };
     const interaction =
-      Object.keys(result.checks).length === 0
+      Object.keys(resolvedChecks).length === 0
         ? null
         : evidence.capture({
             ...common,
             evidenceId: `${input.evidencePrefix}.interactions`,
             kind: ObservationKind.BROWSER_INTERACTION_RESULT,
             captureMethod: "playwright-browser-observation",
-            payload: { checks: result.checks },
+            payload: { checks: resolvedChecks },
           });
     const errors = evidence.capture({
       ...common,
@@ -686,7 +756,7 @@ export function createRuntimePreviewService({
         pageErrors: result.pageErrors,
       },
     });
-    const checkValues = Object.values(result.checks);
+    const checkValues = Object.values(resolvedChecks);
     const passedCount =
       checkValues.filter(Boolean).length +
       (checkValues.length === 0 && commandEvidence.payload.exitCode === 0
@@ -717,7 +787,7 @@ export function createRuntimePreviewService({
       observationId: input.observationId,
       completedAt: timestamp,
       status:
-        passedCount === Object.values(result.checks).length &&
+        passedCount === Object.values(resolvedChecks).length &&
         result.consoleErrors.length === 0 &&
         result.pageErrors.length === 0
           ? RuntimeStatus.HEALTHY

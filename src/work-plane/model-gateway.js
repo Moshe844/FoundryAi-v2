@@ -85,6 +85,29 @@ function routeTier(taskClass, depthLevel) {
   return depthLevel === null ? taskTier[taskClass] : tierForDepth(depthLevel);
 }
 
+export function routingPreferencesForRequest({
+  taskClass,
+  purpose,
+  selectedTier,
+}) {
+  const simpleTwoMinuteProduction =
+    taskClass === ModelTaskClass.FILE_GENERATION &&
+    /Adaptive production policy: SIMPLE complexity with a 2-minute completion target\./u.test(
+      purpose,
+    ) &&
+    !/\b(?:credential|password hash|authenticated cookie|session token|server-validated session)\b/iu.test(
+      purpose,
+    );
+  return Object.freeze({
+    priority: simpleTwoMinuteProduction
+      ? RoutingPriority.FAST_RESPONSE
+      : RoutingPriority.LOW_COST,
+    preferredLatencyProfile: simpleTwoMinuteProduction
+      ? LatencyProfile.FAST
+      : preferredLatencyByTier[selectedTier],
+  });
+}
+
 export function rankPrototypeCandidates(candidates) {
   const latencyRank = { FAST: 0, BALANCED: 1, THOROUGH: 2 };
   return [...candidates].sort((left, right) => {
@@ -731,6 +754,11 @@ export function createModelGateway({
         ).length;
       const providers = providerRegistry.list();
       const selectedTier = routeTier(input.taskClass, depthLevel);
+      const routingPreferences = routingPreferencesForRequest({
+        taskClass: input.taskClass,
+        purpose: input.purpose,
+        selectedTier,
+      });
       const taskCapabilityContract = modelTaskCapabilityContract(input.taskClass);
       const effectiveTaskDepth =
         depthLevel ?? taskCapabilityContract?.defaultDepth ?? 1;
@@ -768,8 +796,9 @@ export function createModelGateway({
             maximumTotalPerMillionTokensUsd: null,
           },
           userPreferences: {
-            priority: RoutingPriority.LOW_COST,
-            preferredLatencyProfile: preferredLatencyByTier[selectedTier],
+            priority: routingPreferences.priority,
+            preferredLatencyProfile:
+              routingPreferences.preferredLatencyProfile,
           },
         });
         if (designPrototypeRequest) {

@@ -198,12 +198,7 @@ test("legacy visual-direction metadata cannot activate prototype fidelity gates"
   assert.equal(brief.approvedDesignContract, null);
 });
 
-test("a studio offers the concepts it proved rather than failing over one it did not", async () => {
-  // The real failure: two concepts were generated, browser-admitted at phone,
-  // tablet and desktop, and ready to choose between. A third tripped the
-  // prototype CSP, and the studio discarded all of it — the customer saw a
-  // paused session and a stylesheet error about a concept they never asked
-  // for. Three directions are what Foundry aims for, not what a choice needs.
+test("a studio does not claim three real directions when only two passed", async () => {
   const server = await readFile(
     new URL("../apps/web/local-api/server.mjs", import.meta.url),
     "utf8",
@@ -211,22 +206,15 @@ test("a studio offers the concepts it proved rather than failing over one it did
 
   assert.match(
     server,
-    /if \(admitted\.length < 2\) \{/u,
-    "a studio must fail only when it cannot offer a choice",
+    /if \(admitted\.length < 3\) \{/u,
+    "the ready gate must match the three-direction promise",
   );
-  assert.doesNotMatch(
-    server,
-    /admitted\.length !== 3/u,
-    "requiring exactly three concepts discards proven work",
-  );
-  // A single concept's failure must no longer end the session before the
-  // admitted ones are counted.
   const completion = server.slice(
     server.indexOf("const admitted = session.concepts.filter"),
     server.indexOf("const differentiation = verifyStudioDifferentiation"),
   );
   assert.doesNotMatch(completion, /^\s*if \(firstError !== null\) throw firstError;/mu);
-  assert.match(completion, /throw firstError \?\?/u, "the cause is still reported when there is no choice");
+  assert.match(completion, /Only \$\{admitted\.length\} of 3 concepts passed browser admission/u);
 });
 
 test("a refused concept is told what overflowed and by how much", async () => {
@@ -263,12 +251,7 @@ test("a refused concept is told what overflowed and by how much", async () => {
   assert.match(generation, /min-width:0/u);
 });
 
-test("the studio's own screen accepts the choice the server admitted", async () => {
-  // The server admits a session once it can offer a choice — two proven
-  // directions — but the screen still required three. A READY studio therefore
-  // rendered its concepts with the continue button reading "Building live
-  // concepts…", so a direction could be selected and the customer had no way
-  // to go on. The two rules must agree.
+test("the studio screen and server both require the promised three directions", async () => {
   const screen = await readFile(
     new URL("../apps/web/app/components/project-discovery.tsx", import.meta.url),
     "utf8",
@@ -280,11 +263,26 @@ test("the studio's own screen accepts the choice the server admitted", async () 
 
   assert.match(
     screen,
-    /verificationStatus === "PASSED",\s*\n\s*\)\.length >= 2;/u,
-    "the screen must continue on the same minimum the server admits",
+    /verificationStatus === "PASSED",\s*\n\s*\)\.length >= 3;/u,
+    "the screen must continue only after all three promised directions are admitted",
   );
-  assert.match(server, /if \(admitted\.length < 2\) \{/u);
-  assert.doesNotMatch(screen, /\)\.length >= 3;/u);
+  assert.match(server, /if \(admitted\.length < 3\) \{/u);
+});
+
+test("concept generation exposes truthful per-direction file and browser progress", async () => {
+  const [server, screen] = await Promise.all([
+    readFile(new URL("../apps/web/local-api/server.mjs", import.meta.url), "utf8"),
+    readFile(new URL("../apps/web/app/components/design-direction.tsx", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(server, /activeConceptProgress/u);
+  assert.match(server, /phase: "GENERATING_FILES"/u);
+  assert.match(server, /phase: "VERIFYING_BROWSER"/u);
+  assert.match(server, /generatedFilePreviews\(generated\.workspace\)/u);
+  assert.match(screen, /Live activity and generated code/u);
+  assert.match(screen, /Actual source appears after each model response passes file and sandbox validation/u);
+  assert.doesNotMatch(screen, /concept-generation-tracks/u);
+  assert.match(screen, /file\.content \?\? "Waiting for validated model output…"/u);
 });
 
 test("three directions may not share a composition", async () => {

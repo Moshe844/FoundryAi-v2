@@ -46,6 +46,18 @@ test("a delivered design shortfall travels on the completion verdict", () => {
   assert.equal(shipped.designShortfall.comparedViewports, 3);
 });
 
+test("prototype viewport evidence is reduced to its public count before completion", () => {
+  // Fidelity evidence identifies each route and viewport. The completion
+  // contract reports only how many viewports were compared.
+  const viewportEvidence = ["/:390x844", "/:768x1024", "/:1280x900"];
+  const shipped = verdict({
+    failedAspects: ["responsive"],
+    comparedViewports: viewportEvidence,
+    reason: "The approved responsive transformation still differs.",
+  });
+  assert.equal(shipped.designShortfall.comparedViewports, 3);
+});
+
 test("the shortfall is inside the integrity hash, so it cannot be dropped quietly", () => {
   const shipped = verdict({
     failedAspects: ["typography"],

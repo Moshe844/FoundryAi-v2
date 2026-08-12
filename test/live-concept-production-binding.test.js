@@ -221,7 +221,34 @@ test("the approved design reaches the generator that writes production source", 
   assert.match(prompt, /No generic card dashboard/u);
   assert.match(prompt, /Make mobile the priority\./u);
   assert.match(prompt, /Visible keyboard focus/u);
+  assert.match(prompt, /design floor, not the finish ceiling/u);
+  assert.match(prompt, /complete hover\/focus\/pressed\/loading\/error\/success states/u);
   assert.deepEqual(approvedDesignPromptSegments(null), []);
+});
+
+test("the production generator receives the integrity-verified prototype source", () => {
+  const { contract, approved } = fixture();
+  const prompt = approvedDesignPromptSegments(contract, {
+    approvedDesignId: approved.approvedDesignId,
+    prototypeContentHash: approved.prototypeContentHash,
+    files: [
+      {
+        path: "index.html",
+        content: '<main class="cinematic-opening"><h1>Commissioned light</h1></main>',
+        contentHash: "a".repeat(64),
+      },
+      {
+        path: "styles.css",
+        content: ".cinematic-opening{min-height:100svh;color:#c98555}",
+        contentHash: "b".repeat(64),
+      },
+    ],
+  }).join("\n\n");
+
+  assert.match(prompt, /APPROVED LIVE PROTOTYPE SOURCE/u);
+  assert.match(prompt, /Commissioned light/u);
+  assert.match(prompt, /min-height:100svh/u);
+  assert.match(prompt, /faithful production evolution/u);
 });
 
 test("an approved multi-surface design gets a budget it can actually be built in", () => {
@@ -282,7 +309,7 @@ test("an armed deferred shock departs from the prototype instead of reproducing 
   // Without a shock the approved design is authority and is comparable.
   assert.notEqual(comparablePrototypeDesign(contract), null);
   const faithful = approvedDesignPromptSegments(contract).join("\n\n");
-  assert.match(faithful, /Reproduce that approved design/u);
+  assert.match(faithful, /faithful production evolution/u);
 
   // With a shock armed the instruction inverts and fidelity is switched off.
   assert.equal(comparablePrototypeDesign(shocked), null);
@@ -290,7 +317,7 @@ test("an armed deferred shock departs from the prototype instead of reproducing 
   assert.match(surprising, /asked Foundry to surprise them/u);
   assert.match(surprising, /context to react against/u);
   assert.match(surprising, /Reject the most common composition/u);
-  assert.doesNotMatch(surprising, /Reproduce that approved design/u);
+  assert.doesNotMatch(surprising, /faithful production evolution/u);
 
   // The approved palette must not be force-injected into a shock build.
   const plan = {
@@ -325,6 +352,38 @@ test("Foundry owns deterministic browser fidelity evidence when a model omits it
   assert.match(evidence.content, /scrollWidth/u);
   assert.match(evidence.content, /keyboard\.press/u);
   assert.deepEqual(evidence.contractRequirementIds, ["approved-design-direction"]);
+});
+
+test("Foundry owns browser fidelity evidence for a simple site without a prototype", () => {
+  const contract = {
+    verificationPlan: [{
+      acceptanceMethod: "browser-check",
+      observableOutcome: "The public site remains usable on a phone.",
+    }],
+    acceptanceObligations: [{
+      obligationId: "obligation-responsive",
+      statement: "The public site remains usable on a phone.",
+    }],
+    productBlueprint: {
+      designSpecification: { approvedDesignContract: null },
+    },
+  };
+  const bound = bindApprovedPrototypeBrowserEvidence(
+    {
+      files: [{
+        path: "tests/workflow.spec.ts",
+        content: "test('workflow', async ({ page }) => { await page.goto('/'); });",
+        contractRequirementIds: ["obligation-responsive"],
+      }],
+    },
+    contract,
+  );
+  const evidence = bound.files.find((file) =>
+    file.path.startsWith("tests/foundry-design-fidelity-evidence"),
+  );
+  assert(evidence);
+  assert.match(evidence.content, /page\.screenshot/u);
+  assert.deepEqual(evidence.contractRequirementIds, ["obligation-responsive"]);
 });
 
 test("Foundry's own evidence spec satisfies every gate Foundry applies to it", () => {

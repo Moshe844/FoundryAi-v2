@@ -92,6 +92,14 @@ test("prototype workspaces are isolated, immutable, idempotent, and restart reco
     assert.equal(leftFinal.fileManifest.length, 3);
     assert.equal(readFileSync(join(left.rootPath, "source", "index.html"), "utf8").includes("Left concept"), true);
     assert.equal(readFileSync(join(right.rootPath, "source", "index.html"), "utf8").includes("Right concept"), true);
+    assert.match(
+      service.readSourceFile(leftContract, "index.html").toString("utf8"),
+      /Left concept/u,
+    );
+    assert.throws(
+      () => service.readSourceFile(leftContract, "../contract.json"),
+      /safe workspace-relative file/u,
+    );
     assert.throws(
       () => service.writeFiles(leftContract, { "index.html": "changed" }),
       /immutable|finalized/iu,

@@ -19,7 +19,7 @@ import {
   isTerminalMissionState,
 } from "../domain/lifecycle.js";
 import { ObservationKind } from "../domain/observation-evidence.js";
-import { collusiveCheckIssues } from "../domain/observation-independence.js";
+import { assertObservationIndependence } from "../domain/observation-independence.js";
 import {
   ObservationAction,
   browserObservationDecision,
@@ -48,9 +48,15 @@ import {
 } from "../domain/approved-project-contract.js";
 import {
   detectEngineeringSignals,
+  EngineeringSignal,
   engineeringFloorPromptSegments,
   validateEngineeringFloor,
 } from "../domain/engineering-floor.js";
+import {
+  CERTIFIED_DEPENDENCY_INSTALLER_SOURCE,
+  certifiedAuthenticationFastLaneEligible,
+  createCertifiedAuthenticationFastLaneBundle,
+} from "./certified-auth-fast-lane.js";
 
 export const PRODUCTION_MISSION_SOURCE = "PRODUCTION_MISSION_SERVICE";
 const BROWSER_ISOLATION_RESTORE_REASON =
@@ -106,17 +112,196 @@ const MAX_BROWSER_OBSERVATION_ATTEMPTS = 6;
 const MAX_REPAIR_PROPOSALS_PER_ROUND = 3;
 const MAX_RUNTIME_RESTARTS = 2;
 
-export function productionRepairBudgets({ approvedPrototype = false } = {}) {
+export const ProductionComplexity = Object.freeze({
+  SIMPLE: "SIMPLE",
+  STANDARD: "STANDARD",
+  COMPLEX: "COMPLEX",
+});
+
+function listLength(value) {
+  return Array.isArray(value) ? value.length : 0;
+}
+
+// Time and retry policy follows the approved product's observable shape, not
+// its label. A calculator and a portal may share the same certified stack, but
+// they do not need the same per-check timeout or observation ceiling.
+export function productionPerformancePolicy({ profile = null, approvedContract = null } = {}) {
+  const blueprint = approvedContract?.productBlueprint ?? null;
+  const workflows = Math.max(
+    listLength(blueprint?.primaryWorkflows) +
+      listLength(blueprint?.supportingWorkflows),
+    listLength(profile?.primaryJourneys) +
+      listLength(profile?.secondaryJourneys),
+  );
+  const surfaces = Math.max(
+    listLength(blueprint?.requiredSurfaces),
+    listLength(profile?.requiredSurfaces),
+  );
+  const dependencies = Math.max(
+    (approvedContract?.acceptedRecommendations ?? []).reduce(
+      (total, recommendation) =>
+        total + listLength(recommendation?.requiredDependencies),
+      0,
+    ),
+    (profile?.recommendations ?? []).reduce(
+      (total, recommendation) =>
+        total + listLength(recommendation?.requiredDependencies),
+      0,
+    ),
+  );
+  const actors = Math.max(
+    listLength(approvedContract?.audiences),
+    listLength(profile?.primaryActors),
+  );
+  const obligations = listLength(approvedContract?.acceptanceObligations);
+  const observableShape = JSON.stringify({
+    blueprint,
+    acceptanceObligations: approvedContract?.acceptanceObligations ?? [],
+    primaryJourneys: profile?.primaryJourneys ?? [],
+    secondaryJourneys: profile?.secondaryJourneys ?? [],
+  });
+  // Authentication and durable mutation add database setup plus several
+  // dependent browser journeys even when the product has only two screens.
+  // Treating that shape like a calculator cut off a Todo Dashboard while its
+  // remaining failures were still falling.
+  const hasAuthenticationBoundary =
+    /\b(?:authenticat\w*|create (?:an? )?account|sign[- ]?in|sign[- ]?up|log[- ]?in|protected route|session)\b/iu.test(
+      observableShape,
+    );
+  const hasDurableMutation =
+    /\b(?:persist\w*|durable|database|sqlite|saved record|after (?:a )?(?:browser )?refresh|create,? (?:edit|update)|add,? (?:edit|update)|delete)\b/iu.test(
+      observableShape,
+    );
+  const requiresStatefulVerification =
+    hasAuthenticationBoundary || hasDurableMutation;
+
+  // A focused account-access build is stateful, but it is not a portal or a
+  // domain application. Treating three short identity journeys like a general
+  // stateful product gave a login/sign-up page a seven-minute budget and four
+  // repair rounds. The workflow descriptions are the reliable discriminator:
+  // every journey must remain about identity, credentials, sessions, or their
+  // validation. Small authenticated CRUD products also use the fast lane when
+  // their workflow, surface, actor, dependency, and obligation counts all stay
+  // inside the same deliberately narrow bounds.
+  const workflowDescriptions = [
+    ...(blueprint?.primaryWorkflows ?? []),
+    ...(blueprint?.supportingWorkflows ?? []),
+    ...(profile?.primaryJourneys ?? []),
+    ...(profile?.secondaryJourneys ?? []),
+  ].map((workflow) => JSON.stringify(workflow));
+  const focusedAuthentication =
+    hasAuthenticationBoundary &&
+    workflowDescriptions.length > 0 &&
+    workflowDescriptions.every((description) =>
+      /\b(?:account|authenticat\w*|credential\w*|password|session|sign[- ]?in|sign[- ]?out|sign[- ]?up|log[- ]?in|log[- ]?out|invalid input|access error)\b/iu.test(
+        description,
+      ),
+    );
+
+  const compactStatefulProduct =
+    requiresStatefulVerification &&
+    workflows <= 6 &&
+    surfaces <= 8 &&
+    dependencies === 0 &&
+    actors <= 2 &&
+    obligations <= 16;
+  const simple =
+    (!requiresStatefulVerification ||
+      focusedAuthentication ||
+      compactStatefulProduct) &&
+    workflows <= 6 &&
+    surfaces <= 8 &&
+    dependencies === 0 &&
+    actors <= (focusedAuthentication ? 3 : 2) &&
+    obligations <= 16;
+  const standard =
+    workflows <= 12 &&
+    surfaces <= 16 &&
+    dependencies <= 3 &&
+    actors <= 5 &&
+    obligations <= 28;
+  const complexity = simple
+    ? ProductionComplexity.SIMPLE
+    : standard
+      ? ProductionComplexity.STANDARD
+      : ProductionComplexity.COMPLEX;
+
+  const policies = {
+    [ProductionComplexity.SIMPLE]: {
+      targetDurationMs: 2 * 60_000,
+      // Stateful authentication checks create an account, revoke it, sign in
+      // again, and verify refresh through real scrypt/SQLite work. Five seconds
+      // cut off a correct journey; eight still bounds failures tightly while
+      // allowing the real secure path to finish.
+      browserCheckBudgetMs: 8_000,
+      // The complete browser-action phase is bounded separately from model
+      // repair and design comparison. Normal products do not get an
+      // unbounded five-minute Playwright command or a fourth full rerun.
+      browserVerificationBudgetMs: 60_000,
+      browserObservationAttempts: 2,
+      browserRepairCalls: 1,
+      designFidelityRepairCalls: 1,
+      runtimeRestarts: 2,
+    },
+    [ProductionComplexity.STANDARD]: {
+      targetDurationMs: 7 * 60_000,
+      browserCheckBudgetMs: 10_000,
+      // Four bounded observations include immutable pre/post workspace
+      // checkpoints as well as the Playwright subprocess. A one-minute total
+      // expired after a 22-second browser run because two checkpointed rounds
+      // had already consumed the rest. Two minutes keeps each individual check
+      // at ten seconds while leaving room for one final converging correction.
+      browserVerificationBudgetMs: 120_000,
+      browserObservationAttempts: 4,
+      browserRepairCalls: 4,
+      designFidelityRepairCalls: 1,
+      runtimeRestarts: 2,
+    },
+    [ProductionComplexity.COMPLEX]: {
+      targetDurationMs: 12 * 60_000,
+      browserCheckBudgetMs: 15_000,
+      browserVerificationBudgetMs: 3 * 60_000,
+      browserObservationAttempts: MAX_BROWSER_OBSERVATION_ATTEMPTS,
+      browserRepairCalls: MAX_BROWSER_REPAIR_CALLS,
+      designFidelityRepairCalls: MAX_DESIGN_FIDELITY_REPAIR_CALLS,
+      runtimeRestarts: MAX_RUNTIME_RESTARTS,
+    },
+  };
+  return Object.freeze({ complexity, ...policies[complexity] });
+}
+
+export function productionRepairModelTimeoutMs(performancePolicy) {
+  if (performancePolicy?.complexity === ProductionComplexity.SIMPLE)
+    return 20_000;
+  if (performancePolicy?.complexity === ProductionComplexity.STANDARD)
+    return 45_000;
+  return 90_000;
+}
+
+export function productionRepairBudgets({
+  approvedPrototype = false,
+  performancePolicy = null,
+  stateful = false,
+} = {}) {
+  const statefulCorrectionCalls =
+    stateful ||
+    performancePolicy?.complexity === ProductionComplexity.STANDARD ||
+    performancePolicy?.complexity === ProductionComplexity.COMPLEX
+      ? 1
+      : 0;
   return Object.freeze({
     generationCorrectionCalls: approvedPrototype
       ? MAX_APPROVED_PROTOTYPE_GENERATION_CORRECTION_CALLS
-      : MAX_GENERATION_CORRECTION_CALLS,
+      : Math.max(MAX_GENERATION_CORRECTION_CALLS, statefulCorrectionCalls),
     procedureRepairCalls: approvedPrototype
       ? MAX_APPROVED_PROTOTYPE_PROCEDURE_REPAIR_CALLS
-      : MAX_PROCEDURE_REPAIR_CALLS,
-    browserRepairCalls: MAX_BROWSER_REPAIR_CALLS,
-    designFidelityRepairCalls: MAX_DESIGN_FIDELITY_REPAIR_CALLS,
-    runtimeRestarts: MAX_RUNTIME_RESTARTS,
+      : Math.max(MAX_PROCEDURE_REPAIR_CALLS, statefulCorrectionCalls),
+    browserRepairCalls:
+      performancePolicy?.browserRepairCalls ?? MAX_BROWSER_REPAIR_CALLS,
+    designFidelityRepairCalls:
+      performancePolicy?.designFidelityRepairCalls ?? MAX_DESIGN_FIDELITY_REPAIR_CALLS,
+    runtimeRestarts:
+      performancePolicy?.runtimeRestarts ?? MAX_RUNTIME_RESTARTS,
   });
 }
 
@@ -164,6 +349,15 @@ export function browserCheckObservationFailure(failedCheckIds, diagnostics = {},
       return failed.length === 0 ? [] : [[checkId, failed]];
     }),
   );
+  const thrownChecks = Object.fromEntries(
+    observed.flatMap((checkId) => {
+      const detail = diagnostics?.[checkId] ?? {};
+      const message = detail.threw ?? detail.error;
+      return typeof message === "string" && message.trim() !== ""
+        ? [[checkId, message]]
+        : [];
+    }),
+  );
   const lines =
     uncomputed.length === failedCheckIds.length && uncomputed.length > 0
       ? [
@@ -184,6 +378,9 @@ export function browserCheckObservationFailure(failedCheckIds, diagnostics = {},
     ...(Object.keys(failedSubchecks).length === 0
       ? []
       : [`Failed named sub-checks: ${JSON.stringify(failedSubchecks)}.`]),
+    ...(Object.keys(thrownChecks).length === 0
+      ? []
+      : [`Checks that threw or timed out: ${JSON.stringify(thrownChecks)}.`]),
     ...(gateway === null ? [] : [gateway]),
   ].join("\n");
 }
@@ -232,8 +429,12 @@ export function buildEnforcesTypesAndLint(files) {
   return hasEslintConfig;
 }
 
-export function productionBrowserRepairPolicy(observationFailure) {
+export function productionBrowserRepairPolicy(
+  observationFailure,
+  { nonFidelityFailureOutstanding = false, repairBudgets = null } = {},
+) {
   const designFidelity =
+    !nonFidelityFailureOutstanding &&
     typeof observationFailure === "string" &&
     /Production design fidelity failed against the approved live prototype/iu.test(
       observationFailure,
@@ -244,8 +445,52 @@ export function productionBrowserRepairPolicy(observationFailure) {
       ? "design-fidelity-repair"
       : "browser-repair",
     maxCalls: designFidelity
-      ? MAX_DESIGN_FIDELITY_REPAIR_CALLS
-      : MAX_BROWSER_REPAIR_CALLS,
+      ? repairBudgets?.designFidelityRepairCalls ?? MAX_DESIGN_FIDELITY_REPAIR_CALLS
+      : repairBudgets?.browserRepairCalls ?? MAX_BROWSER_REPAIR_CALLS,
+  });
+}
+
+// Approved-design checks used to be treated as a second, weaker completion
+// authority beside the deterministic prototype comparator. That let a stale
+// model-authored selector overrule a complete desktop/tablet/mobile fidelity
+// pass and spend every repair on an application that was already correct.
+// Functional behaviour remains owned by its exact browser workflows. Design
+// obligations are owned by the immutable approved-prototype comparison when
+// that authority is present.
+export function browserCheckAuthorityPlan({
+  obligations = [],
+  bindings = {},
+  approvedPrototypeContract = null,
+} = {}) {
+  const required = obligations
+    .filter(
+      (obligation) =>
+        bindings[obligation.obligationId] === "browser-check" ||
+        (obligation.origin !== "foundry-derived" &&
+          obligationRequiresCredentialLoginProof(obligation.statement)),
+    )
+    .map((obligation) => obligation.obligationId)
+    .sort((left, right) => left.localeCompare(right));
+  const design =
+    approvedPrototypeContract === null
+      ? []
+      : obligations
+          .filter(
+            (obligation) =>
+              bindings[obligation.obligationId] === "browser-check" &&
+              /^approved-design-/u.test(
+                String(obligation.sourceRequirement ?? ""),
+              ),
+          )
+          .map((obligation) => obligation.obligationId)
+          .sort((left, right) => left.localeCompare(right));
+  const designSet = new Set(design);
+  return Object.freeze({
+    required: Object.freeze(required),
+    functional: Object.freeze(
+      required.filter((obligationId) => !designSet.has(obligationId)),
+    ),
+    design: Object.freeze(design),
   });
 }
 
@@ -347,10 +592,17 @@ export function unbalancedJavaScriptDelimiter(source) {
         continue;
       }
     }
+    const wordBeforeApostrophe =
+      /[\p{L}\p{N}_$]+$/u.exec(source.slice(0, index))?.[0] ?? "";
     const apostropheInRenderedText =
       character === "'" &&
       /[\p{L}\p{N}]/u.test(source[index - 1] ?? "") &&
-      /[\p{L}\p{N}]/u.test(next ?? "");
+      /[\p{L}\p{N}]/u.test(next ?? "") &&
+      // Minified modules validly emit `from'next'`. That opening quote has a
+      // letter on both sides just like an English contraction, but skipping it
+      // makes the real closing quote look unterminated and falsely rejects
+      // every import in the file.
+      wordBeforeApostrophe !== "from";
     if (apostropheInRenderedText) continue;
     if (character === "'" || character === '"' || character === "`") {
       quote = character;
@@ -556,8 +808,14 @@ export function classifyProductionFailure({
     /(?:status(?:\s+of)?\s+5\d{2}\b|responded\s+with\s+a\s+status\s+of\s+5\d{2}\b|\b5\d{2}\s+\(Internal Server Error\)|\bInternal Server Error\b)/iu.test(
       text,
     );
+  const nonFidelityBrowserFailure =
+    stage === "browserVerification" &&
+    /(?:The Playwright command exited unsuccessfully|structured browser result|browser result could not be parsed|did not contain exactly the required browser-check|The following real browser checks were false|browser observation recorded blocking errors)/iu.test(
+      text,
+    );
   const approvedPrototypeFidelityFailure =
     stage === "browserVerification" &&
+    !nonFidelityBrowserFailure &&
     /(?:Production design fidelity failed against the approved live prototype|Approved live prototype fidelity could not be proven)/iu.test(
       text,
     );
@@ -744,6 +1002,140 @@ const wholeFileRepairSchema = Object.freeze({
   },
 });
 
+// Deterministic admission can name the exact generated file that is invalid.
+// Re-generating an otherwise valid application in that case is both expensive
+// and destabilizing: a broken observation file used to cause two complete
+// 30k-token bundle rewrites. Keep the correction at the smallest trustworthy
+// boundary and preserve every unaffected file and contract trace.
+export function admissionCorrectionPaths(error, files = []) {
+  const available = new Set(files.map((file) => file.path));
+  const message = String(error?.message ?? error ?? "");
+  const paths = new Set(
+    [...message.matchAll(/Generated source "([^"]+)"/gu)]
+      .map((match) => match[1])
+      .filter((path) => available.has(path)),
+  );
+  if (
+    /\bcheck\s+"(?:obligation|check)-/iu.test(message) &&
+    available.has("tests/foundry-checks.ts")
+  ) {
+    paths.add("tests/foundry-checks.ts");
+  }
+  return paths.size > 0 && paths.size <= MAX_REPAIR_FILES_PER_PROPOSAL
+    ? Object.freeze([...paths].sort((left, right) => left.localeCompare(right)))
+    : Object.freeze([]);
+}
+
+export function mergeAdmissionCorrection(plan, correction, allowedPaths) {
+  const files = Array.isArray(correction?.files) ? correction.files : [];
+  const allowed = new Set(allowedPaths);
+  if (files.length === 0) {
+    throw new TypeError("A scoped admission correction must return at least one file.");
+  }
+  const replacements = new Map();
+  for (const file of files) {
+    if (
+      typeof file?.path !== "string" ||
+      typeof file?.content !== "string" ||
+      !allowed.has(file.path) ||
+      replacements.has(file.path)
+    ) {
+      throw new TypeError(
+        "A scoped admission correction may replace each allowed file exactly once.",
+      );
+    }
+    replacements.set(file.path, file.content);
+  }
+  const currentPaths = new Set(plan.files.map((file) => file.path));
+  for (const path of replacements.keys()) {
+    if (!currentPaths.has(path)) {
+      throw new TypeError(`Scoped admission correction cannot create "${path}".`);
+    }
+  }
+  return {
+    ...plan,
+    files: plan.files.map((file) =>
+      replacements.has(file.path)
+        ? { ...file, content: replacements.get(file.path) }
+        : file,
+    ),
+  };
+}
+
+// A complete admission correction owns the new source, but it does not get to
+// erase already-admitted contract bookkeeping. Models commonly focus on the
+// structural defect named in the correction prompt and return a shorter claim
+// list even though the corrected files still implement the same approved
+// requirements. Preserve those trace links by stable requirement and file
+// identity; the normal contract, source, build, browser, and fidelity gates
+// still verify the corrected implementation itself.
+export function mergeCompleteAdmissionCorrection(plan, correction) {
+  if (
+    plan === null ||
+    correction === null ||
+    typeof plan !== "object" ||
+    typeof correction !== "object"
+  ) {
+    return correction;
+  }
+  const claims = new Map(
+    (Array.isArray(plan.requirementClaims) ? plan.requirementClaims : [])
+      .filter((claim) => typeof claim?.requirementId === "string")
+      .map((claim) => [claim.requirementId, claim]),
+  );
+  for (const claim of correction.requirementClaims ?? []) {
+    if (typeof claim?.requirementId === "string") {
+      claims.set(claim.requirementId, claim);
+    }
+  }
+  const priorFiles = new Map(
+    (Array.isArray(plan.files) ? plan.files : []).map((file) => [file.path, file]),
+  );
+  return {
+    ...correction,
+    requirementClaims: [...claims.values()],
+    explicitExclusionIds: [
+      ...new Set([
+        ...(plan.explicitExclusionIds ?? []),
+        ...(correction.explicitExclusionIds ?? []),
+      ]),
+    ],
+    files: (Array.isArray(correction.files) ? correction.files : []).map(
+      (file) => ({
+        ...file,
+        contractRequirementIds: [
+          ...new Set([
+            ...(priorFiles.get(file.path)?.contractRequirementIds ?? []),
+            ...(file.contractRequirementIds ?? []),
+          ]),
+        ],
+      }),
+    ),
+  };
+}
+
+export function reconstructGenerationOutput(calls) {
+  if (!Array.isArray(calls) || calls.length === 0) return null;
+  let output = calls[0].structuredOutput;
+  for (const call of calls.slice(1)) {
+    const candidate = call.structuredOutput;
+    if (
+      candidate !== null &&
+      typeof candidate === "object" &&
+      typeof candidate.contractHash === "string"
+    ) {
+      output = mergeCompleteAdmissionCorrection(output, candidate);
+      continue;
+    }
+    output = mergeAdmissionCorrection(
+      output,
+      candidate,
+      candidate?.files?.map((file) => file.path) ?? [],
+    );
+  }
+  return output;
+}
+
 // A whole-file proposal is turned into the patch shape the rest of the loop
 // already understands: one replacement of the entire current file.
 export function patchFromWholeFileRepair(structuredOutput, currentFiles) {
@@ -844,23 +1236,125 @@ export function validateProjectBundleForStack(
     }
     byPath.set(file.path, file.content);
   }
+  const generatedSourceIssues = [];
+  const routeArchitectureIssues = [];
+  const allowedRouteExports = new Set([
+    "DELETE",
+    "GET",
+    "HEAD",
+    "OPTIONS",
+    "PATCH",
+    "POST",
+    "PUT",
+    "config",
+    "dynamic",
+    "dynamicParams",
+    "fetchCache",
+    "generateStaticParams",
+    "maxDuration",
+    "preferredRegion",
+    "revalidate",
+    "runtime",
+  ]);
   for (const [path, content] of byPath) {
     if (/\.(?:js|jsx|mjs|ts|tsx)$/u.test(path)) {
       const unbalanced = unbalancedJavaScriptDelimiter(content);
       if (unbalanced !== null) {
-        throw new TypeError(
+        generatedSourceIssues.push(
           `Generated source "${path}" has unbalanced JavaScript delimiters: ${unbalanced}. Correct that expression and return the complete file.`,
         );
       }
+      if (/\b(?:eval|Function)\s*\(/u.test(content)) {
+        generatedSourceIssues.push(
+          `Generated source "${path}" uses unsafe string-to-code execution. Write the behavior directly; for arithmetic, parse operands and apply explicit operators instead of using eval or Function.`,
+        );
+      }
+      if (/\bPromise<[^<>\r\n]{1,200}=>/u.test(content)) {
+        generatedSourceIssues.push(
+          `Generated source "${path}" has a malformed Promise return type before an arrow function. Close the generic type first, for example Promise<void> =>.`,
+        );
+      }
+    }
+    if (/^(?:src\/)?app\/api\/.+\/route\.(?:js|ts)$/u.test(path)) {
+      const exportLists = [...content.matchAll(/\bexport\s*\{([^}]+)\}/gu)]
+        .flatMap((match) => match[1].split(","))
+        .map((entry) => entry.trim().split(/\s+as\s+/u).at(-1))
+        .filter(Boolean);
+      const runtimeExports = [
+        ...content.matchAll(
+          /\bexport\s+(?:async\s+)?function\s+([A-Za-z_$][\w$]*)/gu,
+        ),
+        ...content.matchAll(
+          /\bexport\s+(?:const|let|var|class)\s+([A-Za-z_$][\w$]*)/gu,
+        ),
+      ].map((match) => match[1]).concat(exportLists);
+      if (/\bexport\s+default\b/u.test(content)) {
+        runtimeExports.push("default");
+      }
+      const unsupported = [
+        ...new Set(runtimeExports.filter((name) => !allowedRouteExports.has(name))),
+      ];
+      if (unsupported.length > 0) {
+        routeArchitectureIssues.push(
+          `Next.js route module "${path}" exports unsupported application helper${unsupported.length === 1 ? "" : "s"}: ${unsupported.join(", ")}. Route entry modules may export only HTTP handlers and approved Next.js route metadata. Move shared helpers into a non-route module such as lib/auth.ts and update every importer in the same correction.`,
+        );
+      }
+    }
+    if (
+      /\bfrom\s*["'](?:@\/(?:src\/)?app\/api\/|\.\.?\/)[^"']*\/route["']/u.test(
+        content,
+      )
+    ) {
+      routeArchitectureIssues.push(
+        `Source module "${path}" imports application logic from a Next.js route entry module. Route files are framework entry points, not shared libraries; move the helper into lib/ and update the route plus every consumer together.`,
+      );
     }
     if (/\.(?:jsx|tsx)$/u.test(path)) {
       const unbalancedTag = unbalancedJsxTag(content);
       if (unbalancedTag !== null) {
-        throw new TypeError(
+        generatedSourceIssues.push(
           `Generated source "${path}" has unbalanced JSX tags: ${unbalancedTag}. Correct that element and return the complete file.`,
         );
       }
+      const startsSessionReadOnMount =
+        /useEffect\s*\([\s\S]{0,500}\b(?:load|fetch|refresh|check)[A-Za-z_$]*Session\s*\(\s*\)[\s\S]{0,120},\s*\[\s*\]\s*\)/iu.test(
+          content,
+        ) ||
+        /useEffect\s*\([\s\S]{0,500}\bload\s*\(\s*\)[\s\S]{0,120},\s*\[\s*\]\s*\)/u.test(
+          content,
+        );
+      const writesUserFromAsyncSession =
+        /(?:async\s+function|const)\s+(?:load|fetch|refresh|check)[A-Za-z_$]*(?:\s*=)?[\s\S]{0,1200}\bsetUser\s*\(/iu.test(
+          content,
+        );
+      const alsoWritesUserAfterAuth =
+        /(?:sign\s*up|signup|register|log\s*in|login|\/api\/auth)[\s\S]{0,1500}\bsetUser\s*\(/iu.test(
+          content,
+        );
+      const guardsSessionHydration =
+        /\b(?:hydrating|sessionLoading|sessionResolved|sessionRequest|authEpoch|authVersion|foundryAuthEpoch|cancelled|ignoreSession)\b/iu.test(
+          content,
+        );
+      if (
+        startsSessionReadOnMount &&
+        writesUserFromAsyncSession &&
+        alsoWritesUserAfterAuth &&
+        !guardsSessionHydration
+      ) {
+        generatedSourceIssues.push(
+          `Generated source "${path}" starts an asynchronous session lookup on mount and can also update the same user state after sign-up or sign-in without a hydration or request-version guard. A late signed-out response can erase a successful authentication. Render a resolving state until the initial lookup finishes, or cancel/version the lookup so it cannot overwrite a newer authentication action.`,
+        );
+      }
     }
+  }
+  if (generatedSourceIssues.length > 0) {
+    throw new TypeError(generatedSourceIssues.join("\n"));
+  }
+  if (routeArchitectureIssues.length > 0) {
+    // Deliberately do not use the Generated source "path" admission marker.
+    // This architecture spans the route, its consumers, and usually a new lib
+    // file, so a one-file scoped correction cannot possibly resolve it.
+    throw new TypeError(routeArchitectureIssues.join("\n"));
   }
   let packageDefinition;
   try {
@@ -1082,11 +1576,421 @@ export function validateProjectBundleForStack(
   );
 }
 
+// Authentication pages repeatedly arrive with one real but mechanically
+// correctable race: the initial GET /api/auth remains in flight while the user
+// submits sign-up or sign-in, then its older signed-out response overwrites the
+// successful action. The model was told the exact defect on two paid retries
+// and reproduced it both times. Install a request epoch in the certified stack
+// before admission so the older response cannot commit state.
+export function stabilizeGeneratedAuthHydration(source) {
+  if (
+    typeof source !== "string" ||
+    /\bfoundryAuthEpoch\b/u.test(source) ||
+    !/\buseEffect\s*\(/u.test(source) ||
+    !/\b(?:api|call)\(\s*(["'])\/api\/auth\1\s*\)/u.test(source) ||
+    !/\b(?:setUser|setU)\s*\(/u.test(source)
+  ) {
+    return source;
+  }
+
+  const reactImport = /import\s*\{([^}]*)\}\s*from\s*(["'])react\2\s*;?/u;
+  const importMatch = reactImport.exec(source);
+  if (
+    importMatch === null ||
+    !/\buseEffect\b/u.test(importMatch[1]) ||
+    !/\buseState\b/u.test(importMatch[1])
+  ) {
+    return source;
+  }
+  let corrected = source.replace(
+    reactImport,
+    (statement, imports) =>
+      /\buseRef\b/u.test(imports)
+        ? statement
+        : statement.replace("{", "{useRef,"),
+  );
+
+  const component = /export\s+default\s+function\s+[A-Za-z_$][\w$]*\s*\([^)]*\)\s*\{/u;
+  const componentMatch = component.exec(corrected);
+  if (componentMatch === null) return source;
+  corrected =
+    corrected.slice(0, componentMatch.index + componentMatch[0].length) +
+    "const foundryAuthEpoch=useRef(0);" +
+    corrected.slice(componentMatch.index + componentMatch[0].length);
+
+  const arrowLoader = /\bconst\s+load\s*=\s*async\s*\(\s*\)\s*=>\s*\{/u;
+  const functionLoader = /\basync\s+function\s+load\s*\(\s*\)\s*\{/u;
+  let loaderMatch = arrowLoader.exec(corrected);
+  if (loaderMatch !== null) {
+    corrected =
+      corrected.slice(0, loaderMatch.index) +
+      loaderMatch[0].replace(
+        /\(\s*\)/u,
+        "(foundryExpectedAuthEpoch=foundryAuthEpoch.current)",
+      ) +
+      corrected.slice(loaderMatch.index + loaderMatch[0].length);
+  } else {
+    loaderMatch = functionLoader.exec(corrected);
+    if (loaderMatch === null) return source;
+    corrected =
+      corrected.slice(0, loaderMatch.index) +
+      loaderMatch[0].replace(
+        /\(\s*\)/u,
+        "(foundryExpectedAuthEpoch=foundryAuthEpoch.current)",
+      ) +
+      corrected.slice(loaderMatch.index + loaderMatch[0].length);
+  }
+
+  // Re-find the widened loader, then guard immediately after its session
+  // response. The default argument captures the epoch before the first await.
+  const widenedLoader = /(?:\bconst\s+load\s*=\s*async|\basync\s+function\s+load)\s*\(\s*foundryExpectedAuthEpoch\s*=\s*foundryAuthEpoch\.current\s*\)[^{]*\{/u;
+  const widenedMatch = widenedLoader.exec(corrected);
+  if (widenedMatch === null) return source;
+  const loaderTailStart = widenedMatch.index + widenedMatch[0].length;
+  const sessionRead = /\b(?:const|let)\s+[A-Za-z_$][\w$]*\s*=\s*await\s+(?:api|call)\(\s*(["'])\/api\/auth\1\s*\)\s*;/u;
+  const sessionMatch = sessionRead.exec(corrected.slice(loaderTailStart));
+  if (sessionMatch === null) return source;
+  const guardAt = loaderTailStart + sessionMatch.index + sessionMatch[0].length;
+  corrected =
+    corrected.slice(0, guardAt) +
+    "if(foundryExpectedAuthEpoch!==foundryAuthEpoch.current)return;" +
+    corrected.slice(guardAt);
+
+  const arrowAuth = /\bconst\s+auth\s*=\s*async\s*\([^)]*\)\s*=>\s*\{/u;
+  const functionAuth = /\basync\s+function\s+auth\s*\([^)]*\)\s*\{/u;
+  const authMatch = arrowAuth.exec(corrected) ?? functionAuth.exec(corrected);
+  if (authMatch === null) return source;
+  const authBody = authMatch.index + authMatch[0].length;
+  corrected =
+    corrected.slice(0, authBody) +
+    "foundryAuthEpoch.current+=1;" +
+    corrected.slice(authBody);
+  return corrected;
+}
+
+export function focusFirstInvalidGeneratedFormField(source) {
+  if (
+    typeof source !== "string" ||
+    !/\bonSubmit\s*=\s*\{/u.test(source) ||
+    !/\bsetError\s*\(/u.test(source) ||
+    /\.querySelector\(\s*(["'])input\1\s*\)[\s\S]{0,180}?\.focus\s*\(/u.test(
+      source,
+    )
+  ) {
+    return source;
+  }
+  return source.replace(
+    /(\bconst\s+[A-Za-z_$][\w$]*\s*=\s*async\s*\(\s*([A-Za-z_$][\w$]*)\s*:\s*FormEvent<[^>]+>\s*\)\s*=>\s*\{[\s\S]{0,2200}?\bif\s*\([^{}]{1,700}\)\s*\{)(\s*)(setError\s*\()/u,
+    (_match, validationPrefix, eventName, spacing, errorCall) =>
+      `${validationPrefix}${spacing}const firstField=${eventName}.currentTarget.querySelector('input');if(firstField instanceof HTMLInputElement)firstField.focus();${spacing}${errorCall}`,
+  );
+}
+
+export function expandGeneratedBrowserCheckLoop(source) {
+  if (
+    typeof source !== "string" ||
+    !/Object\.fromEntries\s*\(/u.test(source)
+  ) {
+    return source;
+  }
+  return source.replace(
+    /Object\.fromEntries\(\s*\[((?:\s*["'][A-Za-z0-9._-]+["']\s*,?)+)\]\.map\(\(\s*([A-Za-z_$][\w$]*)(?:\s*:\s*string)?\s*\)\s*=>\s*\[\s*\2\s*,\s*async\s*\(\s*([A-Za-z_$][\w$]*)(\s*:\s*[A-Za-z_$][\w$]*)?\s*\)\s*=>\s*([A-Za-z_$][\w$]*)\(\s*\3\s*,\s*\2\s*\)\s*\]\s*\)\s*\)/gu,
+    (_match, literalList, _keyName, contextName, contextType = "", helperName) => {
+      const ids = [...literalList.matchAll(/(["'])([A-Za-z0-9._-]+)\1/gu)]
+        .map((entry) => entry[2]);
+      if (ids.length === 0) return _match;
+      return `{${ids
+        .map(
+          (id) =>
+            `${JSON.stringify(id)}:async(${contextName}${contextType})=>${helperName}(${contextName},${JSON.stringify(id)})`,
+        )
+        .join(",")}}`;
+    },
+  );
+}
+
+export function expandGeneratedBrowserCheckAssignmentLoop(source) {
+  if (
+    typeof source !== "string" ||
+    !/for\s*\(\s*const\s+[A-Za-z_$][\w$]*\s+of\s*\[/u.test(source)
+  ) {
+    return source;
+  }
+  const declaration = /const\s+([A-Za-z_$][\w$]*)(\s*:\s*Record<[^;\r\n]+>)?\s*=\s*\{\s*\}\s*;/u.exec(
+    source,
+  );
+  if (declaration === null) return source;
+  const collectionName = declaration[1];
+  const escapedCollection = collectionName.replace(
+    /[.*+?^${}()|[\]\\]/gu,
+    "\\$&",
+  );
+  const loopStartPattern = new RegExp(
+    `for\\s*\\(\\s*const\\s+([A-Za-z_$][\\w$]*)\\s+of\\s*\\[((?:\\s*["'][A-Za-z0-9._-]+["']\\s*,?)+)\\]\\s*\\)\\s*${escapedCollection}\\s*\\[\\s*\\1\\s*\\]\\s*=\\s*async\\s*\\(\\s*([A-Za-z_$][\\w$]*)(\\s*:\\s*[^)]+)?\\s*\\)\\s*=>\\s*\\{`,
+    "u",
+  );
+  const loopStart = loopStartPattern.exec(source);
+  if (loopStart === null) return source;
+  const exportPattern = new RegExp(
+    `\\}\\s*;\\s*export\\s+const\\s+obligationChecks\\s*=\\s*${escapedCollection}\\s*;?`,
+    "u",
+  );
+  const tail = source.slice(loopStart.index + loopStart[0].length);
+  const loopEnd = exportPattern.exec(tail);
+  if (loopEnd === null) return source;
+  const body = tail.slice(0, loopEnd.index);
+  const ids = [...loopStart[2].matchAll(/(["'])([A-Za-z0-9._-]+)\1/gu)]
+    .map((entry) => entry[2]);
+  if (ids.length === 0) return source;
+  const loopVariablePattern = new RegExp(
+    `(?<![\\w$.])${loopStart[1]}\\b(?!\\s*:)`,
+    "gu",
+  );
+  const shorthandPropertyPattern = new RegExp(
+    `([,{]\\s*)${loopStart[1]}(?=\\s*[,}])`,
+    "gu",
+  );
+  const contextName = loopStart[3];
+  const contextType = loopStart[4] ?? "";
+  const explicit = `export const obligationChecks${declaration[2] ?? ""}={${ids
+    .map((id) => {
+      const literal = JSON.stringify(id);
+      const boundBody = body
+        .replace(shorthandPropertyPattern, `$1${loopStart[1]}:${literal}`)
+        .replace(loopVariablePattern, literal);
+      return `${JSON.stringify(id)}:async(${contextName}${contextType})=>{${boundBody}}`;
+    })
+    .join(",")}};`;
+  const replacementStart = declaration.index;
+  const replacementEnd =
+    loopStart.index + loopStart[0].length + loopEnd.index + loopEnd[0].length;
+  return source.slice(0, replacementStart) + explicit +
+    source.slice(replacementEnd);
+}
+
+export function bindCertifiedCredentialLoginChecks(source, loginCheckIds = []) {
+  let corrected = source;
+  for (const checkId of loginCheckIds) {
+    const implementation = browserCheckImplementationSource(
+      corrected,
+      checkId,
+    );
+    const canonical = `${JSON.stringify(checkId)}:async(context)=>{const page=context.page;const email=\`foundry-login-\${Date.now()}-\${Math.random().toString(36).slice(2)}@example.test\`;const password='foundry-secure-pass-99';await page.goto('/',{waitUntil:'domcontentloaded'});await page.locator('form:visible, button:visible').first().waitFor({state:'visible'});await page.getByRole('button',{name:'Create account',exact:true}).first().click();const extraFields=page.locator('form input:is([type="text"],:not([type])):visible');for(let index=0;index<await extraFields.count();index+=1)await extraFields.nth(index).fill('Test person');await page.locator('input[type="email"]:visible').fill(email);await page.locator('input[name="password"]:visible').fill(password);await page.locator('form').getByRole('button',{name:'Create account',exact:true}).click();const signOut=page.getByRole('button',{name:'Sign out',exact:true}).first();await signOut.waitFor({state:'visible'});await page.reload({waitUntil:'domcontentloaded'});await signOut.waitFor({state:'visible'});await signOut.click();await page.getByRole('button',{name:/sign in/i}).first().click();await page.locator('input[type="email"]:visible').fill(email);await page.locator('input[name="password"]:visible').fill(password);await page.locator('form').getByRole('button',{name:'Sign in',exact:true}).click();await signOut.waitFor({state:'visible'});const passed=await signOut.isVisible();return{passed,diagnostics:{observed:true,refreshPersistence:true,savedCredentialLogin:passed}}}`;
+    if (implementation !== "") {
+      corrected = corrected.replace(implementation, canonical);
+      continue;
+    }
+    // A credential-login obligation may use structured test counts as its
+    // contract acceptance condition. It still needs a concrete browser entry:
+    // the Playwright suite is the structured test being counted. Add Foundry's
+    // canonical account -> refresh -> sign-out -> saved-login proof when the
+    // model did not emit an entry for that obligation at all.
+    corrected = corrected.replace(
+      /\}\s*;?\s*$/u,
+      (objectClose) => `,${canonical}${objectClose}`,
+    );
+  }
+  return corrected;
+}
+
+export function bindCertifiedAuthenticationErrorChecks(
+  source,
+  authenticationErrorCheckIds = [],
+) {
+  let corrected = source;
+  for (const checkId of authenticationErrorCheckIds) {
+    const implementation = browserCheckImplementationSource(
+      corrected,
+      checkId,
+    );
+    const canonical = `${JSON.stringify(checkId)}:async(context)=>{const page=context.page;const email=\`foundry-missing-\${Date.now()}-\${Math.random().toString(36).slice(2)}@example.test\`;const password='foundry-secure-pass-99';await page.goto('/',{waitUntil:'domcontentloaded'});await page.locator('form:visible, button:visible').first().waitFor({state:'visible'});await page.getByRole('button',{name:/sign in/i}).first().click();await page.locator('input[type="email"]:visible').fill(email);await page.locator('input[name="password"]:visible').fill(password);await page.locator('form').getByRole('button',{name:'Sign in',exact:true}).click();const alert=page.locator('form [role="alert"]:visible').first();await alert.waitFor({state:'visible'});const message=(await alert.textContent()??'').trim();const passed=message.length>0&&!message.includes(password);return{passed,diagnostics:{observed:true,accessibleError:passed,sensitivePasswordAbsent:!message.includes(password)}}}`;
+    if (implementation !== "") {
+      corrected = corrected.replace(implementation, canonical);
+      continue;
+    }
+    corrected = corrected.replace(
+      /\}\s*;?\s*$/u,
+      (objectClose) => `,${canonical}${objectClose}`,
+    );
+  }
+  return corrected;
+}
+
+function existingFreshAccountSetup(source, checkId) {
+  const implementation = browserCheckImplementationSource(source, checkId);
+  if (implementation === "") return "";
+  for (const match of implementation.matchAll(
+    /\bawait\s+([A-Za-z_$][\w$]*)\s*\(([^;\r\n]{0,500})\)\s*;/gu,
+  )) {
+    const helperName = match[1];
+    const escapedName = helperName.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+    const definition = new RegExp(
+      `(?:const|let|var)\\s+${escapedName}(?:\\s*:[^=\\r\\n]+)?\\s*=\\s*(?:async\\s*)?\\([^)]*\\)\\s*(?::\\s*[^=\\r\\n]+)?=>|(?:async\\s+)?function\\s+${escapedName}\\s*\\([^)]*\\)`,
+      "u",
+    ).exec(source);
+    if (definition === null) continue;
+    const helperSource = source.slice(
+      definition.index,
+      Math.min(source.length, definition.index + 4_000),
+    );
+    if (
+      /(?:getByRole|getByText|locator)\s*\([\s\S]{0,220}\b(?:create account|sign up|register)\b[\s\S]{0,220}\.(?:click|press)\s*\(/iu.test(
+        helperSource,
+      ) ||
+      /(?:\/api\/auth|\/signup|\/register)[\s\S]{0,180}\b(?:POST|signup|register)\b/iu.test(
+        helperSource,
+      )
+    ) {
+      const singleAlias = match[2].trim();
+      return /^[$A-Z_a-z][$\w]*$/u.test(singleAlias)
+        ? `await ${helperName}(page);`
+        : match[0];
+    }
+  }
+  return "";
+}
+
+export function bindCertifiedResponsiveChecks(
+  source,
+  responsiveCheckIds = [],
+  authenticatedCheckIds = [],
+) {
+  let corrected = source;
+  const authenticated = new Set(authenticatedCheckIds);
+  for (const checkId of responsiveCheckIds) {
+    const implementation = browserCheckImplementationSource(corrected, checkId);
+    const sessionSetup = authenticated.has(checkId)
+      ? existingFreshAccountSetup(corrected, checkId)
+      : "";
+    const canonical = `${JSON.stringify(checkId)}:async(context)=>{const page=context.page;${sessionSetup}await page.setViewportSize({width:390,height:844});await page.goto('/',{waitUntil:'domcontentloaded'});await page.locator('form:visible,input:visible,button:visible,a:visible').first().waitFor({state:'visible'});const layout=await page.evaluate(()=>({scrollWidth:document.documentElement.scrollWidth,clientWidth:document.documentElement.clientWidth,scrollHeight:document.documentElement.scrollHeight,clientHeight:window.innerHeight,interactionCount:document.querySelectorAll('button,a,input,select,textarea').length}));const passed=layout.scrollWidth<=layout.clientWidth&&layout.scrollHeight>0&&layout.scrollHeight<=layout.clientHeight*30&&layout.interactionCount>0&&layout.interactionCount<=100;return{passed,diagnostics:{observed:true,phoneNoOverflow:layout.scrollWidth<=layout.clientWidth,...layout}}}`;
+    if (implementation !== "") {
+      corrected = corrected.replace(implementation, canonical);
+      continue;
+    }
+    corrected = corrected.replace(
+      /\}\s*;?\s*$/u,
+      (objectClose) => `,${canonical}${objectClose}`,
+    );
+  }
+  return corrected;
+}
+
+export function bindCertifiedAccessibilityChecks(
+  source,
+  accessibilityCheckIds = [],
+  authenticatedCheckIds = [],
+  responsiveCheckIds = [],
+) {
+  let corrected = source;
+  const authenticated = new Set(authenticatedCheckIds);
+  const responsive = new Set(responsiveCheckIds);
+  for (const checkId of accessibilityCheckIds) {
+    const implementation = browserCheckImplementationSource(
+      corrected,
+      checkId,
+    );
+    const sessionSetup = authenticated.has(checkId)
+      ? corrected.includes("establishAccountAndReturnToPublic")
+        ? "await establishAccountAndReturnToPublic(context);"
+        : existingFreshAccountSetup(corrected, checkId)
+      : "";
+    const responsiveSetup = responsive.has(checkId)
+      ? "await page.setViewportSize({width:390,height:844});"
+      : "";
+    const responsiveMeasurement = responsive.has(checkId)
+      ? "const layout=await page.evaluate(()=>({scrollWidth:document.documentElement.scrollWidth,clientWidth:document.documentElement.clientWidth,scrollHeight:document.documentElement.scrollHeight,clientHeight:window.innerHeight,interactionCount:document.querySelectorAll('button,a,input,select,textarea').length}));const responsivePassed=layout.scrollWidth<=layout.clientWidth&&layout.scrollHeight>0&&layout.scrollHeight<=layout.clientHeight*30&&layout.interactionCount>0&&layout.interactionCount<=100&&context.responsiveEvidence.phone===true;"
+      : "const layout={scrollWidth:0,clientWidth:0,scrollHeight:0,clientHeight:0,interactionCount:0};const responsivePassed=true;";
+    const canonical = `${JSON.stringify(checkId)}:async(context)=>{const page=context.page;${sessionSetup}${responsiveSetup}await page.goto('/',{waitUntil:'domcontentloaded'});await page.locator('form:visible, input:visible, button:visible, a:visible').first().waitFor({state:'visible'});${responsiveMeasurement}await page.keyboard.press('Tab');const focused=await page.evaluate(()=>{const active=document.activeElement;return active instanceof HTMLElement&&!['BODY','HTML'].includes(active.tagName)&&active.matches(':focus-visible')});const labelled=await page.locator('label,button[aria-label],a[aria-label],input[aria-label],textarea[aria-label],select[aria-label]').count();const sharedFocus=context.accessibilityEvidence.focus===true;const sharedLabels=context.accessibilityEvidence.labels===true;const passed=responsivePassed&&focused&&labelled>0&&sharedFocus&&sharedLabels;return{passed,diagnostics:{observed:true,focused,labelled,sharedFocus,sharedLabels,responsivePassed,...layout}}}`;
+    if (implementation !== "") {
+      corrected = corrected.replace(implementation, canonical);
+      continue;
+    }
+    corrected = corrected.replace(
+      /\}\s*;?\s*$/u,
+      (objectClose) => `,${canonical}${objectClose}`,
+    );
+  }
+  return corrected;
+}
+
+export function stabilizeGeneratedBrowserCheckTiming(source) {
+  return String(source)
+    .replace(
+      /(await\s+([$A-Z_a-z][$\w]*)\.getByRole\(\s*(['"])button\3\s*,\s*\{\s*name\s*:\s*(['"])Complete\4\s*,\s*exact\s*:\s*true\s*\}\s*\)\.click\(\s*\);)\s*([$A-Z_a-z][$\w]*)\s*=\s*await\s+\2\.getByText\(\s*(['"])Done\6\s*,\s*\{\s*exact\s*:\s*true\s*\}\s*\)\.isVisible\(\s*\)/gu,
+      "$1await $2.waitForFunction(()=>/Completed tasks \\([1-9]\\d*\\)/i.test(document.body.innerText)||!!document.querySelector('[aria-pressed=\"true\"],input[type=\"checkbox\"]:checked,[data-completed=\"true\"],.done,.completed'));$5=await $2.evaluate(()=>/Completed tasks \\([1-9]\\d*\\)/i.test(document.body.innerText)||!!document.querySelector('[aria-pressed=\"true\"],input[type=\"checkbox\"]:checked,[data-completed=\"true\"],.done,.completed'))",
+    )
+    .replace(
+      /await\s+page\.waitForTimeout\(\s*(?:100|150|200|250)\s*\);\s*if\s*\(\s*!\(await\s+dashboardVisible\(page\)\)\s*\)/gu,
+      "await page.waitForFunction(()=>/Your workspace|Your list|dashboard/i.test(document.body.innerText),null,{timeout:5000});if (!(await dashboardVisible(page)))",
+    )
+    .replace(
+      /(await\s+context\.page\.reload\([^;]*\);)\s*(const\s+persistedTodo\s*=\s*await\s+visible\(context\.page,\s*`text=\$\{task\}`\s*\);)/gu,
+      "$1await context.page.getByText(task,{exact:true}).first().waitFor({state:'visible'});$2",
+    )
+    .replace(
+      /await\s+control\.check\(\s*\);\s*const\s+checked\s*=\s*await\s+control\.isChecked\(\s*\);/gu,
+      "await control.click();await control.evaluate(async(element)=>{const deadline=Date.now()+5000;while(element instanceof HTMLInputElement&&!element.checked&&Date.now()<deadline)await new Promise(resolve=>setTimeout(resolve,25))});const checked=await control.isChecked();",
+    )
+    .replace(
+      /(await\s+context\.page\.getByRole\(\s*['"]button['"],\s*\{\s*name:\s*\/sign out\|log out\/i\s*\}\s*\)\.first\(\)\.click\(\s*\);)/gu,
+      "$1await context.page.locator('form:visible').first().waitFor({state:'visible'});await context.page.waitForFunction(()=>!document.querySelector('[data-foundry-screen=\"screen-02-overview\"]')&&!!document.querySelector('form input[type=\"email\"]'),null,{timeout:5000});",
+    )
+    .replace(
+      /(await\s+([$A-Z_a-z][$\w]*)\.getByRole\(\s*['"]button['"],\s*\{\s*name:\s*['"]Confirm delete['"],\s*exact:\s*true\s*\}\s*\)\.click\(\s*\);)\s*([$A-Z_a-z][$\w]*\s*=\s*await\s+\2\.getByText\(\s*(['"])([^'"]+)\4,\s*\{\s*exact:\s*true\s*\}\s*\)\.count\(\s*\)\s*===\s*0)/gu,
+      "$1await $2.getByText($4$5$4,{exact:true}).waitFor({state:'detached'});$3",
+    );
+}
+
+export function stabilizeGeneratedNarrowLayout(source) {
+  const value = String(source).replace(/\bflexDirection\s*:/gu, "flex-direction:");
+  if (value.includes("Foundry-owned narrow-layout guardrails")) return value;
+  return `${value.trimEnd()}\n\n/* Foundry-owned narrow-layout guardrails. */
+html, body, [data-foundry-render-contract], main, section, header, nav, form, p { max-width: 100%; }
+header, nav, form, [class*="control"], [class*="capture"] { min-width: 0; }
+p, a, button, label { overflow-wrap: anywhere; }
+input, textarea, select { min-width: 0; max-width: 100%; }
+.auth, [data-foundry-screen*="auth"] { width: min(100%, 480px); min-width: 0; }
+@media (max-width: 560px) {
+  header, nav, [class*="control"] { flex-wrap: wrap; }
+  [class*="control"] { flex-direction: column; align-items: stretch; }
+  [class*="control"] > button, [class*="control"] > input { width: 100%; }
+  .auth, [data-foundry-screen*="auth"] { width: 100%; margin-left: 0; margin-right: 0; padding-left: 20px; padding-right: 20px; }
+}\n`;
+}
+
+export function stabilizeGeneratedSqliteRowMaps(source) {
+  // better-sqlite3 correctly types an unparameterized Statement#all result as
+  // unknown[]. Models often put the row type on map's callback parameter,
+  // which is not a legal narrowing under strictFunctionTypes. Move that same
+  // generated type to the query result; this is mechanical and preserves the
+  // mapper and runtime behavior without spending a model correction.
+  return String(source).replace(
+    /(\breturn\s+)([^;\r\n]+?\.all\([^\r\n)]*\))\.map\(\(([$A-Z_a-z][$\w]*):\s*(\{[^\r\n)]+\})\)\s*=>\s*(\(\{[^\r\n]+\}\))\)/gu,
+    "$1($2 as $4[]).map(($3)=>$5)",
+  );
+}
+
 export function ensureCertifiedStackScaffold(
   files,
   contractRequirementIds = [],
-  { responsiveCheckIds = [], accessibilityCheckIds = [] } = {},
+  {
+    responsiveCheckIds = [],
+    accessibilityCheckIds = [],
+    authenticatedCheckIds = [],
+    loginCheckIds = [],
+    authenticationErrorCheckIds = [],
+  } = {},
 ) {
+  files = [
+    ...files.filter(
+      (file) => file.path !== "scripts/foundry-certified-install.mjs",
+    ),
+    {
+      path: "scripts/foundry-certified-install.mjs",
+      content: CERTIFIED_DEPENDENCY_INSTALLER_SOURCE,
+      contractRequirementIds: [...contractRequirementIds],
+    },
+  ];
   const generatedHealthRoute = files.find((file) =>
     /^(?:src\/)?app\/api\/health\/route\.(?:js|ts)$/u.test(file.path),
   );
@@ -1095,8 +1999,46 @@ export function ensureCertifiedStackScaffold(
     /\bexport\s+(?:async\s+)?function\s+(?:POST|PUT|PATCH|DELETE)\b/u.test(
       generatedHealthRoute.content,
     );
+  const generatedSessionRoute = files.find((file) => {
+    const match = /^(?:src\/)?app\/api\/([^/]+)\/route\.(?:js|ts)$/u.exec(
+      file.path,
+    );
+    return match !== null &&
+      match[1] !== "health" &&
+      /\bexport\s+(?:async\s+)?function\s+GET\b/u.test(file.content) &&
+      /\b(?:user|session)\b/iu.test(file.content);
+  });
+  const generatedSessionApiPath = generatedSessionRoute === undefined
+    ? null
+    : generatedSessionRoute.path
+        .replace(/^(?:src\/)?app/u, "")
+        .replace(/\/route\.(?:js|ts)$/u, "");
+  // The health route is Foundry-owned readiness infrastructure. A generated
+  // auth page occasionally uses it as its initial session endpoint and reads
+  // `response.user`; replacing that route with the readiness probe then leaves
+  // the UI in its resolving screen forever. When the bundle already owns a
+  // real GET auth/session route, bind that state read to the route that can
+  // actually answer it before install or browser repair.
+  const sessionBoundFiles = files.map((file) => {
+    if (
+      generatedSessionApiPath === null ||
+      !/^(?:src\/)?app\/.*\.(?:js|jsx|ts|tsx)$/u.test(file.path) ||
+      file.path === generatedHealthRoute?.path ||
+      !/\bsetUser\s*\(/u.test(file.content) ||
+      !/(["'])\/api\/health\1/u.test(file.content)
+    ) {
+      return file;
+    }
+    return {
+      ...file,
+      content: file.content.replace(
+        /(["'])\/api\/health\1/gu,
+        `$1${generatedSessionApiPath}$1`,
+      ),
+    };
+  });
   const applicationApiPath = "/api/foundry-application";
-  const protectedApiFiles = files.map((file) => {
+  const protectedApiFiles = sessionBoundFiles.map((file) => {
     if (
       generatedHealthOwnsApplicationMutations &&
       /^(?:src\/)?app\/.*\.(?:js|jsx|ts|tsx)$/u.test(file.path) &&
@@ -1158,6 +2100,11 @@ export function ensureCertifiedStackScaffold(
         ...packageDefinition,
         dependencies,
         devDependencies,
+        overrides: {
+          ...(packageDefinition.overrides ?? {}),
+          postcss: "8.5.26",
+          sharp: "0.35.3",
+        },
       }, null, 2)}\n`,
     };
   });
@@ -1211,7 +2158,8 @@ export function ensureCertifiedStackScaffold(
         file.path,
       ) &&
       !/^(?:src\/)?app\/api\/health\/route\.(?:js|ts)$/u.test(file.path) &&
-      !/^playwright\.config\.(?:cjs|js|mjs|ts)$/u.test(file.path),
+      !/^playwright\.config\.(?:cjs|js|mjs|ts)$/u.test(file.path) &&
+      file.path !== "eslint.config.mjs",
   );
   const generatedAppRoutes = new Set(
     generatedFiles.flatMap((file) => {
@@ -1253,8 +2201,42 @@ export function ensureCertifiedStackScaffold(
     }
     return target;
   };
+  const generatedApplicationSource = generatedFiles
+    .filter((file) =>
+      /^(?:src\/)?app\/.*\.(?:js|jsx|ts|tsx)$/u.test(file.path),
+    )
+    .map((file) => file.content)
+    .join("\n");
+  const applicationBlocksOnInitialAuth =
+    /\buseEffect\s*\(/u.test(generatedApplicationSource) &&
+    (/(?:user|session)\s*===\s*undefined\b/u.test(
+      generatedApplicationSource,
+    ) ||
+      /\bif\s*\(\s*!\s*(?:ready|loaded|resolved|hydrated|sessionReady)\s*\)\s*return\b/iu.test(
+        generatedApplicationSource,
+      ));
+  const applicationIsAuthenticatedRecordWorkspace =
+    /\/api\/(?:todos|tasks|records)\b/iu.test(generatedApplicationSource) &&
+    /\b(?:password|sign[- ]?in|create account|signup|login)\b/iu.test(
+      generatedApplicationSource,
+    );
+  const authenticationModeLabel =
+    /<(?:div|nav)\b[^>]*\baria-label\s*=\s*(["'])([^"']*(?:auth|access|account)[^"']*)\1/iu.exec(
+      generatedApplicationSource,
+    )?.[2] ?? null;
+  const authenticationModeRole =
+    authenticationModeLabel !== null &&
+      /<button\b[^>]*\brole\s*=\s*(["'])tab\1/iu.test(
+        generatedApplicationSource,
+      )
+      ? "tab"
+      : "button";
+  const signOutNavigatesDirectlyToLogin =
+    /\b(?:signOut|logout)\b[\s\S]{0,1200}?\brouter\.(?:push|replace)\(\s*["']\/login["']\s*\)/iu.test(
+      generatedApplicationSource,
+    );
   const protocolNormalizedFiles = generatedFiles.map((file) => {
-    const validStylesheetContent = /\.css$/u.test(file.path) &&
+    let validStylesheetContent = /\.css$/u.test(file.path) &&
       /(?:\bexport\s+default\b|\bfunction\s+[A-Za-z_$]|=>|\bimport\s+[^;]+\b)/u.test(
         file.content,
       )
@@ -1266,6 +2248,41 @@ export function ensureCertifiedStackScaffold(
           "",
         ].join("\n")
       : file.content;
+    if (
+      /\.css$/u.test(file.path) &&
+      /\.sr\s*\{[^}]*font-size\s*:\s*0(?:px|rem|em)?\b[^}]*\}/iu.test(
+        validStylesheetContent,
+      ) &&
+      !/\.sr\s+(?:input|textarea)[^{]*\{[^}]*font-size\s*:/iu.test(
+        validStylesheetContent,
+      )
+    ) {
+      // A generated visually-hidden label used font-size:0 while wrapping the
+      // real input. Because controls also inherited their font, Chrome received
+      // no usable keystrokes and the field stayed empty. Keep the label text
+      // visually quiet without disabling the control it labels.
+      validStylesheetContent += "\n.sr input, .sr textarea { font-size: 1rem; }\n";
+    }
+    if (/\.css$/u.test(file.path)) {
+      // Fractional grid tracks with fixed pixel minimums frequently look fine
+      // on a wide desktop but overflow at the tablet evidence viewport. The
+      // fractions already express the desired composition; make only those
+      // flexible tracks shrinkable. This is the canonical `minmax(0, 1fr)`
+      // pattern and prevents a predictable repair/build/browser retry.
+      validStylesheetContent = validStylesheetContent.replace(
+        /grid-template-columns\s*:[^;{}]+/giu,
+        (declaration) =>
+          declaration.replace(
+            /minmax\(\s*\d+(?:\.\d+)?px\s*,\s*((?:\d+(?:\.\d+)?|\.\d+)fr)\s*\)/giu,
+            "minmax(0,$1)",
+          ),
+      );
+      if (applicationIsAuthenticatedRecordWorkspace) {
+        validStylesheetContent = stabilizeGeneratedNarrowLayout(
+          validStylesheetContent,
+        );
+      }
+    }
     let typedCountContent = /\.(?:ts|tsx)$/u.test(file.path)
       ? validStylesheetContent.replace(
           /(\.get\(\)\s+as\s+)any(\)\.c\b)/gu,
@@ -1273,9 +2290,193 @@ export function ensureCertifiedStackScaffold(
         )
       : validStylesheetContent;
     if (/\.(?:ts|tsx)$/u.test(file.path)) {
+      typedCountContent = stabilizeGeneratedSqliteRowMaps(typedCountContent);
       typedCountContent = typedCountContent.replace(
         /\b(body|payload)\s+as\s+(\{[^\r\n]+?\})/gu,
         "$1 as unknown as $2",
+      );
+      // A missing close angle before an async arrow's return arrow is a purely
+      // mechanical model typo. Correct it locally before admission rather than
+      // buying an otherwise identical full-bundle regeneration.
+      typedCountContent = typedCountContent.replace(
+        /\bPromise<([^<>\r\n]{1,200})=>/gu,
+        "Promise<$1>=>",
+      );
+      // Function declarations do not take an arrow after their return type.
+      // This is the inverse recurring typo: `async function f():Promise<T>=>{`.
+      // Remove only that impossible token while leaving async arrow functions
+      // and the declared Promise type intact.
+      typedCountContent = typedCountContent.replace(
+        /(\basync\s+function\s+[A-Za-z_$][\w$]*\s*\([^\r\n)]*\)\s*:\s*Promise<[^\r\n]*?>)\s*=>\s*\{/gu,
+        "$1{",
+      );
+      // Nested generic return types can instead contain all closing angles but
+      // omit the arrow between the declared Promise and the function body.
+      // Test files are excluded from `next build`, so normalize this shape
+      // before Playwright is the first parser to see it.
+      typedCountContent = typedCountContent.replace(
+        /(\)\s*:\s*Promise<(?:(?!=>)[^\r\n]){1,500}>)\s*\{(?=\s*(?:const|let|try|return)\b)/gu,
+        "$1=>{",
+      );
+      // The missing-arrow normalizer above also sees a function declaration's
+      // valid `Promise<T> {` boundary. Re-apply the declaration rule after it
+      // so only actual async arrow functions retain the inserted token.
+      typedCountContent = typedCountContent.replace(
+        /(\basync\s+function\s+[A-Za-z_$][\w$]*\s*\([^\r\n)]*\)\s*:\s*Promise<[^\r\n]*?>)\s*=>\s*\{/gu,
+        "$1{",
+      );
+      typedCountContent = typedCountContent.replace(
+        /\bDEFAULT\s+datetime\((['"])now\1\)/giu,
+        "DEFAULT (datetime($1now$1))",
+      );
+      if (file.path === "tests/foundry-checks.ts") {
+        typedCountContent = stabilizeGeneratedBrowserCheckTiming(
+          typedCountContent,
+        );
+        typedCountContent = expandGeneratedBrowserCheckLoop(
+          typedCountContent,
+        );
+        typedCountContent = expandGeneratedBrowserCheckAssignmentLoop(
+          typedCountContent,
+        );
+        typedCountContent = bindCertifiedCredentialLoginChecks(
+          typedCountContent,
+          loginCheckIds,
+        );
+        typedCountContent = bindCertifiedAuthenticationErrorChecks(
+          typedCountContent,
+          authenticationErrorCheckIds,
+        );
+        typedCountContent = bindCertifiedResponsiveChecks(
+          typedCountContent,
+          responsiveCheckIds,
+          authenticatedCheckIds,
+        );
+        typedCountContent = bindCertifiedAccessibilityChecks(
+          typedCountContent,
+          accessibilityCheckIds,
+          authenticatedCheckIds,
+          responsiveCheckIds,
+        );
+        // Generated checks often initialize `const passed = false` and then
+        // assign the measured result inside try/catch. It type-checks when the
+        // test directory is excluded from Next's build, but throws at runtime
+        // and can leave a misleading wrapper verdict. Preserve the intended
+        // mutable accumulator before Playwright executes it.
+        typedCountContent = typedCountContent.replace(
+          /\bconst\s+([A-Za-z_$][\w$]*)\s*=\s*(false|true)\s*;(?=[\s\S]{0,4000}\b\1\s*=)/gu,
+          "let $1=$2;",
+        );
+        if (applicationBlocksOnInitialAuth) {
+          typedCountContent = typedCountContent.replace(
+            /(const\s+(?:check|run)\s*=\s*async\s*\(\s*([A-Za-z_$][\w$]*)[^;\r\n]{0,1200}=>\s*\{)/u,
+            (_match, declaration, contextName) =>
+              `${declaration}await ${contextName}.page.locator('form:visible, input:visible, button:visible').first().waitFor({ state: 'visible' });`,
+          );
+          typedCountContent = typedCountContent.replace(
+            /(await\s+((?:[A-Za-z_$][\w$]*\.)?page)\.goto\([^;]+;)(?!\s*await\s+\2\.locator\(\s*["']form:visible)/gu,
+            "$1await $2.locator('form:visible, input:visible, button:visible').first().waitFor({ state: 'visible' });",
+          );
+        }
+        typedCountContent = typedCountContent.replace(
+          /(["'])\p{Cf}+(?=(?:obligation|check)-)/gu,
+          "$1",
+        );
+        if (authenticationModeLabel !== null) {
+          typedCountContent = typedCountContent.replace(
+            /((?:[A-Za-z_$][\w$]*\.)?page)\.getByRole\(\s*(["'])button\2\s*,\s*\{\s*name\s*:\s*(["'])(Sign in|Create account)\3\s*,\s*exact\s*:\s*true\s*\}\s*\)(\.first\(\))?/giu,
+            (_match, pageExpression, buttonQuote, labelQuote, label, first, offset, wholeSource) => {
+              // An explicit `.first()` denotes the mode control. For an
+              // unscoped click after fields were filled, the same accessible
+              // name denotes the form submit button. Keeping these identities
+              // separate prevents Foundry from rewriting a real submission
+              // into a click on the already-selected mode tab.
+              const recentSource = wholeSource.slice(
+                Math.max(0, offset - 700),
+                offset,
+              );
+              const isFormSubmission =
+                first === undefined && /\.fill\s*\([^)]*\)[\s\S]{0,500}$/u.test(recentSource);
+              if (isFormSubmission) {
+                return `${pageExpression}.locator('form').getByRole(${buttonQuote}button${buttonQuote}, { name: ${labelQuote}${label}${labelQuote}, exact: true })`;
+              }
+              const selector = `[aria-label=${JSON.stringify(authenticationModeLabel)}]`;
+              return `${pageExpression}.locator(${JSON.stringify(selector)}).getByRole(${buttonQuote}${authenticationModeRole}${buttonQuote}, { name: ${labelQuote}${label}${labelQuote}, exact: true })`;
+            },
+          );
+        }
+        typedCountContent = typedCountContent.replace(
+          /((?:[A-Za-z_$][\w$]*\.)?page)\.getByLabel\(\s*(['"])Password\2\s*,\s*\{\s*exact\s*:\s*true\s*\}\s*\)\.fill\s*\(/giu,
+          "$1.locator('input[name=\"password\"]:visible').fill(",
+        );
+        // Playwright Locator has no `.submit()` method. Generated checks use
+        // that DOM-shaped API often enough to waste a complete browser repair
+        // even though the intended action is unambiguous. Dispatch the form's
+        // real requestSubmit path inside the page so React/Next submit handlers
+        // and constraint validation are still exercised.
+        typedCountContent = typedCountContent.replace(
+          /(\.locator\(\s*(["'])[^"'\r\n]{1,200}\2\s*\))\.submit\(\)/giu,
+          "$1.evaluate((form:Element)=>{if(form instanceof HTMLFormElement)form.requestSubmit()})",
+        );
+        // Approved split auth designs may intentionally repeat the same title
+        // in their context and form panels. A text-presence check does not need
+        // strict uniqueness, so select the first exact heading rather than
+        // allowing Playwright to abort before returning the visibility result.
+        typedCountContent = typedCountContent.replace(
+          /(\.getByRole\(\s*(["'])heading\2\s*,\s*\{(?=[^}\r\n]*\bname\s*:)(?=[^}\r\n]*\bexact\s*:\s*true)[^}\r\n]*\}\s*\))(?!\.first\(\))/giu,
+          "$1.first()",
+        );
+        typedCountContent = typedCountContent.replace(
+          /(\.getByRole\(\s*(["'])button\2\s*,\s*\{(?=[^}\r\n]*\bname\s*:\s*(["'])Sign out\3)(?=[^}\r\n]*\bexact\s*:\s*true)[^}\r\n]*\}\s*\))(?!\.first\(\))/giu,
+          "$1.first()",
+        );
+        if (signOutNavigatesDirectlyToLogin) {
+          typedCountContent = typedCountContent.replace(
+            /(await\s+page\.getByRole\(\s*(["'])button\2\s*,\s*\{[^}]*name\s*:\s*(["'])Sign out\3[^}]*\}\s*\)(?:\.first\(\))?\.click\(\)\s*;)\s*await\s+page\.getByRole\(\s*(["'])link\4\s*,\s*\{[^}]*name\s*:\s*(["'])Sign in\5[^}]*\}\s*\)\.click\(\)\s*;/giu,
+            "$1",
+          );
+        }
+        typedCountContent = typedCountContent.replace(
+          /(await\s+([$A-Z_a-z][$\w]*)\.getByRole\([^;]+?\)\.click\(\)\s*;)(\s*[$A-Z_a-z][$\w]*\s*=\s*await\s+\2\.(?:getByRole|getByText|getByLabel|locator)\([^;]+?\))\.isVisible\(\)/gu,
+          "$1$3.waitFor({ state: 'visible' }).then(() => true)",
+        );
+
+        if (authenticationModeLabel !== null) {
+          // The first button on an authentication page is commonly the pale
+          // selected mode tab, not the primary submit action. Measuring it as
+          // the approved accent produced a false palette failure and bought a
+          // model repair even though the rendered primary action was correct.
+          typedCountContent = typedCountContent.replace(
+            /((?:[A-Za-z_$][\w$]*\.)?page)\.locator\(\s*(["'])button\2\s*\)\.first\(\)\.evaluate\(/gu,
+            "$1.locator('form').getByRole('button').evaluate(",
+          );
+        }
+      }
+      if (
+        applicationBlocksOnInitialAuth &&
+        file.path === "tests/foundry-observation.spec.ts"
+      ) {
+        // The harness creates the fresh page that every generated check uses.
+        // Waiting here covers direct object-entry checks as well as checks that
+        // have their own helper or goto. Previously only those latter shapes
+        // were normalized, so immediate layout/color/focus reads raced the
+        // initial session lookup and triggered an unnecessary repair pass.
+        typedCountContent = typedCountContent.replace(
+          /(await\s+page\.goto\([^;]+;)(?!\s*await\s+page\.locator\(\s*["']form:visible)/gu,
+          "$1await page.locator('form:visible, input:visible, button:visible').first().waitFor({ state: 'visible' });",
+        );
+      }
+    }
+    if (/^(?:src\/)?app\/.*\.(?:jsx|tsx)$/u.test(file.path)) {
+      typedCountContent = stabilizeGeneratedAuthHydration(typedCountContent);
+      typedCountContent = focusFirstInvalidGeneratedFormField(
+        typedCountContent,
+      );
+    }
+    if (/^(?:src\/)?app\/.*\.(?:js|jsx|ts|tsx)$/u.test(file.path)) {
+      typedCountContent = typedCountContent.replace(
+        /(fetch\(\s*(["'])[^"']*(?:signout|logout)[^"']*\2\s*,\s*\{\s*method\s*:\s*(["'])POST\3)(\s*\})/giu,
+        "$1,headers:{'content-type':'application/json'},body:'{}'$4",
       );
     }
     const nextLinkImport = typedCountContent.match(
@@ -1396,6 +2597,10 @@ export function ensureCertifiedStackScaffold(
         "page.locator('[role=\"alert\"]:not(#__next-route-announcer__)').first()",
       )
       .replace(
+        /page\.getByRole\(\s*(["'])alert\1(?:\s*,\s*\{[^}]*\})?\s*\)/gu,
+        "page.locator('[role=\"alert\"]:not(#__next-route-announcer__)').first()",
+      )
+      .replace(
         /(browser\.newContext\(\{[^\r\n]*?),\s*channel\s*:\s*(["'])chrome\2/gu,
         "$1",
       )
@@ -1403,6 +2608,15 @@ export function ensureCertifiedStackScaffold(
         /page\.click\(\s*(["'])text=([^"'\\\r\n]+)\1\s*\)/gu,
         (_match, quote, label) =>
           `page.getByRole('button', { name: ${quote}${label}${quote}, exact: true }).click()`,
+      )
+      .replace(
+        /page\.getByLabel\(\s*(["'])([^"']+)\1\s*\)(?=\s*\.)/gu,
+        (_match, quote, label) =>
+          `page.getByLabel(${quote}${label}${quote}, { exact: true })`,
+      )
+      .replace(
+        /(await\s+page\.getByRole\([^;]+?\)\.click\(\)\s*;)(\s*[A-Za-z_$][\w$]*\s*=\s*await\s+page\.(?:getByRole|getByText|getByLabel|locator)\([^;]+?\))\.isVisible\(\)/gu,
+        "$1$2.waitFor({ state: 'visible' }).then(() => true)",
       );
     if (
       !/page\.mouse\.move\(\s*0\s*,\s*0\s*\)/u.test(
@@ -1625,6 +2839,42 @@ export function ensureCertifiedStackScaffold(
     ? {}
     : { contractRequirementIds: [...contractRequirementIds] };
   const scaffold = [];
+  scaffold.push({
+    path: "eslint.config.mjs",
+    content: [
+      'import { FlatCompat } from "@eslint/eslintrc";',
+      'import { dirname } from "node:path";',
+      'import { fileURLToPath } from "node:url";',
+      "",
+      "const baseDirectory = dirname(fileURLToPath(import.meta.url));",
+      "const compat = new FlatCompat({ baseDirectory });",
+      "const config = [",
+      '  { ignores: [".next/**", "next-env.d.ts", "tests/**", "node_modules/**", "playwright-report/**", "test-results/**"] },',
+      '  ...compat.extends("next/core-web-vitals", "next/typescript"),',
+      "];",
+      "",
+      "export default config;",
+      "",
+    ].join("\n"),
+    ...trace,
+  });
+  const needsGeneratedDataDirectory = protocolNormalizedFiles.some(
+    (file) =>
+      /\.(?:js|jsx|mjs|ts|tsx)$/u.test(file.path) &&
+      ( /\bnew\s+Database\(\s*["'](?:\.\/)?data\//u.test(file.content) ||
+        /\bnew\s+Database\([\s\S]{0,180}\b(?:path\.)?join\([\s\S]{0,120}["']data["']/u.test(
+          file.content,
+        ) ),
+  );
+  const hasGeneratedDataDirectory = protocolNormalizedFiles.some((file) =>
+    /^data\//u.test(file.path),
+  );
+  if (needsGeneratedDataDirectory && !hasGeneratedDataDirectory) {
+    // SQLite cannot create its parent directory. Generated workspaces contain
+    // files rather than empty directories, so preserve the relative data root
+    // explicitly before the application ever starts.
+    scaffold.push({ path: "data/.gitkeep", content: "", ...trace });
+  }
   const healthPath = `${appDirectory}/api/health/route.ts`;
   scaffold.push({
     path: healthPath,
@@ -1778,6 +3028,8 @@ export function checkComputationSources(source, checkId) {
     ),
   ].map((match) => match[1]);
   if (direct.length > 0) return direct;
+  const implementation = browserCheckImplementationSource(source, checkId);
+  if (implementation !== "") return [implementation];
   // Helper form: the id is passed to something that assigns into checks, so the
   // computation lives in the invocation that follows the id literal.
   if (!/checks\s*\[\s*[A-Za-z_$][\w$]*\s*\]\s*=/u.test(source)) return [];
@@ -1786,11 +3038,301 @@ export function checkComputationSources(source, checkId) {
   ].map((match) => source.slice(match.index, match.index + 700));
 }
 
+export function runtimeRestartCountForRecords(runtimeRecords = []) {
+  const starts = runtimeRecords.filter((record) => record.eventType === "STARTUP");
+  const independentlyObservedSessionIds = new Set(
+    runtimeRecords
+      .filter((record) => record.eventType === "BROWSER_OBSERVATION")
+      .map((record) => record.sessionId),
+  );
+  const hasIndependentVerificationRuntime = starts.some((record) =>
+    independentlyObservedSessionIds.has(record.sessionId),
+  );
+  const executionRuntimeCount = starts.length -
+    (hasIndependentVerificationRuntime ? 1 : 0);
+  return Math.max(0, executionRuntimeCount - 1);
+}
+
+function browserCheckImplementationSource(source, checkId) {
+  const escaped = checkId.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+  const callback =
+    "(?:async\\s*)?(?:\\([^)]*\\)|[A-Za-z_$][\\w$]*)\\s*(?::\\s*[^=\\r\\n]+)?=>";
+  // A small higher-order wrapper such as check(async context => { ... }) is
+  // still an explicit entry with an independently invokable callback. Treating
+  // it like an opaque computed loop rejected valid isolated authentication
+  // checks even though their account helper was directly reachable.
+  const entryValue =
+    `(?:${callback}|[A-Za-z_$][\\w$]*\\s*\\(\\s*${callback})`;
+  const marker = new RegExp(
+    `["']${escaped}["']\\s*:\\s*${entryValue}`,
+    "u",
+  ).exec(source);
+  if (marker === null) return "";
+  const start = marker.index;
+  const tail = source.slice(start + marker[0].length);
+  const next = new RegExp(
+    `,\\s*["'][^"']+["']\\s*:\\s*${entryValue}`,
+    "u",
+  ).exec(tail);
+  if (next === null) {
+    // The final callback is followed by the obligationChecks object's own
+    // closing brace. Return only the callback entry so a canonical replacement
+    // cannot accidentally delete that enclosing brace.
+    return source.slice(start).replace(/\}\s*;?\s*$/u, "");
+  }
+  return source.slice(
+    start,
+    start + marker[0].length + next.index,
+  );
+}
+
+function browserCheckReachableSource(source, checkId) {
+  const implementation = browserCheckImplementationSource(source, checkId);
+  if (implementation === "") return "";
+  const reachable = [implementation];
+  const pending = [implementation];
+  const visited = new Set();
+  while (pending.length > 0 && visited.size < 12) {
+    const current = pending.shift();
+    for (const match of current.matchAll(
+      /\b(?:await\s+)?([A-Za-z_$][\w$]*)\s*\(/gu,
+    )) {
+      const name = match[1];
+      if (visited.has(name)) continue;
+      visited.add(name);
+      const escaped = name.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+      const definition = new RegExp(
+        `(?:const|let|var)\\s+${escaped}(?:\\s*:[^=\\r\\n]+)?\\s*=\\s*(?:async\\s*)?\\([^)]*\\)\\s*(?::\\s*[^=\\r\\n]+)?=>|(?:async\\s+)?function\\s+${escaped}\\s*\\([^)]*\\)`,
+        "u",
+      ).exec(source);
+      if (definition === null) continue;
+      // The observation file is deliberately small. Include the local helper's
+      // bounded source neighborhood so admission follows shared actions such as
+      // enroll(context) instead of falsely requiring every check to inline the
+      // same sign-up sequence. Runtime verification remains the final proof.
+      const helperSource = source.slice(
+        definition.index,
+        Math.min(source.length, definition.index + 4_000),
+      );
+      reachable.push(helperSource);
+      pending.push(helperSource);
+    }
+  }
+  return reachable.join("\n");
+}
+
+export function obligationRequiresCredentialLoginProof(statement = "") {
+  // Derived design obligations can name a "sign-in switch", "login tab", or
+  // similar visible label while asking only for composition or navigation.
+  // Treating that noun as a credential journey rejected valid design checks
+  // before install. Functional customer obligations never use this approved-
+  // design prefix and remain subject to the full saved-credential proof.
+  if (
+    /\b(?:implements|satisfies)\s+the\s+approved\b[^:]{0,120}\b(?:composition|navigation|responsive|visual|accessibility|design)\b/iu.test(
+      String(statement),
+    ) ||
+    /\bpreserves\s+its\s+approved\b[^.]{0,180}\b(?:content|workflow|design|interaction|experience)\b/iu.test(
+      String(statement),
+    )
+  ) {
+    return false;
+  }
+  // A mode switch is navigation evidence, even when one of its labels is
+  // "Sign in". Requiring saved credentials here rejected the exact customer
+  // obligation "switch between create-account and sign-in modes" before the
+  // project could even install. Credential proof belongs to the separate
+  // obligation that says a valid sign-in creates an authenticated session.
+  if (
+    /\b(?:switch|toggle|choose|move|navigate)\w*\b[^.]{0,140}\b(?:sign[- ]?in|log[- ]?in)\b[^.]{0,80}\b(?:mode|tab|view|screen|form)s?\b/iu.test(
+      String(statement),
+    ) ||
+    /\b(?:mode|tab|view|screen|form)s?\b[^.]{0,80}\b(?:switch|toggle|choose|move|navigate)\w*\b[^.]{0,140}\b(?:sign[- ]?in|log[- ]?in)\b/iu.test(
+      String(statement),
+    ) ||
+    /\b(?:sign[- ]?in|log[- ]?in)\s*[/&-]\s*(?:create[- ]?account|sign[- ]?up)\s+(?:mode\s+)?switch\b/iu.test(
+      String(statement),
+    ) ||
+    (/(?=.*\b(?:sign[- ]?in|log[- ]?in)\b)(?=.*\b(?:create[- ]?account|sign[- ]?up)\b)(?=.*\bmodes?\b)/iu.test(
+      String(statement),
+    ) &&
+      !/\b(?:submit(?:ting)?|credentials?|password|session|authenticated|signed[- ]in|saved\s+account|existing\s+account)\b/iu.test(
+        String(statement),
+      ))
+  ) {
+    return false;
+  }
+  // Registration obligations often explain that the newly-created account is
+  // available *for a later login*. That outcome is evidence of sign-up, not a
+  // demand to repeat the separate login journey in the same check. Remove only
+  // those explicit future-purpose clauses; an obligation that actually says to
+  // sign up, sign out, and then sign in still requires credential-login proof.
+  const actionableStatement = String(statement)
+    .replace(
+      /\bso\s+(?:that\s+)?(?:they|the\s+(?:person|user|member|customer))\s+can\s+(?:sign[- ]?in|log[- ]?in)\b/giu,
+      "",
+    )
+    .replace(
+      /\b(?:available|ready|saved|usable)\s+for\s+(?:a\s+)?future\s+(?:sign[- ]?in|log[- ]?in)\b/giu,
+      "",
+    );
+  if (
+    /\bsubmitting\s+valid\s+credentials\b[^.]{0,140}\bserver[- ]validated\s+session\b/iu.test(
+      actionableStatement,
+    )
+  ) {
+    return true;
+  }
+  return /\b(?:sign[- ]?in|log[- ]?in)\b/iu.test(actionableStatement);
+}
+
+export function obligationRequiresAuthenticationErrorProof(statement = "") {
+  return /\b(?:invalid|rejected|incorrect|malformed|failed|duplicate|incomplete)\b[\s\S]{0,160}\b(?:authentication|credentials?|emails?|fields?|passwords?)\b|\b(?:authentication|credentials?|validation)\b[\s\S]{0,40}\berrors?\b/iu.test(
+    String(statement),
+  );
+}
+
+export function obligationRequiresAuthenticatedSurface(statement = "") {
+  // A negative authentication check must begin signed out. Its wording often
+  // names the protected destination only to prove that invalid credentials do
+  // *not* reach it (for example, "without entering the dashboard"). Treating
+  // that noun as an authenticated-surface requirement makes the correct test
+  // impossible and sends an already-valid bundle through paid regeneration.
+  if (obligationRequiresAuthenticationErrorProof(statement)) return false;
+  return /\b(?:authenticated|protected|signed[- ]in|dashboard|workspace|portal|account area|todo|task|record|rail)\b/iu.test(
+    String(statement),
+  );
+}
+
+export function isFoundryOwnedBrowserHealthObligation(statement = "") {
+  return /\b(?:complete|completes|run|runs)\b[\s\S]{0,100}\b(?:primary\s+)?browser\s+workflow\b[\s\S]{0,100}\bwithout\s+blocking\s+browser\s+errors\b/iu.test(
+    String(statement),
+  );
+}
+
+export function responsiveBrowserCheckIdsForContract(
+  obligations = [],
+  bindings = {},
+) {
+  const candidates = obligations.filter(
+    (obligation) =>
+      bindings[obligation.obligationId] === "browser-check" &&
+      /\b(?:phone|mobile|responsive|small[- ]screen|narrow viewport|narrow screens?|touch target)\b/iu.test(
+        obligation.statement,
+      ),
+  );
+  const dedicated = candidates.filter((obligation) =>
+    /\b(?:responsive\s+(?:priority|behavior|behaviour|transformation|transform)|phone\s+(?:layout|viewport|view)|mobile\s+(?:layout|viewport|view)|without\s+horizontal\s+overflow|works?\s+(?:on|at)\s+(?:narrow|small|mobile|phone))\b/iu.test(
+      obligation.statement,
+    ),
+  );
+  return (dedicated.length > 0 ? dedicated : candidates)
+    .map((obligation) => obligation.obligationId)
+    .sort((left, right) => left.localeCompare(right));
+}
+
 export function validateBrowserObservationTestSource(
   source,
   requiredBrowserCheckIds = [],
-  { responsiveCheckIds = [], accessibilityCheckIds = [] } = {},
+  {
+    responsiveCheckIds = [],
+    accessibilityCheckIds = [],
+    authenticatedCheckIds = [],
+    loginCheckIds = [],
+  } = {},
 ) {
+  const unnamedFormRole = /\.getByRole\(\s*(["'])form\1/iu.exec(source);
+  if (unnamedFormRole !== null) {
+    throw new TypeError(
+      "The browser observation test locates a native form with getByRole('form'). An unnamed HTML form is not required to be exposed as the ARIA form landmark, so that locator can wait until the check times out even while the visible form works. Use locator('form'), or give the form an accessible name and locate that exact named form.",
+    );
+  }
+  const reusablePersistentIdentity = /(?:^|\n)\s*const\s+([A-Za-z_$][\w$]*(?:account|email|user(?:name)?)[\w$]*)\s*=\s*(?:["'`]|[^;\n]*\bDate\.now\s*\()/imu.exec(
+    source,
+  );
+  const invocationScopedIdentityFactory =
+    reusablePersistentIdentity !== null &&
+    /=>/u.test(reusablePersistentIdentity[0]) &&
+    /\b(?:Date\.now|Math\.random|randomUUID|crypto\.randomUUID)\b/u.test(
+      reusablePersistentIdentity[0],
+    );
+  if (
+    reusablePersistentIdentity !== null &&
+    !invocationScopedIdentityFactory
+  ) {
+    throw new TypeError(
+      `The browser observation test declares persistent identity "${reusablePersistentIdentity[1]}" once at module load. Every isolated check shares the same database, so account and record identities must be created inside the helper on every invocation; a module-level literal or Date.now() value is reused and causes later checks to receive conflict or 422 responses.`,
+    );
+  }
+  const ambiguousClassAction = /page\.locator\(\s*(["'])\.[A-Za-z_-][\w-]*\1\s*\)(?!\s*\.(?:first|last|nth|filter)\s*\()\s*\.(?:check|click|fill|press|selectOption|uncheck)\s*\(/iu.exec(
+    source,
+  );
+  if (ambiguousClassAction !== null) {
+    const locator = ambiguousClassAction[0].slice(
+      0,
+      ambiguousClassAction[0].indexOf(").") + 1,
+    );
+    throw new TypeError(
+      `The browser observation test performs a strict action through the unscoped class locator ${locator}. Generated pages commonly reuse visual classes; scope the locator to a semantic role and accessible name, a stable ancestor, or an explicitly selected element so multiple matching controls cannot abort the check.`,
+    );
+  }
+  const ambiguousLabelAction = /page\.getByLabel\(\s*(["'])([^"']+)\1\s*\)(?!\s*\.\s*(?:first|last|nth|filter)\s*\()\s*\.(?:check|click|evaluate|fill|press|selectOption|uncheck)\s*\(/iu.exec(
+    source,
+  );
+  if (ambiguousLabelAction !== null) {
+    throw new TypeError(
+      `The browser observation test performs a strict action through getByLabel(${JSON.stringify(ambiguousLabelAction[2])}) without exact matching. Playwright label queries also match longer accessible names; pass { exact: true }, use a semantic role with an exact accessible name, or scope the locator so an unrelated region or progress control cannot abort the workflow.`,
+    );
+  }
+  const opaqueAuthenticatedCheckIds = [];
+  const sessionlessAuthenticatedCheckIds = [];
+  for (const checkId of authenticatedCheckIds) {
+    const implementation = browserCheckReachableSource(source, checkId);
+    if (implementation === "") {
+      opaqueAuthenticatedCheckIds.push(checkId);
+      continue;
+    }
+    const establishesFreshAccount =
+      /(?:getByRole|getByText|locator)\s*\([\s\S]{0,220}\b(?:create account|sign up|register)\b[\s\S]{0,220}\.(?:click|press)\s*\(/iu.test(
+        implementation,
+      ) ||
+      /(?:\/api\/auth|\/signup|\/register)[\s\S]{0,180}\b(?:POST|signup|register)\b/iu.test(
+        implementation,
+      );
+    if (!establishesFreshAccount) {
+      sessionlessAuthenticatedCheckIds.push(checkId);
+    }
+  }
+  if (opaqueAuthenticatedCheckIds.length > 0) {
+    throw new TypeError(
+      `Browser check "${opaqueAuthenticatedCheckIds.join(", ")}" observes an authenticated or protected product surface but is generated through an opaque shared loop. Define an explicit object entry for every listed check so Foundry can verify each independent account/session setup before execution.`,
+    );
+  }
+  if (sessionlessAuthenticatedCheckIds.length > 0) {
+    throw new TypeError(
+      `Browser check "${sessionlessAuthenticatedCheckIds.join(", ")}" observes an authenticated or protected product surface but does not establish its own account/session. Foundry clears cookies and storage before every check; create a unique account inside every listed check, reach the protected surface, and only then measure it. Do not weaken the assertion or rely on another check's login.`,
+    );
+  }
+  for (const checkId of loginCheckIds) {
+    // A generated check commonly delegates account creation and credential
+    // submission to local helpers. Inspect the same bounded reachable source
+    // used by the authenticated-surface gate so valid reusable verification
+    // code is not rejected before the application can even be built.
+    const implementation = browserCheckReachableSource(source, checkId);
+    if (implementation === "") continue;
+    const submitsLoginThroughUi =
+      /(?:getByLabel\s*\([\s\S]{0,120}(?:password|passcode)|locator\s*\([\s\S]{0,120}input[^\r\n]*(?:password|passcode))[\s\S]{0,800}\b(?:sign in|log in)\b[\s\S]{0,220}\.click\s*\(/iu.test(
+        implementation,
+      );
+    const submitsLoginDirectly =
+      /\/(?:api\/auth\/)?(?:signin|login)[\s\S]{0,220}\bPOST\b/iu.test(
+        implementation,
+      );
+    if (!submitsLoginThroughUi && !submitsLoginDirectly) {
+      throw new TypeError(
+        `Browser check "${checkId}" promises sign-in but does not submit saved credentials. Revealing a login form is not login evidence; create an account, sign out, fill the saved email and password, submit login, and then observe the protected surface.`,
+      );
+    }
+  }
   for (const collection of [
     "captureProbeErrors",
     "consoleErrors",
@@ -1981,7 +3523,10 @@ export function validateBrowserObservationTestSource(
         /[.*+?^${}()|[\]\\]/gu,
         "\\$&",
       );
-      const computations = checkComputationSources(source, checkId);
+      const computations = [
+        ...checkComputationSources(source, checkId),
+        browserCheckReachableSource(source, checkId),
+      ].filter(Boolean);
       const directlyReferencesResponsiveEvidence = (expression) =>
         /(?:phone|mobile|responsive|overflow|density|height|width|viewport|interaction)/iu.test(
           expression,
@@ -2013,10 +3558,40 @@ export function validateBrowserObservationTestSource(
           `Responsive check "${checkId}" must be computed from measured phone-layout quality evidence.`,
         );
       }
+      // Only the check's own computation can prove that this responsive
+      // obligation is trying to inspect a mobile-only project control. The
+      // reachable helper graph deliberately includes shared wrappers (for
+      // example `check(context, callback)`). Treating every locator used by a
+      // shared wrapper or a neighboring check as part of this check produced a
+      // false viewport error and made every otherwise-valid repair
+      // inadmissible. Runtime observation still executes the exact callback;
+      // this admission rule only needs to guard visibility asserted by the
+      // responsive check itself.
+      const projectSpecificVisibility = checkComputationSources(
+        source,
+        checkId,
+      ).filter((expression) =>
+        /(?:\.locator\s*\(|getByRole\s*\(|getByLabel\s*\()[\s\S]{0,300}?\.isVisible\s*\(/u.test(
+          expression,
+        ),
+      );
+      if (
+        projectSpecificVisibility.length > 0 &&
+        !projectSpecificVisibility.some((expression) =>
+          /setViewportSize\s*\(/u.test(expression),
+        )
+      ) {
+        throw new TypeError(
+          `Responsive check "${checkId}" observes project-specific element visibility without setting the viewport in that check. The shared phone evidence is measured earlier, but each project check starts at desktop width; set a 280-480px viewport before asserting a mobile-only navigation or control.`,
+        );
+      }
     }
   }
   for (const checkId of accessibilityCheckIds) {
-    const computations = checkComputationSources(source, checkId);
+    const computations = [
+      ...checkComputationSources(source, checkId),
+      browserCheckReachableSource(source, checkId),
+    ].filter(Boolean);
     if (
       !/(?:keyboard\.press|\.press)\s*\(\s*["']Tab["']/u.test(source) ||
       !/(?:document\.activeElement|toBeFocused\s*\(|:focus-visible)/u.test(source)
@@ -2088,10 +3663,7 @@ export function validateBrowserObservationTestSource(
   // derived from the page. A dashboard shipped "Open tickets" counting
   // everything not closed, and its check asserted the widget read "2" after
   // filtering to Pending -- true only because the code was wrong the same way.
-  const colluding = collusiveCheckIssues(source);
-  if (colluding.length > 0) {
-    throw new TypeError(colluding[0]);
-  }
+  assertObservationIndependence(source);
 }
 
 export function generatedFileReconciliationAction(file, workUnits) {
@@ -2296,6 +3868,11 @@ function validateSingleRepairPatch({
     structuredOutput.path,
   );
   const repairsTestSource =
+    /^tests\/.*\.(?:cjs|js|jsx|mjs|ts|tsx)$/u.test(
+      structuredOutput.path,
+    );
+  const repairsObservationSource =
+    structuredOutput.path === "tests/foundry-checks.ts" ||
     /^tests\/.*\.(?:spec|test)\.(?:js|jsx|ts|tsx)$/u.test(
       structuredOutput.path,
     );
@@ -2318,6 +3895,9 @@ function validateSingleRepairPatch({
       const unbalanced = unbalancedJavaScriptDelimiter(repairedContent);
       if (unbalanced !== null) {
         return `the repaired ${structuredOutput.path} has unbalanced delimiters: ${unbalanced}`;
+      }
+      if (/\bPromise<[^<>\r\n]{1,200}=>/u.test(repairedContent)) {
+        return `the repaired ${structuredOutput.path} has a malformed Promise return type before an arrow function; close the generic first, for example Promise<void> =>`;
       }
     }
     if (!repairsPlaywrightConfig) return null;
@@ -2407,11 +3987,30 @@ function validateSingleRepairPatch({
         `The browser repair added ${literalsAfter - literalsBefore} assignment(s) or return(s) of a literal true in ${structuredOutput.path}. A check must conclude from something observed in the running page; hard-coding a pass reports success that was never seen. Observe the condition and return what the observation found.`,
       );
     }
-    validateBrowserObservationTestSource(
-      repairedContent,
-      requiredBrowserCheckIds,
-      browserQualityRequirements,
-    );
+    if (repairsObservationSource) {
+      const validationSource =
+        structuredOutput.path === "tests/foundry-checks.ts"
+          ? bindFoundryObservationHarness(
+              {
+                files: [
+                  {
+                    path: structuredOutput.path,
+                    content: repairedContent,
+                  },
+                ],
+              },
+              requiredBrowserCheckIds,
+            ).files
+              .filter((file) => file.path.startsWith("tests/"))
+              .map((file) => file.content)
+              .join("\n")
+          : repairedContent;
+      validateBrowserObservationTestSource(
+        validationSource,
+        requiredBrowserCheckIds,
+        browserQualityRequirements,
+      );
+    }
   }
   return Object.freeze({
     path: structuredOutput.path,
@@ -2523,6 +4122,36 @@ export function validateGeneratedRepairProposal({
       `The proposed repair returns exactly the same ${structuredOutput.path} as an earlier attempt, and that attempt left the failure in place. Diagnose the remaining cause from the recorded output and change something different.`,
     );
   }
+}
+
+export function validateGeneratedRepairSet({
+  structuredOutput,
+  currentFiles,
+  priorStructuredOutputs = [],
+}) {
+  const files = repairPatchFiles(structuredOutput);
+  if (files.length === 0 || files.length > MAX_REPAIR_FILES_PER_PROPOSAL) {
+    throw new Error(
+      `A procedure repair must return between one and ${MAX_REPAIR_FILES_PER_PROPOSAL} complete files.`,
+    );
+  }
+  const paths = files.map((file) => file?.path);
+  if (new Set(paths).size !== paths.length) {
+    throw new Error(
+      "A procedure repair may return each file only once; combine all changes for a path into its complete corrected content.",
+    );
+  }
+  const priorFiles = priorStructuredOutputs.flatMap((proposal) =>
+    repairPatchFiles(proposal),
+  );
+  for (const file of files) {
+    validateGeneratedRepairProposal({
+      structuredOutput: file,
+      currentFiles,
+      priorStructuredOutputs: priorFiles,
+    });
+  }
+  return Object.freeze([...files]);
 }
 
 function commandEvidence(evidence, workUnitId) {
@@ -2696,7 +4325,9 @@ export function bindMissingApprovedRequirementTraces(plan, approvedContract) {
   };
   for (const [requirementId, requirement] of requirements) {
     if (claims.has(requirementId)) continue;
-    const target = rankedTarget(requirement.statement);
+    const target = files.find((file) =>
+      file.contractRequirementIds.includes(requirementId),
+    ) ?? rankedTarget(requirement.statement);
     if (target === null) continue;
     claims.set(
       requirementId,
@@ -2827,32 +4458,47 @@ export function bindApprovedPrototypeFidelityIdentity(plan, approvedContract) {
 // tests/foundry-checks.ts. Every scaffolding gate is then satisfied by
 // construction rather than by hope, and what the model supplies is the only
 // thing it is actually qualified to supply: what each obligation means.
-export function foundryObservationHarness(requiredCheckIds) {
+export function foundryObservationHarness(
+  requiredCheckIds,
+  { checkBudgetMs = 20_000, foundryOwnedBrowserHealthCheckIds = [] } = {},
+) {
   const ids = [...new Set(requiredCheckIds ?? [])];
   const idList = ids.map((id) => JSON.stringify(id)).join(", ");
+  const browserHealthIdList = [
+    ...new Set(foundryOwnedBrowserHealthCheckIds ?? []),
+  ]
+    .filter((id) => ids.includes(id))
+    .map((id) => JSON.stringify(id))
+    .join(", ");
+  const boundedCheckBudgetMs = Number.isSafeInteger(checkBudgetMs) && checkBudgetMs >= 5_000
+    ? Math.min(checkBudgetMs, 30_000)
+    : 20_000;
+  const checkBudgetLiteral = String(boundedCheckBudgetMs).replace(
+    /\B(?=(\d{3})+(?!\d))/gu,
+    "_",
+  );
   return `import { expect, test } from "@playwright/test";
 import { obligationChecks } from "./foundry-checks";
 
 // Generated by Foundry. The observation protocol is fixed so that evidence is
 // comparable across every build; project-specific assertions live in
 // ./foundry-checks.
-test("foundry contract observation", async ({ page }) => {
+test("foundry contract observation", async ({ browser }) => {
   const captureProbeErrors: string[] = [];
   const consoleErrors: string[] = [];
   const pageErrors: string[] = [];
   const requiredCheckIds = [${idList}];
+  // These contract obligations describe the health of this complete run. The
+  // harness owns their evidence because it alone sees every workflow result,
+  // failed response, console error, and page error.
+  const foundryOwnedBrowserHealthCheckIds = [${browserHealthIdList}];
   // Per-check ceiling. A workflow check signs in, submits, and waits on a
   // result, so it needs real time; what it must never do is spend the rest of
   // the run waiting for something that is not going to appear.
-  const CHECK_BUDGET_MS = 20_000;
+  const CHECK_BUDGET_MS = ${checkBudgetLiteral};
   const checks: Record<string, boolean> = {};
   const diagnostics: Record<string, Record<string, boolean | number | string | null>> = {};
   for (const id of requiredCheckIds) checks[id] = false;
-
-  page.on("console", (message) => {
-    if (message.type() === "error") consoleErrors.push(message.text());
-  });
-  page.on("pageerror", (error) => pageErrors.push(String(error?.message ?? error)));
   // A workflow check reports one boolean. "added: false" was returned to three
   // consecutive repairs and told none of them whether the form never
   // submitted, the route answered 500, or the row simply rendered somewhere the
@@ -2861,16 +4507,59 @@ test("foundry contract observation", async ({ page }) => {
   // the check that was running when they arrived.
   const failedRequests: { check: string; method: string; url: string; status: number }[] = [];
   let observingCheckId = "setup";
-  page.on("response", (response) => {
-    const status = response.status();
-    if (status < 400 || failedRequests.length >= 25) return;
-    failedRequests.push({
-      check: observingCheckId,
-      method: response.request().method(),
-      url: response.url().slice(0, 200),
-      status,
+  const attachPageEvidence = (observedPage: import("@playwright/test").Page) => {
+    observedPage.on("console", (message) => {
+      if (message.type() === "error") consoleErrors.push(message.text());
     });
+    observedPage.on("pageerror", (error) =>
+      pageErrors.push(String(error?.message ?? error)),
+    );
+    observedPage.on("response", (response) => {
+      const status = response.status();
+      if (status < 400 || failedRequests.length >= 25) return;
+      failedRequests.push({
+        check: observingCheckId,
+        method: response.request().method(),
+        url: response.url().slice(0, 200),
+        status,
+      });
+    });
+  };
+  const expectedClientError = (entry: { check: string; method: string; url: string; status: number }) =>
+    checks[entry.check] === true &&
+    [400, 401, 403, 409, 422].includes(entry.status) &&
+    /\\/api\\//u.test(entry.url);
+  const blockingFailedRequests = () =>
+    failedRequests.filter((entry) => !expectedClientError(entry));
+  // Chromium also writes a generic console error for an expected 4xx. Suppress
+  // one such line only when an exact API response with that status was
+  // observed during a check that ultimately passed. A 404, every 5xx, and any
+  // uncorrelated browser error remain blocking.
+  const blockingConsoleErrors = () => {
+    const expectedStatuses = new Map<number, number>();
+    for (const entry of failedRequests.filter(expectedClientError)) {
+      expectedStatuses.set(
+        entry.status,
+        (expectedStatuses.get(entry.status) ?? 0) + 1,
+      );
+    }
+    return consoleErrors.filter((message) => {
+      const status = Number.parseInt(
+        /status(?: code)? of (\\d{3})/iu.exec(message)?.[1] ?? "",
+        10,
+      );
+      const available = expectedStatuses.get(status) ?? 0;
+      if (available === 0) return true;
+      expectedStatuses.set(status, available - 1);
+      return false;
+    });
+  };
+
+  const probeContext = await browser.newContext({
+    baseURL: process.env.FOUNDRY_PREVIEW_URL,
   });
+  let page = await probeContext.newPage();
+  attachPageEvidence(page);
 
   try {
     await page.setViewportSize({ width: 390, height: 844 });
@@ -2913,7 +4602,15 @@ test("foundry contract observation", async ({ page }) => {
     const narrowNoHorizontalOverflow = narrowOverflow.excess <= 0;
     await page.setViewportSize({ width: 390, height: 844 });
 
+    const phone =
+      phoneNoHorizontalOverflow &&
+      narrowNoHorizontalOverflow &&
+      phoneHeightWithinBudget &&
+      phoneInteractionDensityBounded;
     const responsiveEvidence = {
+      phone,
+      mobile: phone,
+      responsive: phone,
       phoneNoHorizontalOverflow,
       narrowNoHorizontalOverflow,
       phoneHeightWithinBudget,
@@ -2928,49 +4625,48 @@ test("foundry contract observation", async ({ page }) => {
     }
 
     // Accessible keyboard focus and labelling, measured once.
-    await page.keyboard.press("Tab");
-    const focusedTag = await page.evaluate(() => document.activeElement?.tagName ?? null);
-    const keyboardFocusObservable = focusedTag !== null && focusedTag !== "BODY";
+    let keyboardFocusObservable = false;
+    for (let focusAttempt = 0; focusAttempt < 5 && !keyboardFocusObservable; focusAttempt += 1) {
+      await page.keyboard.press("Tab");
+      keyboardFocusObservable = await page.evaluate(() => {
+        const active = document.activeElement;
+        return active instanceof HTMLElement &&
+          !["BODY", "HTML"].includes(active.tagName) &&
+          !active.hasAttribute("disabled");
+      });
+    }
     const labelledControlCount = await page.evaluate(() =>
-      [...document.querySelectorAll("input, select, textarea")].filter((control) => {
+      [...document.querySelectorAll("a[href], button, input, select, textarea")].filter((control) => {
         const id = control.getAttribute("id");
         const labelled =
           (control.getAttribute("aria-label") ?? "").trim().length > 0 ||
+          (control.getAttribute("aria-labelledby") ?? "").trim().length > 0 ||
           (id !== null && document.querySelector('label[for="' + id + '"]') !== null) ||
-          control.closest("label") !== null;
+          control.closest("label") !== null ||
+          (["A", "BUTTON"].includes(control.tagName) && (control.textContent ?? "").trim().length > 0);
         return labelled;
       }).length,
     );
     const accessibleLabellingObserved = labelledControlCount >= 1;
-    const accessibilityEvidence = { keyboardFocusObservable, accessibleLabellingObserved };
+    const accessibility = keyboardFocusObservable && accessibleLabellingObserved;
+    const accessibilityEvidence = {
+      focus: keyboardFocusObservable,
+      labels: accessibleLabellingObserved,
+      accessible: accessibility,
+      accessibility,
+      keyboardFocusObservable,
+      accessibleLabellingObserved,
+    };
 
     await page.setViewportSize({ width: 1280, height: 900 });
     await expect(page.locator("body")).toBeVisible();
+    await probeContext.close();
 
-    // Each check runs in isolation: one failure can never leave another
-    // unobserved, and every check records diagnostics whether it passes or not.
-    //
-    // Isolation used to mean only that a throw was caught. It did not mean the
-    // browser forgot anything, and a build that finally implemented real signup
-    // exposed the difference: the signup check created its account and left the
-    // page on the signed-in view, which has no tablist, so the very next check
-    // waited the whole test budget for a "Sign in" tab that could never appear
-    // and every check after it reported "browser has been closed". Nine
-    // failures, one cause, and a working product marked EXHAUSTED. State is
-    // reset here, before each check, so no check can inherit another's session.
-    const resetBrowserState = async () => {
-      await page.context().clearCookies();
-      await page.goto("/", { waitUntil: "domcontentloaded" });
-      await page.evaluate(() => {
-        try {
-          localStorage.clear();
-          sessionStorage.clear();
-        } catch {
-          // Storage can be unavailable; the cookie clear above is what matters.
-        }
-      });
-      await page.goto("/", { waitUntil: "domcontentloaded" });
-    };
+    // Each check owns a fresh browser context. Promise.race alone does not
+    // cancel timed-out Playwright work: the old action kept running on the same
+    // page while the next check reset and reused it, corrupting every later
+    // result. Closing this context in finally actually cancels the work and
+    // guarantees independent cookies, storage, listeners, and navigation.
     // One stuck locator must cost one check, not the run. Playwright's own
     // timeout applies to the whole test, so without a per-check bound the first
     // check that waits on something absent spends every remaining check's time.
@@ -2990,16 +4686,37 @@ test("foundry contract observation", async ({ page }) => {
         clearTimeout(timer);
       }
     };
+    let repeatedFailureSignature: string | null = null;
+    let repeatedFailureCount = 0;
     for (const id of requiredCheckIds) {
+      if (foundryOwnedBrowserHealthCheckIds.includes(id)) continue;
       const check = obligationChecks[id];
       if (typeof check !== "function") {
         diagnostics[id] = { checkImplemented: false };
         captureProbeErrors.push("No observation supplied for " + id);
         continue;
       }
+      if (repeatedFailureCount >= 2 && repeatedFailureSignature !== null) {
+        diagnostics[id] = {
+          observed: false,
+          blockedByRepeatedSetupFailure: repeatedFailureSignature.slice(0, 240),
+        };
+        captureProbeErrors.push(
+          "Skipped " + id + " because two isolated checks already failed identically: " +
+          repeatedFailureSignature.slice(0, 240),
+        );
+        continue;
+      }
       observingCheckId = id;
+      let checkContext: import("@playwright/test").BrowserContext | null = null;
       try {
-        await resetBrowserState();
+        checkContext = await browser.newContext({
+          baseURL: process.env.FOUNDRY_PREVIEW_URL,
+          viewport: { width: 1280, height: 900 },
+        });
+        page = await checkContext.newPage();
+        attachPageEvidence(page);
+        await page.goto("/", { waitUntil: "domcontentloaded" });
         // expect is handed to the check because reaching for it is the natural
         // way to write a Playwright assertion. A checks module that used it
         // without importing it once failed the production build itself.
@@ -3011,15 +4728,48 @@ test("foundry contract observation", async ({ page }) => {
             : {};
         checks[id] = passed;
         diagnostics[id] = { ...detail, observed: true };
+        repeatedFailureSignature = null;
+        repeatedFailureCount = 0;
       } catch (error: unknown) {
         checks[id] = false;
+        const failureMessage = error instanceof Error ? error.message : String(error);
         diagnostics[id] = {
           observed: true,
-          threw: (error instanceof Error ? error.message : String(error)).slice(0, 300),
+          threw: failureMessage.slice(0, 300),
         };
+        const signature = /Check exceeded its own observation budget/u.test(failureMessage)
+          ? "check-timeout"
+          : failureMessage.replace(/\\d+/gu, "#").slice(0, 180);
+        if (signature === repeatedFailureSignature) repeatedFailureCount += 1;
+        else {
+          repeatedFailureSignature = signature;
+          repeatedFailureCount = 1;
+        }
+      } finally {
+        await checkContext?.close();
       }
     }
+    const customerWorkflowCheckIds = requiredCheckIds.filter(
+      (id) => !foundryOwnedBrowserHealthCheckIds.includes(id),
+    );
+    for (const id of foundryOwnedBrowserHealthCheckIds) {
+      const workflowsPassed = customerWorkflowCheckIds.every(
+        (checkId) => checks[checkId] === true,
+      );
+      const noBlockingBrowserErrors =
+        captureProbeErrors.length === 0 &&
+        blockingConsoleErrors().length === 0 &&
+        pageErrors.length === 0 &&
+        blockingFailedRequests().length === 0;
+      checks[id] = workflowsPassed && noBlockingBrowserErrors;
+      diagnostics[id] = {
+        observed: true,
+        workflowsPassed,
+        noBlockingBrowserErrors,
+      };
+    }
   } finally {
+    await probeContext.close().catch(() => {});
     console.log(
       "FOUNDRY_BROWSER_RESULT:" +
         JSON.stringify({
@@ -3035,7 +4785,7 @@ test("foundry contract observation", async ({ page }) => {
           ],
           checks,
           diagnostics,
-          consoleErrors,
+          consoleErrors: blockingConsoleErrors(),
           pageErrors,
         }),
     );
@@ -3046,7 +4796,7 @@ test("foundry contract observation", async ({ page }) => {
 
 // Foundry's harness is the only thing permitted to emit the evidence marker:
 // two markers would make the observation ambiguous.
-export function bindFoundryObservationHarness(plan, requiredCheckIds) {
+export function bindFoundryObservationHarness(plan, requiredCheckIds, options = {}) {
   if (!Array.isArray(plan?.files) || (requiredCheckIds ?? []).length === 0) {
     return plan;
   }
@@ -3069,7 +4819,7 @@ export function bindFoundryObservationHarness(plan, requiredCheckIds) {
       ...retained.filter((file) => file.path !== "tests/foundry-observation.spec.ts"),
       {
         path: "tests/foundry-observation.spec.ts",
-        content: foundryObservationHarness(requiredCheckIds),
+        content: foundryObservationHarness(requiredCheckIds, options),
         contractRequirementIds: traceIds.length > 0 ? traceIds : ["approved-design-direction"],
       },
     ],
@@ -3077,8 +4827,7 @@ export function bindFoundryObservationHarness(plan, requiredCheckIds) {
 }
 
 export function bindApprovedPrototypeBrowserEvidence(plan, approvedContract) {
-  const approved = approvedContract?.productBlueprint?.designSpecification?.approvedDesignContract ?? null;
-  if (approved === null || !Array.isArray(plan?.files)) return plan;
+  if (!Array.isArray(plan?.files)) return plan;
 
   const browserSource = plan.files
     .filter((file) => /^tests\/.*\.(?:spec|test)\.(?:js|jsx|ts|tsx)$/u.test(file.path))
@@ -3301,7 +5050,10 @@ export function bundleBudgetInstruction(approvedContract) {
   ].join(" ");
 }
 
-export function approvedDesignPromptSegments(approvedContract) {
+export function approvedDesignPromptSegments(
+  approvedContract,
+  approvedPrototypeSource = null,
+) {
   if (approvedContract === null || typeof approvedContract !== "object") {
     return [];
   }
@@ -3355,7 +5107,8 @@ export function approvedDesignPromptSegments(approvedContract) {
     "Derive every expected value from the page, never from what you believe the code computes. To check a displayed count, total or summary, count the elements that genuinely satisfy the condition and compare the display to that count -- do not assert it equals a number you worked out yourself. A dashboard whose \"open\" count wrongly included pending tickets passed its own check because the check asserted the literal the buggy code happened to produce; had it counted the rows actually marked open, it would have failed. A literal is only acceptable when your own test typed it in.",
     "After an action that reaches the server — submitting a form, signing in, saving — assert with a locator that waits, such as await expect(locator).toBeVisible() or await locator.waitFor(). isVisible() and textContent() read the DOM at that instant and will report the state from before the request resolved. Return the verdict from the waited assertion, not from an immediate read.",
     "Foundry clears cookies and storage and reloads the page before each check, so write every check as if it starts signed out on a fresh load. Do not rely on state a previous check established, and do not repeat the reset yourself.",
-    "The customer approved a specific visual design. Reproduce that approved design in the generated source; do not substitute your own art direction, palette, type scale, or layout.",
+    "The customer approved a specific visual design. Build a faithful production evolution of that design; do not substitute your own art direction, palette, type scale, layout, or interaction model.",
+    "Treat the approved prototype as the design floor, not the finish ceiling. Preserve its recognizable composition, hierarchy, navigation, tokens, responsive transformation, and personality while elevating production polish through precise alignment, coherent spacing, complete hover/focus/pressed/loading/error/success states, refined typography, purposeful transitions, stronger content finish, and accessible interaction. Elevation may improve execution quality but may not change the creative thesis, rearrange the approved surface sequence, introduce excluded features, or turn the product into a generic shell.",
     "Implement the approved color tokens, typography system, and spacing scale as real CSS applied to real elements. Declaring unused custom properties is not implementing the design.",
     "Follow the approved surface sequence, navigation model, and composition rules so the produced pages match the approved prototype's structure and visual order.",
     "Honor the approved responsive, interaction, motion, and accessibility rules. Respect the approved deliberate exclusions: do not add surfaces or components the design excluded.",
@@ -3386,11 +5139,33 @@ export function approvedDesignPromptSegments(approvedContract) {
     segments.push(
       "A real browser compares the produced pages against the approved prototype's recorded evidence at phone, tablet, and desktop widths. Composition, palette, and type must survive that comparison.",
     );
+    if (
+      approvedPrototypeSource !== null &&
+      approvedPrototypeSource.approvedDesignId === design.approvedDesignId &&
+      approvedPrototypeSource.prototypeContentHash === design.prototypeContentHash &&
+      Array.isArray(approvedPrototypeSource.files)
+    ) {
+      segments.push(
+        [
+          "APPROVED LIVE PROTOTYPE SOURCE — IMMUTABLE DESIGN BASELINE",
+          "These are the integrity-verified HTML, CSS, and interaction files that produced the prototype the customer selected. Read their actual structure and styling before generating production source. Rebuild them safely for the certified production stack; do not copy sandbox-only assumptions, but do preserve the visible composition and interaction character while applying the production-elevation rules above.",
+          JSON.stringify(approvedPrototypeSource),
+        ].join("\n"),
+      );
+    }
   }
   return segments;
 }
 
-function bundlePrompt(profile, contract, bindings, approvedContract = null, engineeringSignals = null) {
+function bundlePrompt(
+  profile,
+  contract,
+  bindings,
+  approvedContract = null,
+  engineeringSignals = null,
+  performancePolicy = null,
+  approvedPrototypeSource = null,
+) {
   const browserChecks = contract.obligations
     .filter(
       (obligation) =>
@@ -3410,6 +5185,11 @@ function bundlePrompt(profile, contract, bindings, approvedContract = null, engi
     }));
   return [
     "Generate the complete source bundle for this specific project. This must be an original implementation of the supplied ProjectProfile and Requirement Contract, not a template selected by project keywords.",
+    ...(performancePolicy === null
+      ? []
+      : [
+          `Adaptive production policy: ${performancePolicy.complexity} complexity with a ${Math.round(performancePolicy.targetDurationMs / 60_000)}-minute completion target. Make the first bundle complete and internally consistent so generation, build, browser behavior, and approved-design fidelity can pass in one pipeline. Do not trade away requirements or evidence to meet the target.`,
+        ]),
     `Use the selected certified stack package versions exactly: ${JSON.stringify(CERTIFIED_PROJECT_PACKAGE_VERSIONS)}.`,
     "The application must be production-buildable, use a real SQLite database below data/, expose GET /api/health returning HTTP 200, and bind the production server using npm run start.",
     "Every App Router page requires app/layout.tsx (or an equivalent root layout). package.json must provide build, start, typecheck, lint, and test scripts.",
@@ -3419,11 +5199,14 @@ function bundlePrompt(profile, contract, bindings, approvedContract = null, engi
     "When tab navigation returns to a completed multi-step creation workflow, reset that workflow to its first usable step so its primary inputs are visible again.",
     'If source uses the @/ import alias, tsconfig.json must define a valid compilerOptions.paths["@/*"] mapping; otherwise use resolvable relative imports.',
     'When the lint script scans the project root, its ESLint configuration must explicitly ignore ".next" build output.',
-    "For certified Next.js 15.4.4, adapt next/core-web-vitals and next/typescript through FlatCompat from @eslint/eslintrc (with the .next ignore in the exported array); do not use Next.js 16-style direct eslint-config-next flat imports.",
+    "For certified Next.js 15.5.23, adapt next/core-web-vitals and next/typescript through FlatCompat from @eslint/eslintrc (with the .next ignore in the exported array); do not use Next.js 16-style direct eslint-config-next flat imports.",
     "Because eslint.config.mjs is ESM, derive __dirname from import.meta.url before passing it to FlatCompat; never reference an undefined CommonJS __dirname global.",
     "Do not use explicit any types. Give better-sqlite3 query rows concrete result types, including SELECT COUNT aliases such as { c: number }.",
     "Include a valid app/icon or public/favicon resource so the real browser does not generate a missing decorative-resource error.",
     "SQLite connection, schema initialization, migrations, PRAGMAs, and seeding must run lazily in the application runtime, never as module-import side effects during Next.js build route collection. Importing route modules in parallel must not mutate or lock the database.",
+    "Next.js app/api/**/route.ts files are framework entry modules. Export only HTTP handlers and supported Next.js route metadata from them. Never export an authentication, database, or domain helper from a route file and never import one route file from another source module; put shared logic in lib/ and import that library from every route that needs it.",
+    "A GET endpoint used by the page to discover an optional session or signed-out state must return HTTP 200 with an explicit empty value such as { user: null }. Do not use a routine 401 or 404 for expected initial signed-out state because the browser reports it as a blocking resource error; reserve error status codes for genuinely protected actions and invalid mutations.",
+    "When a client performs an asynchronous initial session lookup, keep the authentication surface in an explicit resolving state until it finishes, and prevent a late signed-out response from overwriting a successful sign-up or sign-in. Use cancellation or a request/authentication version guard when the lookup can overlap a user action.",
     "In SQLite SQL, use single quotes for string literals such as datetime('now'); never use double quotes around literal values because SQLite treats them as identifiers. Keep route mutations and the initialized table columns exactly aligned.",
     "Include package.json, TypeScript/Next/ESLint configuration, all application files, API routes as needed, durable SQLite behavior when required by the contract, Playwright configuration using channel chrome and FOUNDRY_PREVIEW_URL, and one real browser verification test.",
     "Do not configure Playwright webServer or start another application process from the test configuration. Foundry's Runtime & Preview Service exclusively owns the already-ready application process and supplies its URL through FOUNDRY_PREVIEW_URL.",
@@ -3437,12 +5220,24 @@ function bundlePrompt(profile, contract, bindings, approvedContract = null, engi
     "Do not write a Playwright spec file and do not emit FOUNDRY_BROWSER_RESULT. Foundry generates tests/foundry-observation.spec.ts, which owns the evidence marker, console and page error capture, per-check isolation, and the shared phone-layout and accessibility measurements. A spec file you write that emits the marker is discarded.",
     "Write exactly one observation file, tests/foundry-checks.ts, exporting `export const obligationChecks: Record<string, (context: { page: any; expect: any; responsiveEvidence: Record<string, boolean>; accessibilityEvidence: Record<string, boolean> }) => Promise<{ passed: boolean; diagnostics: Record<string, boolean | number | string | null> }>> = { ... }` with one entry keyed by each exact supplied checkId. Take expect from the supplied context rather than importing it; the file must import nothing from @playwright/test.",
     "Each entry drives the running UI with Playwright through `context.page` and returns { passed, diagnostics }. passed must be computed from what the browser actually showed. diagnostics names the sub-observations behind that verdict, so a false verdict identifies its exact failed predicate. Do not initialize arrays, attach listeners, catch your own errors, or print anything: the harness does all of it.",
-    "For a check about phone layout use context.responsiveEvidence, and for a check about keyboard focus or labelling use context.accessibilityEvidence, rather than measuring those again. Combine them with your own project-specific observations.",
+    "The harness clears browser cookies and storage between checks, but it deliberately preserves the real SQLite database. Any account email, username, list name, or other unique record created by a check must therefore be generated inside that check or helper invocation. Never declare a reusable identity once at module load, including a template using Date.now(), because every later check will submit the same value and receive a conflict or 422 response.",
+    "Every check that observes a protected or authenticated surface must establish its own unique account/session inside that same check before locating dashboard content. This includes composition, navigation, responsive, visual-character, and accessibility checks; none may inspect the signed-out page and claim that as evidence for a protected dashboard.",
+    "A login obligation must prove login, not merely reveal the login form. Create a unique account, sign out, switch to login, refill the exact saved email and password, submit the login form, and wait for the authenticated surface. Have the account helper return those credentials so this remains isolated inside the same check.",
+    "Use semantic, scoped Playwright locators for actions and computed-style reads. Never call click, fill, evaluate, or similar strict operations on an unscoped visual class such as .primary; several controls may share it. A literal getByLabel action must pass { exact: true }, because Playwright also matches longer accessible names such as Todo workspace and Daily todo progress. Prefer getByRole with an exact accessible name, or scope to the exact region and select one deliberate element.",
+    "For a native HTML form, use page.locator('form') (optionally scoped to a stable ancestor). Do not use getByRole('form') unless the application gives that form an explicit accessible name; unnamed forms are not reliably exposed as ARIA form landmarks and the locator can wait until the check budget expires.",
+    "Next.js renders its own hidden route announcer with role=alert. When observing an application validation alert, locate the application's stable alert element or exclude #__next-route-announcer__; an unscoped getByRole('alert') is ambiguous even when the application has exactly one visible error.",
+    "When a browser check asserts an exact computed color, font, spacing, or other visual token, explicitly apply that approved token to the exact element the check measures. A declared but unused CSS custom property does not make the rendered value match.",
+    "For a check about the initial public page's phone layout use context.responsiveEvidence, and for a check about that page's keyboard focus or labelling use context.accessibilityEvidence rather than measuring those again. The shared aliases are responsiveEvidence.phone/mobile/responsive and accessibilityEvidence.focus/labels/accessible; the detailed measured fields remain available too. Shared evidence is never proof of a protected post-authentication surface: authenticate inside that check, then set the required viewport or press Tab and measure the actual protected UI directly.",
+    "If the application resolves an initial session, account, hydration, or readiness request before rendering its interactive surface, every check that navigates or reloads must await a stable expected control after that request before counting controls, pressing Tab, or measuring layout. domcontentloaded proves only that HTML arrived; it does not prove the client-rendered authentication surface is ready.",
+    "The shared responsive evidence is measured at phone width, but the harness restores the page to desktop before running project-specific checks. If a responsive check also expects a mobile-only control or navigation treatment to be visible, that check must set a 280-480px viewport itself before locating the mobile-only element.",
     // The project type-checks under noImplicitAny, and an unannotated callback
     // parameter inside a page.evaluate or an array callback is the one error
     // that kept reaching the repair loop for something a type annotation
     // prevents outright.
     "tests/foundry-checks.ts is type-checked with noImplicitAny. Annotate every parameter you introduce, including callback parameters inside page.evaluate, map, filter, and find — write (element: Element) or (entry: string) rather than (e). Inside page.evaluate the callback runs in the browser, so annotate its parameters and any DOM values you read.",
+    "Use valid TypeScript syntax for every helper return type. An async arrow helper is `const act = async (...): Promise<void> => { ... }`; never omit the closing `>` before `=>`.",
+    "Never use eval, new Function, Function(), or any other string-to-code execution in application or observation code. For arithmetic, parse operands and apply explicit +, -, *, and / branches. The browser check must calculate its expectation independently from test-controlled operands; it must not call the application's evaluator or evaluate expression text read back from the page.",
+    "A literal deliberately entered by the browser check retains test provenance when it is passed through a local Playwright interaction helper. Keep that input action and its resulting observation in the same check so deterministic admission can verify the provenance without mistaking it for a hard-coded application total.",
     "Do not prove error handling by intentionally requesting a nonexistent resource or an HTTP 4xx/5xx endpoint, because that creates a blocking browser console error. Exercise a visible client-side validation or recovery path that prevents the invalid request, while still observing the real error message and recovery behavior.",
     "For mutable availability such as appointment times, select an observed enabled control at runtime. Never hard-code a slot that an earlier step may have consumed or disabled.",
     "Locate an asynchronously loaded booking slot by its semantic accessible label, not by a visual class shared with Back or secondary-action buttons.",
@@ -3466,7 +5261,7 @@ function bundlePrompt(profile, contract, bindings, approvedContract = null, engi
     ),
     bundleBudgetInstruction(approvedContract),
     "Do not include node_modules, package-lock.json, build output, binary content, or markdown fences. The Execution Engine, not the model, owns lockfile creation.",
-    ...approvedDesignPromptSegments(approvedContract),
+    ...approvedDesignPromptSegments(approvedContract, approvedPrototypeSource),
     `ProjectProfile:\n${JSON.stringify(
       generationProfileView(profile, approvedContract),
     )}`,
@@ -3761,16 +5556,12 @@ export function createProductionMissionService({
     );
     const installCount = countProcedure("install");
     const rebuildCount = countProcedure("productionBuild");
-    const runtimeStartCount =
-      replayedEvents === null
-        ? runtime
-            .listSessions(missionId)
-            .filter((record) => record.eventType === "STARTUP").length
-        : replayedEvents.filter(
-            (record) =>
-              record.fact?.metadata?.runtimeRecord?.eventType ===
-              "STARTUP",
-          ).length;
+    const runtimeRecords = replayedEvents === null
+      ? runtime.listSessions(missionId)
+      : replayedEvents
+          .map((record) => record.fact?.metadata?.runtimeRecord)
+          .filter(Boolean);
+    const runtimeRestartCount = runtimeRestartCountForRecords(runtimeRecords);
     const latestVerdict = (replayedEvents ?? ledger.listEvents(missionId))
       .map((record) => record.completionVerdict)
       .filter(Boolean)
@@ -3798,11 +5589,11 @@ export function createProductionMissionService({
       repeatedPipelineCost:
         Math.max(0, installCount - 1) +
         Math.max(0, rebuildCount - 1) +
-        Math.max(0, runtimeStartCount - 1),
+        runtimeRestartCount,
       installCount,
       reinstallCount: Math.max(0, installCount - 1),
       rebuildCount,
-      runtimeRestartCount: Math.max(0, runtimeStartCount - 1),
+      runtimeRestartCount,
       providerCallCount: modelCalls.reduce(
         (total, call) =>
           total + (call.costMetadata?.attemptCount ?? 0),
@@ -3991,29 +5782,84 @@ export function createProductionMissionService({
               (obligation) => obligation.obligationId,
             ),
           );
-      const requiredBrowserCheckIds = Object.entries(bindings)
-        .filter(
-          ([obligationId, binding]) =>
-            binding === "browser-check" &&
-            (approvedObligationIds === null || approvedObligationIds.has(obligationId)),
-        )
-        .map(([obligationId]) => obligationId)
-        .sort((left, right) => left.localeCompare(right));
-      const responsiveBrowserCheckIds = contract.obligations
+      const requiredBrowserCheckIds = contract.obligations
         .filter(
           (obligation) =>
-            bindings[obligation.obligationId] === "browser-check" &&
-            /\b(?:phone|mobile|responsive|small[- ]screen|narrow viewport|touch target)\b/iu.test(
-              obligation.statement,
-            ),
+            (bindings[obligation.obligationId] === "browser-check" ||
+              (obligation.origin !== "foundry-derived" &&
+                obligationRequiresCredentialLoginProof(
+                  obligation.statement,
+                ))) &&
+            (approvedObligationIds === null ||
+              approvedObligationIds.has(obligation.obligationId)),
         )
         .map((obligation) => obligation.obligationId)
         .sort((left, right) => left.localeCompare(right));
+      const responsiveBrowserCheckIds = responsiveBrowserCheckIdsForContract(
+        contract.obligations,
+        bindings,
+      );
       const accessibilityBrowserCheckIds = contract.obligations
         .filter(
           (obligation) =>
             bindings[obligation.obligationId] === "browser-check" &&
             /\b(?:keyboard|accessible|accessibility|focus|labelled|labeled)\b/iu.test(
+              obligation.statement,
+            ),
+        )
+        .map((obligation) => obligation.obligationId)
+        .sort((left, right) => left.localeCompare(right));
+      const projectHasAuthenticationBoundary = GATEWAY_STATEMENT.test(
+        JSON.stringify({
+          summary: profile.summary,
+          journeys: profile.primaryJourneys,
+          outcomes: profile.outcomes,
+          capabilities: profile.capabilities,
+        }),
+      );
+      const foundryOwnedBrowserHealthCheckIds = contract.obligations
+        .filter(
+          (obligation) =>
+            bindings[obligation.obligationId] === "browser-check" &&
+            isFoundryOwnedBrowserHealthObligation(obligation.statement),
+        )
+        .map((obligation) => obligation.obligationId)
+        .sort((left, right) => left.localeCompare(right));
+      const foundryOwnedBrowserHealthCheckIdSet = new Set(
+        foundryOwnedBrowserHealthCheckIds,
+      );
+      const authenticatedBrowserCheckIds = projectHasAuthenticationBoundary
+        ? contract.obligations
+            .filter(
+              (obligation) =>
+                bindings[obligation.obligationId] === "browser-check" &&
+                !foundryOwnedBrowserHealthCheckIdSet.has(
+                  obligation.obligationId,
+                ) &&
+                obligationRequiresAuthenticatedSurface(obligation.statement),
+            )
+            .map((obligation) => obligation.obligationId)
+            .sort((left, right) => left.localeCompare(right))
+        : [];
+      const loginBrowserCheckIds = contract.obligations
+        .filter(
+          (obligation) =>
+            requiredBrowserCheckIds.includes(obligation.obligationId) &&
+            // Foundry-derived checks cover composition, accessibility, and
+            // whole-run health. Their prose can legitimately mention the
+            // sign-in surface, but the customer-derived workflow obligation
+            // remains the authority for saved-credential login proof.
+            obligation.origin !== "foundry-derived" &&
+            obligationRequiresCredentialLoginProof(obligation.statement),
+        )
+        .map((obligation) => obligation.obligationId)
+        .sort((left, right) => left.localeCompare(right));
+      const authenticationErrorBrowserCheckIds = contract.obligations
+        .filter(
+          (obligation) =>
+            bindings[obligation.obligationId] === "browser-check" &&
+            obligation.origin !== "foundry-derived" &&
+            obligationRequiresAuthenticationErrorProof(
               obligation.statement,
             ),
         )
@@ -4033,10 +5879,26 @@ export function createProductionMissionService({
           ? projectBundleSchema
           : CONTRACT_BOUND_BUNDLE_SCHEMA;
       const engineeringSignals = detectEngineeringSignals(profile, null);
+      const performancePolicy = productionPerformancePolicy({
+        profile,
+        approvedContract,
+      });
+      const approvedPrototypeContract = comparablePrototypeDesign(approvedContract);
+      const approvedPrototypeSource =
+        approvedPrototypeContract !== null &&
+          typeof prototypeFidelity?.loadApprovedPrototypeSource === "function"
+          ? prototypeFidelity.loadApprovedPrototypeSource({
+              approvedDesignContract: approvedPrototypeContract,
+            })
+          : null;
       const repairBudgets = productionRepairBudgets({
         approvedPrototype:
           approvedContract?.productBlueprint?.designSpecification
             ?.approvedDesignContract != null,
+        performancePolicy,
+        stateful:
+          engineeringSignals.has(EngineeringSignal.CREDENTIALS) ||
+          engineeringSignals.has(EngineeringSignal.PERSISTENCE),
       });
       const priorGenerationCalls = models
         .listCalls(missionId)
@@ -4046,13 +5908,40 @@ export function createProductionMissionService({
               call.requestId.startsWith(generationCorrectionPrefix)) &&
             call.status === "SUCCEEDED",
         );
+      const certifiedFastLaneBundle =
+        priorGenerationCalls.length === 0 &&
+        certifiedAuthenticationFastLaneEligible({
+          approvedContract,
+          complexity: performancePolicy.complexity,
+        })
+          ? createCertifiedAuthenticationFastLaneBundle({
+              approvedContract,
+              browserCheckIds: requiredBrowserCheckIds,
+              authenticatedCheckIds: authenticatedBrowserCheckIds,
+            })
+          : null;
       let generation =
         priorGenerationCalls.length === 0
-          ? await requestModel({
+          ? certifiedFastLaneBundle !== null
+            ? {
+                requestId: `${generationRequestId}-certified-fast-lane`,
+                structuredOutput: certifiedFastLaneBundle,
+                tokenMetadata: { inputTokens: 0, outputTokens: 0 },
+                costMetadata: { attemptCount: 0, costUsd: 0 },
+              }
+            : await requestModel({
               requestId: generationRequestId,
               missionId,
               workUnitId: `${generationRequestId}-plan`,
-              purpose: bundlePrompt(profile, contract, bindings, approvedContract, engineeringSignals),
+              purpose: bundlePrompt(
+                profile,
+                contract,
+                bindings,
+                approvedContract,
+                engineeringSignals,
+                performancePolicy,
+                approvedPrototypeSource,
+              ),
               taskClass: ModelTaskClass.FILE_GENERATION,
               contextReferences: [
                 { kind: "contract", id: `${missionId}-contract` },
@@ -4069,11 +5958,16 @@ export function createProductionMissionService({
               structuredOutputValidator: undefined,
               idempotencyKey: `${generationRequestId}-key`,
               sensitiveValues: [],
-            })
+              })
           : {
               requestId: priorGenerationCalls.at(-1).requestId,
-              structuredOutput:
-                priorGenerationCalls.at(-1).structuredOutput,
+              // Scoped admission corrections are deliberately stored as only
+              // the affected files. Rebuild the current full bundle on resume
+              // so a Foundry restart cannot mistake the last small patch for
+              // the whole project.
+              structuredOutput: reconstructGenerationOutput(
+                priorGenerationCalls,
+              ),
               tokenMetadata: priorGenerationCalls.at(-1).tokenMetadata,
               costMetadata: priorGenerationCalls.at(-1).costMetadata,
             };
@@ -4101,6 +5995,10 @@ export function createProductionMissionService({
             structuredOutput: bindFoundryObservationHarness(
               generation.structuredOutput,
               requiredBrowserCheckIds,
+              {
+                checkBudgetMs: performancePolicy.browserCheckBudgetMs,
+                foundryOwnedBrowserHealthCheckIds,
+              },
             ),
           };
           validatedFiles = validateProjectBundleForStack(
@@ -4110,6 +6008,10 @@ export function createProductionMissionService({
               {
                 responsiveCheckIds: responsiveBrowserCheckIds,
                 accessibilityCheckIds: accessibilityBrowserCheckIds,
+                authenticatedCheckIds: authenticatedBrowserCheckIds,
+                loginCheckIds: loginBrowserCheckIds,
+                authenticationErrorCheckIds:
+                  authenticationErrorBrowserCheckIds,
               },
             ),
             requiredBrowserCheckIds,
@@ -4117,6 +6019,8 @@ export function createProductionMissionService({
             {
               responsiveCheckIds: responsiveBrowserCheckIds,
               accessibilityCheckIds: accessibilityBrowserCheckIds,
+              authenticatedCheckIds: authenticatedBrowserCheckIds,
+              loginCheckIds: loginBrowserCheckIds,
             },
           );
           // Deterministic, before any dependency install or build. A violation
@@ -4139,17 +6043,42 @@ export function createProductionMissionService({
           }
           const correctionSequence = correctionCount + 1;
           const requestId = `${generationCorrectionPrefix}${correctionSequence}`;
-          generation = await requestModel({
+          const scopedPaths = approvedContract === null
+            ? []
+            : admissionCorrectionPaths(
+                error,
+                generation.structuredOutput.files,
+              );
+          const scopedFiles = generation.structuredOutput.files.filter((file) =>
+            scopedPaths.includes(file.path),
+          );
+          const correction = await requestModel({
             requestId,
             missionId,
             workUnitId: `${requestId}-plan`,
-            purpose: [
-              bundlePrompt(profile, contract, bindings, approvedContract, engineeringSignals),
-              "The prior generated bundle failed deterministic certified-stack admission before any dependency installation or build was run.",
-              `Admission failure: ${error.message}`,
-              "Return the complete corrected bundle. Preserve valid project behavior and fix the structural stack defect; do not remove obligations or weaken verification.",
-              `Prior bundle:\n${JSON.stringify(generation.structuredOutput.files)}`,
-            ].join("\n\n"),
+            purpose: scopedPaths.length > 0
+              ? [
+                  "Correct a deterministic certified-stack admission defect in the named generated files. Every approved requirement and explicit exclusion in the binding task contract remains authoritative.",
+                  `Admission failure:\n${error.message}`,
+                  `Return complete corrected contents for only these paths: ${scopedPaths.join(", ")}. Do not return or rewrite any other file. Preserve the valid behavior, contract traces, and public design outside this scope; do not weaken verification.`,
+                  "Never use eval, new Function, Function(), or string-to-code execution. Use valid TypeScript generic syntax. Browser expectations must be independent from application implementation, while values deliberately entered through a Playwright interaction helper retain test provenance.",
+                  `Current affected files:\n${JSON.stringify(scopedFiles)}`,
+                ].join("\n\n")
+              : [
+                  bundlePrompt(
+                    profile,
+                    contract,
+                    bindings,
+                    approvedContract,
+                    engineeringSignals,
+                    performancePolicy,
+                    approvedPrototypeSource,
+                  ),
+                  "The prior generated bundle failed deterministic certified-stack admission before any dependency installation or build was run.",
+                  `Admission failure: ${error.message}`,
+                  "Return the complete corrected bundle. Preserve valid project behavior and fix the structural stack defect; do not remove obligations or weaken verification.",
+                  `Prior bundle:\n${JSON.stringify(generation.structuredOutput.files)}`,
+                ].join("\n\n"),
             taskClass: ModelTaskClass.FILE_GENERATION,
             contextReferences: [
               { kind: "contract", id: `${missionId}-contract` },
@@ -4158,13 +6087,34 @@ export function createProductionMissionService({
                 id: workspace.currentCheckpointId,
               },
             ],
-            expectedStructuredOutputSchema: generationSchema,
+            expectedStructuredOutputSchema: scopedPaths.length > 0
+              ? repairPatchSchemaScopedToPaths(
+                  wholeFileRepairSchema,
+                  scopedPaths,
+                )
+              : generationSchema,
             // Keep semantic admission in this loop so the same immutable
             // contract is applied to every bounded correction attempt.
             structuredOutputValidator: undefined,
             idempotencyKey: `${requestId}-key`,
             sensitiveValues: [],
           });
+          generation = scopedPaths.length > 0
+            ? {
+                ...correction,
+                structuredOutput: mergeAdmissionCorrection(
+                  generation.structuredOutput,
+                  correction.structuredOutput,
+                  scopedPaths,
+                ),
+              }
+            : {
+                ...correction,
+                structuredOutput: mergeCompleteAdmissionCorrection(
+                  generation.structuredOutput,
+                  correction.structuredOutput,
+                ),
+              };
         }
       }
       const bundle = {
@@ -4241,13 +6191,16 @@ export function createProductionMissionService({
         rehydratedBeforeCommands = true;
       }
 
-      for (const [mode, procedureName, timeoutMs] of [
-        ["dependency-lock", "dependencyLock", 600_000],
+      const initialCommandPipeline = [
+        ...(certifiedFastLaneBundle === null
+          ? [["dependency-lock", "dependencyLock", 600_000]]
+          : []),
         ["dependency-install", "install", 600_000],
         ["type-check", "typeCheck", 300_000],
         ["lint", "lint", 300_000],
         ["production-build", "productionBuild", 600_000],
-      ]) {
+      ];
+      for (const [mode, procedureName, timeoutMs] of initialCommandPipeline) {
         if (
           rehydratedBeforeCommands &&
           (mode === "dependency-lock" || mode === "dependency-install")
@@ -4333,6 +6286,14 @@ export function createProductionMissionService({
                 record.workUnitId.includes(
                   `repair-${safeName(procedureName)}-`,
                 ),
+            );
+          const repairPrefix = `${contractRequestNamespace}-${safeName(procedureName)}-repair-`;
+          const priorRepairCalls = models
+            .listCalls(missionId)
+            .filter(
+              (call) =>
+                call.requestId.startsWith(repairPrefix) &&
+                call.status === "SUCCEEDED",
             );
           const failureClassification = classifyProductionFailure({
             stage: procedureName,
@@ -4429,7 +6390,7 @@ ${failureEvidence.payload.stderr}`,
             }
             continue;
           }
-          if (priorRepairs.length >= repairBudgets.procedureRepairCalls) {
+          if (priorRepairCalls.length >= repairBudgets.procedureRepairCalls) {
             orchestrator.transition({
               missionId,
               eventId: `${missionId}-${safeName(procedureName)}-repairs-exhausted`,
@@ -4469,7 +6430,6 @@ ${failureEvidence.payload.stderr}`,
                 relativePath: file.path,
               }),
             }));
-          const repairPrefix = `${contractRequestNamespace}-${safeName(procedureName)}-repair-`;
           const nextRepairRequestId = () =>
             `${repairPrefix}${
               models
@@ -4480,18 +6440,10 @@ ${failureEvidence.payload.stderr}`,
           let repairRequestId = nextRepairRequestId();
           const repairRequirementIds =
             targets.length > 0 ? targets : generationTargetIds;
-          const repairFileSchema = contractTraceSchema({
-            type: "object",
-            additionalProperties: false,
-            required: ["path", "content"],
-            properties: {
-              path: {
-                type: "string",
-                minLength: 1,
-              },
-              content: { type: "string", minLength: 8 },
-            },
-          }, approvedContract !== null);
+          const repairFileSchema = contractTraceSchema(
+            wholeFileRepairSchema,
+            approvedContract !== null,
+          );
           // A rejected repair proposal is a correctable model mistake, not a
           // reason to end the mission. Model Gateway classifies its own
           // semantic rejection as terminal, so without this the first slightly
@@ -4519,8 +6471,9 @@ ${failureEvidence.payload.stderr}`,
                   ]),
               `The real ${procedureName} procedure failed for the generated project.`,
               `Deterministic repair classification: ${failureClassification.scope}. Hypothesis: ${failureClassification.hypothesis}`,
-              "Diagnose the observed output and return the complete corrected content of exactly one source or configuration file.",
-              "The path may identify an existing file or one missing file inside an existing generated directory. Do not target dependencies, build output, data, secrets, or a lockfile.",
+              `Diagnose the observed output and return a files array containing the complete corrected content of every implicated source or configuration file, up to ${MAX_REPAIR_FILES_PER_PROPOSAL}. Use one entry per path and include all sides of a cross-file contract in this one repair.`,
+              "Each path may identify an existing file or a missing file inside an existing generated directory. Do not target dependencies, build output, data, secrets, or a lockfile.",
+              "When a Next.js route entry exports a shared helper, move that helper into a non-route lib module and update the route plus every importer together. Do not alternate between an illegal route export and broken imports.",
               "Fix the underlying project defect. Do not weaken TypeScript, lint, build, tests, the Requirement Contract, or runtime behavior.",
               `Observed stdout:\n${failureEvidence.payload.stdout}`,
               `Observed stderr:\n${failureEvidence.payload.stderr}`,
@@ -4535,6 +6488,7 @@ ${failureEvidence.payload.stderr}`,
               `Existing project files:\n${JSON.stringify(currentFiles)}`,
             ].join("\n\n"),
             taskClass: ModelTaskClass.REPAIR_IMPLEMENTATION,
+            requestTimeoutMs: productionRepairModelTimeoutMs(performancePolicy),
             depthLevel: 2,
             routingReason:
               "A bounded generated-source correction is standard engineering.",
@@ -4547,7 +6501,7 @@ ${failureEvidence.payload.stderr}`,
             ],
             expectedStructuredOutputSchema: repairFileSchema,
             structuredOutputValidator(output) {
-              validateGeneratedRepairProposal({
+              validateGeneratedRepairSet({
                 structuredOutput: output,
                 currentFiles,
                 priorStructuredOutputs: models
@@ -4586,58 +6540,40 @@ ${failureEvidence.payload.stderr}`,
             if (proposalAttempt === 2) throw error;
           }
           }
-          const repairMode = validateGeneratedRepairPath(
-            repair.structuredOutput.path,
-            currentFiles,
-          );
-          const currentFile = currentFiles.find(
-            (file) => file.path === repair.structuredOutput.path,
-          );
-          if (
-            currentFile?.content === repair.structuredOutput.content ||
-            models
-              .listCalls(missionId)
-              .some(
-                (call) =>
-                  call.requestId.startsWith(repairPrefix) &&
-                  call.requestId !== repairRequestId &&
-                  call.structuredOutput?.path ===
-                    repair.structuredOutput.path &&
-                  call.structuredOutput?.content ===
-                    repair.structuredOutput.content,
-              )
-          ) {
-            throw new Error(
-              "The proposed source repair repeats an unchanged hypothesis; repeated pipeline work was rejected.",
+          const repairFiles = repairPatchFiles(repair.structuredOutput);
+          for (const repairFile of repairFiles) {
+            const repairMode = validateGeneratedRepairPath(
+              repairFile.path,
+              currentFiles,
             );
-          }
-          const changed = await work(
-            repairMode === "replace"
-              ? WorkUnitAction.REPLACE_FILE
-              : WorkUnitAction.WRITE_FILE,
-            {
-              path: repair.structuredOutput.path,
-              content: repair.structuredOutput.content,
-            },
-            repairRequirementIds,
-            `repair-${procedureName}-${repair.structuredOutput.path}`,
-          );
-          if (changed.status !== WorkUnitStatus.SUCCEEDED) {
-            throw new Error(
-              `The evidence-backed ${procedureName} repair could not be applied.`,
+            const changed = await work(
+              repairMode === "replace"
+                ? WorkUnitAction.REPLACE_FILE
+                : WorkUnitAction.WRITE_FILE,
+              {
+                path: repairFile.path,
+                content: repairFile.content,
+              },
+              repairRequirementIds,
+              `repair-${procedureName}-${repairFile.path}`,
             );
-          }
-          if (repairMode === "write") {
-            bundle.files.push({
-              path: repair.structuredOutput.path,
-              content: repair.structuredOutput.content,
-              ...(approvedContract === null
-                ? {}
-                : {
-                    contractRequirementIds:
-                      repair.structuredOutput.contractRequirementIds,
-                  }),
-            });
+            if (changed.status !== WorkUnitStatus.SUCCEEDED) {
+              throw new Error(
+                `The evidence-backed ${procedureName} repair could not apply ${repairFile.path}.`,
+              );
+            }
+            if (repairMode === "write") {
+              bundle.files.push({
+                path: repairFile.path,
+                content: repairFile.content,
+                ...(approvedContract === null
+                  ? {}
+                  : {
+                      contractRequirementIds:
+                        repair.structuredOutput.contractRequirementIds,
+                    }),
+              });
+            }
           }
         }
       }
@@ -4977,20 +6913,36 @@ ${failureEvidence.payload.stderr}`,
             binding === "structured-tests",
         )
         .map(([obligationId]) => obligationId);
-      const requiredBrowserChecks = Object.entries(bindings)
-        .filter(([, binding]) => binding === "browser-check")
-        .map(([obligationId]) => obligationId)
-        .sort((left, right) => left.localeCompare(right));
-      // An armed deferred shock has no prototype to compare against, so the
-      // fidelity gate is skipped for that build by design.
-      const approvedPrototypeContract = comparablePrototypeDesign(approvedContract);
+      const browserCheckAuthority = browserCheckAuthorityPlan({
+        // RequirementContract intentionally strips approval provenance. The
+        // immutable ApprovedProjectContract retains sourceRequirement, which
+        // is what distinguishes customer workflows from derived design checks.
+        obligations:
+          approvedContract?.acceptanceObligations ?? contract.obligations,
+        bindings,
+        approvedPrototypeContract,
+      });
+      const requiredBrowserChecks = browserCheckAuthority.required;
+      const functionalBrowserChecks = browserCheckAuthority.functional;
+      const approvedDesignBrowserChecks = browserCheckAuthority.design;
+      let authoritativeBrowserCheckOverrides = {};
+      let browserVerificationElapsedMs = 0;
       let browser;
-      for (let attempt = 0; attempt < MAX_BROWSER_OBSERVATION_ATTEMPTS; attempt += 1) {
-        // Fidelity only runs once the browser checks pass, so this must reset
-        // each round. Carrying it forward counted a previous round's aspects
-        // against a round that never measured them, and halted a build that
-        // was in fact converging five, then five, then one.
+      for (
+        let attempt = 0;
+        attempt < performancePolicy.browserObservationAttempts;
+        attempt += 1
+      ) {
+        authoritativeBrowserCheckOverrides = {};
+        // Reset each round. Carrying a previous round's fidelity count into a
+        // round that never measured it makes progress accounting dishonest.
         latestFidelityFailureCount = 0;
+        const browserVerificationRemainingMs = Math.max(
+          1_000,
+          performancePolicy.browserVerificationBudgetMs -
+            browserVerificationElapsedMs,
+        );
+        const browserVerificationStartedAt = Date.now();
         browser = await work(
           WorkUnitAction.RUN_COMMAND,
           {
@@ -4999,13 +6951,20 @@ ${failureEvidence.payload.stderr}`,
               FOUNDRY_PREVIEW_URL: session.previewUrl,
               FOUNDRY_RUNTIME_ACCESS_VALUE: runtimeAccessValue,
             },
-            timeoutMs: 300_000,
+            // A normal project's entire set of real user-action checks gets
+            // one minute across all rounds. A single stuck Playwright process
+            // can no longer consume five minutes by itself.
+            timeoutMs: browserVerificationRemainingMs,
             outputLimitBytes: 1_048_576,
           },
           browserTargets.length > 0
             ? browserTargets
             : generationTargetIds,
           `browser-verification-runtime-${runtimeAttempt}-attempt-${attempt + 1}`,
+        );
+        browserVerificationElapsedMs += Math.max(
+          0,
+          Date.now() - browserVerificationStartedAt,
         );
         const browserEvidence = commandEvidence(
           evidence,
@@ -5037,7 +6996,7 @@ ${failureEvidence.payload.stderr}`,
                 (checkId, index) =>
                   checkId === requiredBrowserChecks[index],
               );
-            const failedChecks = requiredBrowserChecks.filter(
+            const failedChecks = functionalBrowserChecks.filter(
               (checkId) => browserResult.checks[checkId] !== true,
             );
             const blockingErrors = [
@@ -5051,22 +7010,26 @@ ${failureEvidence.payload.stderr}`,
                 `Required: ${JSON.stringify(requiredBrowserChecks)}`,
                 `Observed: ${JSON.stringify(observedCheckIds)}`,
               ].join("\n"));
-            } else if (failedChecks.length > 0) {
-              observationFailures.push(
-                browserCheckObservationFailure(
-                  failedChecks,
-                  browserResult.diagnostics ?? {},
-                  contract.obligations,
-                ),
-              );
-            } else if (blockingErrors.length > 0) {
-              observationFailures.push([
-                "The browser observation recorded blocking errors.",
-                JSON.stringify(blockingErrors),
-              ].join("\n"));
+            } else {
+              if (failedChecks.length > 0) {
+                observationFailures.push(
+                  browserCheckObservationFailure(
+                    failedChecks,
+                    browserResult.diagnostics ?? {},
+                    contract.obligations,
+                  ),
+                );
+              }
+              if (blockingErrors.length > 0) {
+                observationFailures.push([
+                  "The browser observation recorded blocking errors.",
+                  JSON.stringify(blockingErrors),
+                ].join("\n"));
+              }
             }
             if (
-              observationFailures.length === 0 &&
+              exactChecks &&
+              blockingErrors.length === 0 &&
               approvedPrototypeContract !== null
             ) {
               if (typeof prototypeFidelity?.verify !== "function") {
@@ -5159,6 +7122,21 @@ ${failureEvidence.payload.stderr}`,
                         "Correct only the aspects listed above. Each carries its own measurements and, where useful, an explicit remedy: use them directly instead of re-deriving the problem, and leave every passing aspect untouched.",
                       ].join("\n"),
                     );
+                  } else {
+                    // The approved-prototype comparator is the design
+                    // authority. Resolve the contract's derived design checks
+                    // from that verdict while retaining the raw generated
+                    // values in the command evidence for diagnosis.
+                    authoritativeBrowserCheckOverrides = Object.fromEntries(
+                      approvedDesignBrowserChecks.map((checkId) => [checkId, true]),
+                    );
+                    browserResult = {
+                      ...browserResult,
+                      checks: {
+                        ...browserResult.checks,
+                        ...authoritativeBrowserCheckOverrides,
+                      },
+                    };
                   }
                 } catch (error) {
                   observationFailures.push(
@@ -5181,7 +7159,7 @@ ${failureEvidence.payload.stderr}`,
           // explains it, and stops the next repair diagnosing a defect that
           // did not exist a round ago.
           if (browserResult !== undefined) {
-            const nowFalse = requiredBrowserChecks.filter(
+            const nowFalse = functionalBrowserChecks.filter(
               (checkId) =>
                 browserResult.checks[checkId] !== true &&
                 previouslyPassingCheckIds.has(checkId),
@@ -5202,7 +7180,7 @@ ${failureEvidence.payload.stderr}`,
                   : null;
             }
             previouslyPassingCheckIds = new Set(
-              requiredBrowserChecks.filter(
+              functionalBrowserChecks.filter(
                 (checkId) => browserResult.checks[checkId] === true,
               ),
             );
@@ -5268,13 +7246,25 @@ ${failureEvidence.payload.stderr}`,
         const behaviourProven =
           browserResult !== undefined &&
           !nonFidelityFailureOutstanding &&
-          requiredBrowserChecks.every(
+          functionalBrowserChecks.every(
             (checkId) => browserResult.checks[checkId] === true,
           );
+        const browserVerificationBudgetSpent =
+          browserVerificationElapsedMs >=
+          performancePolicy.browserVerificationBudgetMs;
         const acceptWithShortfall = (reason) => {
+          const comparedViewportCount = Array.isArray(
+            latestFidelityVerdict?.comparedViewports,
+          )
+            ? latestFidelityVerdict.comparedViewports.length
+            : latestFidelityVerdict?.comparedViewports ?? null;
           designFidelityShortfall = Object.freeze({
             failedAspects: latestFidelityVerdict?.failedAspects ?? [],
-            comparedViewports: latestFidelityVerdict?.comparedViewports ?? null,
+            // Prototype fidelity retains the exact viewport keys as evidence.
+            // Completion's public shortfall contract intentionally exposes a
+            // count. Passing the evidence array through here crashed a build
+            // after every workflow had already passed.
+            comparedViewports: comparedViewportCount,
             integrityHash: latestFidelityVerdict?.integrityHash ?? null,
             observation: browserFailure,
             reason,
@@ -5287,17 +7277,37 @@ ${failureEvidence.payload.stderr}`,
           // VERIFYING transition, which is where it belongs.
           observationVerified = true;
         };
+        if (browserVerificationBudgetSpent) {
+          if (behaviourProven) {
+            acceptWithShortfall(
+              `The ${Math.round(performancePolicy.browserVerificationBudgetMs / 1_000)}-second browser-action budget was reached after every functional workflow passed; no additional full rerun was bought for the remaining design difference.`,
+            );
+            break;
+          }
+          orchestrator.transition({
+            missionId,
+            eventId: `${missionId}-browser-verification-time-budget-exhausted`,
+            causationId: browser.workUnitId,
+            to: MissionState.EXHAUSTED,
+            reason: `Browser action verification reached its ${Math.round(performancePolicy.browserVerificationBudgetMs / 1_000)}-second budget with functional checks still failing.`,
+          });
+          throw new Error(
+            `Testing important actions reached its ${Math.round(performancePolicy.browserVerificationBudgetMs / 1_000)}-second budget. The exact unfinished checks and browser evidence were preserved; Foundry did not start another full rerun.`,
+          );
+        }
         // Whether to keep correcting, deliver, or stop is decided by the shared
         // policy rather than here, so the replay harness measures a change
         // against every build Foundry has recorded before the customer meets
         // it. Every wrong version of this decision cost a real build.
         const outstandingChecks =
           browserResult === undefined
-            ? requiredBrowserChecks.length
-            : Object.values(browserResult.checks).filter((passed) => passed !== true).length;
+            ? functionalBrowserChecks.length
+            : functionalBrowserChecks.filter(
+                (checkId) => browserResult.checks[checkId] !== true,
+              ).length;
         const decision = browserObservationDecision({
           attempt,
-          maxAttempts: MAX_BROWSER_OBSERVATION_ATTEMPTS,
+          maxAttempts: performancePolicy.browserObservationAttempts,
           outstandingChecks,
           outstandingFidelityAspects: latestFidelityFailureCount,
           previousOutstanding: previousOutstandingFailures,
@@ -5337,8 +7347,19 @@ ${failureEvidence.payload.stderr}`,
           stderr: failureEvidence.payload.stderr,
           observationFailure: browserFailure,
         });
-        const repairPolicy = productionBrowserRepairPolicy(browserFailure);
+        const repairPolicy = productionBrowserRepairPolicy(browserFailure, {
+          nonFidelityFailureOutstanding,
+          repairBudgets,
+        });
         const repairPrefix = `${contractRequestNamespace}-${repairPolicy.requestSegment}-`;
+        const priorRepairCalls = models
+          .listCalls(missionId)
+          .filter(
+            (call) =>
+              call.requestId.startsWith(repairPrefix) &&
+              call.status === "SUCCEEDED",
+          )
+          .reverse();
         await runtime.stop({
           missionId,
           sessionId: session.sessionId,
@@ -5356,19 +7377,11 @@ ${failureEvidence.payload.stderr}`,
         if (
           failureClassification.scope ===
             ProductionRepairScope.RUNTIME &&
-          attempt < MAX_RUNTIME_RESTARTS
+          attempt < repairBudgets.runtimeRestarts
         ) {
           session = await startRuntime();
           continue;
         }
-        const priorRepairCalls = models
-          .listCalls(missionId)
-          .filter(
-            (call) =>
-              call.requestId.startsWith(repairPrefix) &&
-              call.status === "SUCCEEDED",
-          )
-          .reverse();
         const repairFiles = bundle.files
           .filter(
             (file) =>
@@ -5491,12 +7504,15 @@ ${failureEvidence.payload.stderr}`,
           const proposalShape = wholeFile
             ? wholeFileRepairSchema
             : browserRepairPatchSchema;
-          const scopedBrowserRepairPatchSchema = sourceOnlyBrowserRepair
-            ? repairPatchSchemaScopedToPaths(
-                proposalShape,
-                eligibleRepairFiles.map((file) => file.path),
-              )
-            : proposalShape;
+          // Constrain every browser repair—not only source-only failures—to
+          // the exact files offered below. A whole-file fallback repeatedly
+          // named Foundry's immutable observation spec, spent all three
+          // proposal slots on a path it could never edit, and ended a healthy
+          // build before any admissible correction was attempted.
+          const scopedBrowserRepairPatchSchema = repairPatchSchemaScopedToPaths(
+            proposalShape,
+            eligibleRepairFiles.map((file) => file.path),
+          );
           const browserRepairSchema = contractTraceSchema(
             scopedBrowserRepairPatchSchema,
             approvedContract !== null,
@@ -5513,6 +7529,10 @@ ${failureEvidence.payload.stderr}`,
               : `Return exact search/replace edits as a "files" array over existing project source, configuration, Playwright test, or Playwright configuration files. Name every file the observed failure requires — up to ${MAX_REPAIR_FILES_PER_PROPOSAL} — in this one proposal, and name each file at most once. Each oldText must occur exactly once in that file; keep edits narrowly scoped and use as few replacements as possible.`,
             "A failure whose causes span several files must be corrected in one proposal. Correcting part of it and leaving the rest for a later round wastes the repair budget and risks breaking what already passes.",
             "Choose application source when the running behavior is wrong. Choose Playwright test/configuration only when the observation implementation is wrong. Correct invalid selectors, synchronization, or observation code while preserving every contract assertion.",
+            "Never target tests/foundry-observation.spec.ts or a foundry-design-fidelity-evidence spec: Foundry owns and regenerates them. Project-specific browser actions and assertions belong in tests/foundry-checks.ts, which is the editable observation file listed below.",
+            "When scoping an action to a native HTML form, use locator('form') unless that form has an explicit accessible name. Do not replace locator('form') with getByRole('form') for an unnamed form: browsers need not expose it as a form landmark, so the locator can time out while the visible UI is healthy.",
+            "Foundry clears cookies and storage before every browser check. If evidence says a dashboard selector or protected navigation is missing, first inspect whether that element already exists in application source behind authentication. When it does and the failing check never creates an account or signs in, repair tests/foundry-checks.ts so that check establishes its own fresh session; do not add duplicate dashboard UI to the signed-out page.",
+            "For a check that exceeded its own time budget, inspect the complete action sequence rather than guessing from the final timeout. If an initial session request can resolve after a successful sign-up/sign-in and overwrite the authenticated state, fix that hydration race in application source. Otherwise repair the exact missing wait or synchronization point without weakening the assertion.",
             "When a visible create, update, or delete workflow returns a generic HTTP 500, inspect the exact API route used by that interaction together with its SQL and persistence schema. Do not repeatedly change database initialization without checking route statements, parameter binding, and SQL string-literal quoting.",
             ...(sourceOnlyBrowserRepair
               ? [
@@ -5545,6 +7565,7 @@ ${failureEvidence.payload.stderr}`,
             "When visible labels repeat across distinct rows, dates, cards, or entities, bind the observation to the exact interacted ancestor, stable identifier, or complete composite identity. Do not use a substring locator that matches unrelated entities.",
             "If the UI exposes no stable identifier or complete composite label, capture the exact scoped collection and indexed element used for the interaction, then compare that same scope's observable count or state before and after. Do not invent a missing test ID or assert that repeated visible text is globally unique.",
             "After navigation, reload, or client hydration, wait for the first expected element or an explicit ready condition before measuring collection counts. Never capture a zero baseline while the requested data is still loading.",
+            "When the application has an initial session or readiness state, domcontentloaded is not the ready condition. Await a stable expected form control or authenticated control after every goto/reload before counting buttons, pressing Tab, or measuring the post-hydration layout.",
             "The checks object must contain exactly the supplied browser-check obligation IDs, each computed from the observed running application. Do not include build, structured-test, or browser-error obligations as checks because those are verified from their own evidence.",
             "The test must finish by writing exactly one stdout line starting with the literal prefix FOUNDRY_BROWSER_RESULT: followed immediately by JSON containing captureProbeErrors as a string array, checks as the exact boolean map, diagnostics as a map from each check ID to its named boolean sub-checks, consoleErrors as a string array, and pageErrors as a string array. Replace any other marker name.",
             "Move the pointer away from interactive controls and wait for CSS transitions to settle before measuring computed color so hover and active states cannot falsify the approved resting palette. Diagnostics must name the exact false predicate rather than reporting only a composite check.",
@@ -5615,6 +7636,8 @@ ${failureEvidence.payload.stderr}`,
               browserQualityRequirements: {
                 responsiveCheckIds: responsiveBrowserCheckIds,
                 accessibilityCheckIds: accessibilityBrowserCheckIds,
+                authenticatedCheckIds: authenticatedBrowserCheckIds,
+                loginCheckIds: loginBrowserCheckIds,
               },
               priorStructuredOutputs: priorRepairCalls.map(
                 (call) => call.structuredOutput,
@@ -5643,8 +7666,8 @@ ${failureEvidence.payload.stderr}`,
             : { structuredOutput: replayableRepair.structuredOutput };
         let acceptedRepair = null;
         let semanticRejection = null;
-        // After two rejected patches the format is the obstacle, not the
-        // diagnosis, so the last attempt asks for whole files instead. Two
+        // After one rejected patch the format is the obstacle, not the
+        // diagnosis, so the next attempt asks for whole files instead. Two
         // consecutive builds died here with four minutes of correct work
         // already done, because three unusable patches end a mission.
         let wholeFileFallback = false;
@@ -5653,7 +7676,7 @@ ${failureEvidence.payload.stderr}`,
           proposalAttempt < MAX_REPAIR_PROPOSALS_PER_ROUND && acceptedRepair === null;
           proposalAttempt += 1
         ) {
-          if (proposalAttempt === MAX_REPAIR_PROPOSALS_PER_ROUND - 1) {
+          if (proposalAttempt >= 1) {
             wholeFileFallback = true;
           }
           if (repair === null) {
@@ -5727,6 +7750,8 @@ ${failureEvidence.payload.stderr}`,
               browserQualityRequirements: {
                 responsiveCheckIds: responsiveBrowserCheckIds,
                 accessibilityCheckIds: accessibilityBrowserCheckIds,
+                authenticatedCheckIds: authenticatedBrowserCheckIds,
+                loginCheckIds: loginBrowserCheckIds,
               },
               priorStructuredOutputs: priorRepairCalls.map(
                 (call) => call.structuredOutput,
@@ -5891,6 +7916,38 @@ ${failureEvidence.payload.stderr}`,
           }`,
         );
       }
+      // Browser verification is an observation, not delivered application
+      // state. It may create accounts and rows while proving real workflows.
+      // Finish from the clean pre-observation checkpoint and start one fresh
+      // preview from it. The browser command's discarded post-checkpoint stays
+      // immutable audit provenance; captureBrowserVerification binds the
+      // derived verdict to this source-identical current checkpoint.
+      const latestObservedRuntime = runtime.getSession(
+        missionId,
+        session.sessionId,
+      );
+      if (latestObservedRuntime.status !== RuntimeStatus.STOPPED) {
+        await runtime.stop({
+          missionId,
+          sessionId: session.sessionId,
+          observationId: `${browser.workUnitId}-final-runtime-stop`,
+          evidenceId: `${browser.workUnitId}-final-runtime-stop-evidence`,
+          causationId: `${browser.workUnitId}-final-runtime-stop-command`,
+          idempotencyKey: `${browser.workUnitId}-final-runtime-stop-key`,
+        });
+      }
+      if (
+        workspaces.getWorkspace(missionId).currentCheckpointId !==
+        browser.preWorkCheckpointId
+      ) {
+        await restoreBrowserCheckpoint({
+          checkpointId: browser.preWorkCheckpointId,
+          evidenceId: `${browser.workUnitId}-final-restore-evidence`,
+          eventId: `${browser.workUnitId}-final-restore`,
+          causationId: `${browser.workUnitId}-final-restore-command`,
+        });
+      }
+      session = await startRuntime();
       runtime.captureBrowserVerification({
         missionId,
         sessionId: session.sessionId,
@@ -5901,6 +7958,7 @@ ${failureEvidence.payload.stderr}`,
         idempotencyKey: `${missionId}-browser-${runtimeAttempt}-key`,
         verificationRequestReference: `${missionId}-verification`,
         allowEmptyChecks: requiredBrowserChecks.length === 0,
+        authoritativeCheckOverrides: authoritativeBrowserCheckOverrides,
       });
       await runtime.observeHealth({
         missionId,
@@ -5949,7 +8007,8 @@ ${failureEvidence.payload.stderr}`,
             accepted: true,
             failedAspects: designFidelityShortfall.failedAspects,
           },
-          workspaceCheckpointReference: browser.postWorkCheckpointId,
+          workspaceCheckpointReference:
+            workspaces.getWorkspace(missionId).currentCheckpointId,
           obligationReference: null,
           verificationRequestReference: `${missionId}-verification`,
           commandReference: browser.workUnitId,

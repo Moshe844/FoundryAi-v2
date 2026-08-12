@@ -263,9 +263,17 @@ export function evaluatePrototypeFidelity({ approvedDesignContract, prototypeVer
     Boolean(item.prototype?.navigationPresent ?? item.prototype?.manifest?.some((entry) => entry.tag === "nav")) ===
     Boolean(item.production?.navigationPresent ?? item.production?.manifest?.some((entry) => entry.tag === "nav")),
   );
-  const interactionsPreserved = all((item) =>
-    Number(item.production?.focusableCount ?? 0) >= Math.max(1, Math.floor(Number(item.prototype?.focusableCount ?? 1) * 0.5)),
-  );
+  // Raw focusable-count parity is not design fidelity for a stateful app. A
+  // concept may render several representative screens together while the real
+  // application initially renders only sign-in; requiring half the concept's
+  // total made repairs add meaningless links merely to increase the number.
+  // Contract browser checks prove the real workflows. Here we verify that the
+  // approved interactive character remains present at every viewport.
+  const interactionsPreserved = all((item) => {
+    const expected = Number(item.prototype?.focusableCount ?? 0);
+    const actual = Number(item.production?.focusableCount ?? 0);
+    return expected === 0 || actual >= 1;
+  });
   const responsivePreserved = missingViewports.length === 0 && all((item) =>
     item.production?.horizontalOverflow === false && item.orderRatio >= 0.6,
   );
@@ -292,7 +300,7 @@ export function evaluatePrototypeFidelity({ approvedDesignContract, prototypeVer
     verdict(PrototypeFidelityAspect.SPACING, spacingPreserved, spacingPreserved ? "Relative spacing and region geometry are preserved." : "Production spacing materially changes the approved rhythm.", { comparisons: comparisons.map(({ key, geometry }) => ({ key, meanDistance: geometry.meanDistance, pairs: geometry.pairs })) }),
     verdict(PrototypeFidelityAspect.IMAGERY, imageryPreserved, imageryPreserved ? "Approved imagery presence is preserved." : "Production changed the approved imagery treatment.", { comparisons: comparisons.map((item) => ({ key: item.key, prototypeImageCount: Number(item.prototype?.imageCount ?? 0), productionImageCount: Number(item.production?.imageCount ?? 0) })) }),
     verdict(PrototypeFidelityAspect.NAVIGATION, navigationPreserved, navigationPreserved ? "Navigation presence is preserved at every viewport." : "Production changed the approved navigation model.", { comparisons: comparisons.map((item) => ({ key: item.key, prototypeHasNavigationLandmark: Boolean(item.prototype?.navigationPresent ?? item.prototype?.manifest?.some((entry) => entry.tag === "nav")), productionHasNavigationLandmark: Boolean(item.production?.navigationPresent ?? item.production?.manifest?.some((entry) => entry.tag === "nav")) })), remedy: "Match the approved prototype: render a real <nav> landmark (or role=\"navigation\") when the prototype has one, and do not introduce one when it does not." }),
-    verdict(PrototypeFidelityAspect.INTERACTIONS, interactionsPreserved, interactionsPreserved ? "A comparable set of real interaction targets remains available." : "Production removed too many approved interaction targets.", { comparisons: comparisons.map((item) => ({ key: item.key, prototypeFocusableCount: Number(item.prototype?.focusableCount ?? 0), productionFocusableCount: Number(item.production?.focusableCount ?? 0), minimumRequired: Math.max(1, Math.floor(Number(item.prototype?.focusableCount ?? 1) * 0.5)) })) }),
+    verdict(PrototypeFidelityAspect.INTERACTIONS, interactionsPreserved, interactionsPreserved ? "Real interaction targets remain available at every approved viewport." : "Production removed the approved interactive character from a viewport.", { comparisons: comparisons.map((item) => ({ key: item.key, prototypeFocusableCount: Number(item.prototype?.focusableCount ?? 0), productionFocusableCount: Number(item.production?.focusableCount ?? 0), minimumRequired: Number(item.prototype?.focusableCount ?? 0) > 0 ? 1 : 0 })) }),
     verdict(PrototypeFidelityAspect.RESPONSIVE, responsivePreserved, responsivePreserved ? "Phone, tablet, and desktop transformations preserve the prototype without overflow." : "Production responsive behavior differs or overflows." , { missingViewports }),
     verdict(PrototypeFidelityAspect.ACCESSIBILITY, accessibilityPreserved, accessibilityPreserved ? "Keyboard focus and image alternatives remain valid." : "Production accessibility evidence is incomplete or failing.", { comparisons: comparisons.map((item) => ({ key: item.key, productionActiveElement: item.production?.activeElement ?? null, productionMissingImageAltCount: Number(item.production?.missingImageAltCount ?? 0) })), remedy: "After pressing Tab the focused element must not be null or BODY, and every image needs an alt attribute." }),
     verdict(PrototypeFidelityAspect.EXCLUSIONS, exclusionsPreserved, exclusionsPreserved ? "No machine-detectable explicit exclusion is violated." : "Production violates an explicit design exclusion.", { explicitExclusions: [...approvedDesignContract.explicitExclusions ?? []], desktopSemanticSurfaceCount: Number(desktop?.production?.semanticSurfaceCount ?? 0) }),

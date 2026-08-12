@@ -1,0 +1,52 @@
+{
+  "startedAt": "2026-08-11T14:26:53.049Z",
+  "execute": true,
+  "resumed": true,
+  "inputs": [
+    {
+      "input": "Website",
+      "missionId": "mission-1786457787813-64c1421e",
+      "subtypeCount": 6,
+      "selectedSubtype": "Informational Business Website",
+      "blueprintVersion": 2,
+      "blueprintHash": "a2dded02dd894d32e6ccd79831bf458cbb9a210ef4c410ed9c53ee125f0725ca",
+      "primaryWorkflows": [
+        "A visitor lands on the site, understands the offer, reviews supporting information, and reaches the contact action.",
+        "A visitor uses the site on a phone and navigates the primary sections without losing context."
+      ],
+      "requiredSurfaces": [
+        "Visitors can understand the business purpose, offerings, and next step from the responsive website on a phone.",
+        "Visitors can move between the primary sections and reach the contact call to action on desktop and phone.",
+        "Every consequential interaction error is explained in plain language beside the affected action.",
+        "The completed website produces a deployable production build without invented business identity, contact details, pricing, hours, testimonials, or assets."
+      ],
+      "designDirections": [
+        "Clear Editorial",
+        "Service Showcase",
+        "Guided Confidence"
+      ],
+      "minimumVisualDifferences": 8,
+      "recommendations": [
+        "Prioritize one clear journey",
+        "Reserve room for decision support",
+        "Stage trust evidence safely"
+      ],
+      "customMessagePresent": true,
+      "selectedSubtypePresent": true,
+      "executionState": "SUCCEEDED",
+      "contractBlueprintHash": "a2dded02dd894d32e6ccd79831bf458cbb9a210ef4c410ed9c53ee125f0725ca",
+      "finishedMatchesApprovedBlueprint": true,
+      "firstPass": true,
+      "firstPassMetrics": {
+        "repairModelCalls": 0,
+        "reinstallCount": 0,
+        "rebuildCount": 1,
+        "runtimeRestartCount": 0
+      },
+      "recoveredFromLedger": true
+    }
+  ],
+  "completedAt": "2026-08-11T14:27:05.922Z",
+  "passed": 1,
+  "failed": 0
+}

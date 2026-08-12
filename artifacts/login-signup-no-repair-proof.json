@@ -1,0 +1,15 @@
+{
+  "startedAt": "2026-08-11T18:17:09.665Z",
+  "execute": true,
+  "resumed": false,
+  "inputs": [
+    {
+      "input": "Build a polished full login and signup page with a two-panel responsive desktop layout, clear create-account and sign-in modes, durable accounts, real secure server-validated sessions that persist across refresh, sign out that revokes the session, accessible forms, and clear validation and authentication errors",
+      "attempts": 1,
+      "error": "Build a polished full login and signup page with a two-panel responsive desktop layout, clear create-account and sign-in modes, durable accounts, real secure server-validated sessions that persist across refresh, sign out that revokes the session, accessible forms, and clear validation and authentication errors project discovery: No registered model satisfies the routing request: [{\"modelId\":\"claude-haiku-4-5-20251001\",\"providerId\":\"anthropic\",\"reasons\":[\"provider unavailable\",\"REASONING score below 80\",\"STRUCTURED_OUTPUT score below 80\"]},{\"modelId\":\"claude-opus-4-5-20251101\",\"providerId\":\"anthropic\",\"reasons\":[\"provider unavailable\"]},{\"modelId\":\"claude-opus-4-6\",\"providerId\":\"anthropic\",\"reasons\":[\"provider unavailable\"]},{\"modelId\":\"claude-opus-4-7\",\"providerId\":\"anthropic\",\"reasons\":[\"provider unavailable\"]},{\"model"
+    }
+  ],
+  "completedAt": "2026-08-11T18:17:14.680Z",
+  "passed": 0,
+  "failed": 1
+}

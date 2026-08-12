@@ -86,6 +86,10 @@ test("Phase F lifecycle surfaces are modular and consume the sourced model", asy
   assert.match(selectors, /function completion\(mission: Mission\)/);
   assert.match(selectors, /function lifecycleOutcome\(/);
   assert.match(selectors, /function unsupported\(mission: Mission\)/);
+  assert.match(selectors, /const recordedTerminalError = mission\.error/);
+  assert.match(selectors, /\.slice\(0, 500\)/);
+  assert.match(selectors, /generated bundle still failed deterministic admission/);
+  assert.match(selectors, /exact technical reason is preserved in Engineering details/);
 
   assert.doesNotMatch(completion, /mission\.executionProjection|mission\.profile|mission\.error/);
   assert.doesNotMatch(outcome, /mission\.executionProjection|mission\.profile|mission\.error/);

@@ -28,6 +28,30 @@ const EVIDENCE_ID_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,127})$/;
 export function createObservationEvidenceStore({ evidenceDirectory }) {
   const root = resolve(evidenceDirectory);
   const recordsDirectory = resolve(root, "records");
+  let indexes = null;
+
+  function addToIndex(index, key, evidenceId) {
+    if (key === null || key === undefined) return;
+    const ids = index.get(key) ?? new Set();
+    ids.add(evidenceId);
+    index.set(key, ids);
+  }
+
+  function indexRecord(record, target = indexes) {
+    if (target === null) return;
+    addToIndex(target.byMission, record.missionId, record.evidenceId);
+    addToIndex(target.byKind, record.kind, record.evidenceId);
+    addToIndex(
+      target.byWorkUnit,
+      record.workUnitReference,
+      record.evidenceId,
+    );
+    addToIndex(
+      target.byCheckpoint,
+      record.workspaceCheckpointReference,
+      record.evidenceId,
+    );
+  }
 
   function pathFor(evidenceId) {
     if (
@@ -56,6 +80,7 @@ export function createObservationEvidenceStore({ evidenceDirectory }) {
         "utf8",
       );
       fsyncSync(descriptor);
+      indexRecord(record);
       return freezeEvidenceRecord(record);
     } catch (error) {
       if (error?.code === "EEXIST") {
@@ -98,6 +123,39 @@ export function createObservationEvidenceStore({ evidenceDirectory }) {
       .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
       .map((entry) => entry.name.slice(0, -5))
       .sort();
+    return Object.freeze(evidenceIds.map((evidenceId) => getById(evidenceId)));
+  }
+
+  function ensureIndexes() {
+    if (indexes !== null) return indexes;
+    const next = {
+      byMission: new Map(),
+      byKind: new Map(),
+      byWorkUnit: new Map(),
+      byCheckpoint: new Map(),
+    };
+    if (existsSync(recordsDirectory)) {
+      const evidenceIds = readdirSync(recordsDirectory, {
+        withFileTypes: true,
+      })
+        .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
+        .map((entry) => entry.name.slice(0, -5))
+        .sort();
+      for (const evidenceId of evidenceIds) {
+        indexRecord(getById(evidenceId), next);
+      }
+    }
+    indexes = next;
+    return indexes;
+  }
+
+  function indexedRecords(indexName, key) {
+    const index = ensureIndexes()[indexName];
+    const evidenceIds = [...(index.get(key) ?? [])].sort((left, right) =>
+      left.localeCompare(right),
+    );
+    // Read and validate the selected records on every query. The index removes
+    // the unbounded global directory scan without hiding record tampering.
     return Object.freeze(evidenceIds.map((evidenceId) => getById(evidenceId)));
   }
 
@@ -175,22 +233,16 @@ export function createObservationEvidenceStore({ evidenceDirectory }) {
     capture,
     getById,
     findByMission(missionId) {
-      return find((record) => record.missionId === missionId);
+      return indexedRecords("byMission", missionId);
     },
     findByKind(kind) {
-      return find((record) => record.kind === kind);
+      return indexedRecords("byKind", kind);
     },
     findByWorkUnit(workUnitReference) {
-      return find(
-        (record) => record.workUnitReference === workUnitReference,
-      );
+      return indexedRecords("byWorkUnit", workUnitReference);
     },
     findByCheckpoint(workspaceCheckpointReference) {
-      return find(
-        (record) =>
-          record.workspaceCheckpointReference ===
-          workspaceCheckpointReference,
-      );
+      return indexedRecords("byCheckpoint", workspaceCheckpointReference);
     },
     validateReference,
     integrityFingerprint,

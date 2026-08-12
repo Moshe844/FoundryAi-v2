@@ -1,0 +1,15 @@
+{
+  "startedAt": "2026-08-11T19:51:25.427Z",
+  "execute": true,
+  "resumed": false,
+  "inputs": [
+    {
+      "input": "Build a polished responsive login and signup website with distinct account creation and sign-in modes, durable user accounts, server-validated sessions that survive refresh, session-revoking sign out, accessible keyboard-friendly forms, and useful validation and authentication errors",
+      "attempts": 1,
+      "error": "Build a polished responsive login and signup website with distinct account creation and sign-in modes, durable user accounts, server-validated sessions that survive refresh, session-revoking sign out, accessible keyboard-friendly forms, and useful validation and authentication errors execution ended in CANCELLED."
+    }
+  ],
+  "completedAt": "2026-08-11T19:56:50.047Z",
+  "passed": 0,
+  "failed": 1
+}

@@ -55,9 +55,12 @@ function files(kind = "good") {
     ? "display:flex;flex-direction:column-reverse;gap:3rem"
     : "display:grid;grid-template-columns:1.4fr .6fr;gap:4rem";
   const alternateDecoration = kind === "alternate" ? "section{border-left:10px solid #d49a64}" : "";
+  const hiddenFirstControl = kind === "hidden-first-focus"
+    ? '<button class="viewport-hidden" type="button" disabled>Hidden menu</button>'
+    : "";
   return {
-    "index.html": '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Sample commercial portfolio</title><link rel="stylesheet" href="/styles.css"><script type="module" src="/concept.js"></script></head><body><header><nav aria-label="Primary"><a href="#work">Work</a><a href="#inquiry">Inquiry</a></nav></header><main><section><h1>Light shaped for ambitious campaigns.</h1><p>Fictional sample portfolio for concept review.</p></section><section id="work"><h2>Selected assignments</h2><article><h3>Sample Northline campaign</h3></article></section><section id="inquiry"><h2>Start an inquiry</h2><button type="button">Open sample inquiry</button></section></main><footer>Sample content only</footer></body></html>',
-    "styles.css": `*{box-sizing:border-box}body{margin:0;background:#111;color:#f5f0e8;font:18px Arial,sans-serif}header,footer{padding:1.5rem}nav{display:flex;gap:2rem}a{color:inherit}main{${overflow};margin:auto;padding:4rem;${composition}}section{min-height:12rem}${alternateDecoration}button{padding:1rem}@media(max-width:640px){main{grid-template-columns:1fr!important;padding:1.25rem;gap:1.5rem}nav{flex-wrap:wrap}}@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto}}`,
+    "index.html": `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Sample commercial portfolio</title><link rel="stylesheet" href="/styles.css"><script type="module" src="/concept.js"></script></head><body>${hiddenFirstControl}<header><nav aria-label="Primary"><a href="#work">Work</a><a href="#inquiry">Inquiry</a></nav></header><main><section><h1>Light shaped for ambitious campaigns.</h1><p>Fictional sample portfolio for concept review.</p></section><section id="work"><h2>Selected assignments</h2><article><h3>Sample Northline campaign</h3></article></section><section id="inquiry"><h2>Start an inquiry</h2><button type="button">Open sample inquiry</button></section></main><footer>Sample content only</footer></body></html>`,
+    "styles.css": `*{box-sizing:border-box}.viewport-hidden{display:none}body{margin:0;background:#111;color:#f5f0e8;font:18px Arial,sans-serif}header,footer{padding:1.5rem}nav{display:flex;gap:2rem}a{color:inherit}main{${overflow};margin:auto;padding:4rem;${composition}}section{min-height:12rem}${alternateDecoration}button{padding:1rem}@media(max-width:640px){main{grid-template-columns:1fr!important;padding:1.25rem;gap:1.5rem}nav{flex-wrap:wrap}}@media(prefers-reduced-motion:reduce){*{scroll-behavior:auto}}`,
     "concept.js": kind === "browser-error"
       ? "throw new Error('deterministic concept crash')"
       : "document.querySelector('button').addEventListener('click',()=>document.body.dataset.inquiry='open');",
@@ -123,6 +126,25 @@ test("live Chrome admits a responsive concept and persists immutable screenshots
       "cinematic-v1-verification/verification.json": "tamper",
     }),
     /immutable/u,
+  );
+});
+
+test("browser admission focuses the first visible enabled control", async (t) => {
+  const services = setup(t);
+  const concept = contract("concept-visible-focus");
+  materialize(services.workspaceService, concept, files("hidden-first-focus"));
+  const result = await services.verification.verify({
+    conceptContract: concept,
+    verificationId: "visible-focus-verification",
+  });
+
+  assert.equal(result.status, "PASSED", result.findings.join("\n"));
+  assert(
+    result.observations.every(
+      (observation) =>
+        observation.measurement.activeElement !== null &&
+        observation.measurement.activeElement !== "BODY",
+    ),
   );
 });
 

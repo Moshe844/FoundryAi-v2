@@ -1596,6 +1596,9 @@ export default function Page() {
             (activity) =>
               activity.sequence > startHandoff.baselineActivitySequence,
           )}
+          executionStarted={!["INTAKE", "CLARIFYING", "CONTRACTED"].includes(
+            mission.state,
+          )}
           onComplete={() => setStartHandoff(null)}
           onStop={() =>
             setConfirm({
@@ -1683,6 +1686,16 @@ export default function Page() {
           missionRunning={mission.running}
           missionId={mission.missionId}
           conceptStudio={mission.conceptStudio}
+          onConceptGenerationStarted={async () => {
+            const refreshed = validateMission(
+              await api<unknown>(`/missions/${mission.missionId}`),
+            );
+            setCurrent((existing) =>
+              existing?.missionId === refreshed.missionId
+                ? refreshed
+                : existing,
+            );
+          }}
           onClarify={clarify}
           profileVersion={mission.profile?.profileVersion ?? 1}
           initialStage={projectStage}

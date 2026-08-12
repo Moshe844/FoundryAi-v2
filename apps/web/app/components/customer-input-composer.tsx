@@ -105,13 +105,21 @@ export function CustomerInputComposer({
 
   const revision = conversation.latestRevision;
   return (
-    <aside className="discovery-companion" aria-label="Your input and plan changes">
+    <details className="discovery-companion">
+      <summary className="companion-trigger">
+        <span>
+          <strong>Add a note or correction</strong>
+          <small>Optional &mdash; Foundry will update only what your instruction changes.</small>
+        </span>
+        {conversation.messages.length > 0 && (
+          <span className="companion-count">{conversation.messages.length}</span>
+        )}
+      </summary>
+      <div className="companion-body" aria-label="Your input and plan changes">
       <div className="companion-heading">
-        <p className="t-label ink-tertiary">Open conversation</p>
-        <h2 className="t-title-m">Tell Foundry anything else</h2>
+        <h2 className="sr-only">Tell Foundry anything else</h2>
         <p className="t-body-s ink-secondary">
-          Write naturally. I&rsquo;ll work out what the instruction changes and
-          show you the revised plan.
+          Write naturally. Foundry will show exactly what changed.
         </p>
       </div>
 
@@ -288,6 +296,7 @@ export function CustomerInputComposer({
           </ol>
         </details>
       )}
-    </aside>
+      </div>
+    </details>
   );
 }

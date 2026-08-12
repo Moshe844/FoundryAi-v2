@@ -1,0 +1,56 @@
+{
+  "startedAt": "2026-08-11T21:40:58.052Z",
+  "execute": true,
+  "resumed": false,
+  "inputs": [
+    {
+      "input": "Build a polished responsive and accessible login and signup website. People must create durable accounts, sign in later with saved credentials, remain signed in across refresh through secure sessions, sign out with session revocation, switch clearly between sign-in and account-creation modes, use labelled keyboard-accessible forms on phone and desktop, and see useful validation and authentication errors.",
+      "missionId": "mission-1786484458075-6391b269",
+      "subtypeCount": 1,
+      "selectedSubtype": "web-application",
+      "blueprintVersion": 2,
+      "blueprintHash": "a41286a0757d7dd3b334e346219537f25289cef2a527af8b9141ef607aa01450",
+      "primaryWorkflows": [
+        "Create an account and remain signed in after refresh.",
+        "Sign in later with saved credentials.",
+        "Sign out and confirm the session is revoked."
+      ],
+      "requiredSurfaces": [
+        "A person can switch clearly between sign-in and account-creation modes on phone and desktop.",
+        "Submitting valid signup details creates a durable account record.",
+        "Valid sign-in reaches an authenticated account state with a saved credential path.",
+        "An authenticated session remains active after a page refresh.",
+        "Signing out revokes the active session and prevents continued authenticated access.",
+        "Labels, focus states, keyboard order, touch targets, and error announcements support accessible form use.",
+        "Invalid, duplicate, and incorrect credentials produce useful authentication feedback without exposing sensitive details."
+      ],
+      "designDirections": [
+        "Calm Gateway",
+        "Signal Console",
+        "Welcome Frame"
+      ],
+      "minimumVisualDifferences": 8,
+      "recommendations": [
+        "Make session state visible",
+        "Design errors for recovery",
+        "Add password visibility control"
+      ],
+      "customMessagePresent": true,
+      "selectedSubtypePresent": true,
+      "executionState": "SUCCEEDED",
+      "contractBlueprintHash": "a41286a0757d7dd3b334e346219537f25289cef2a527af8b9141ef607aa01450",
+      "finishedMatchesApprovedBlueprint": true,
+      "firstPass": true,
+      "firstPassMetrics": {
+        "repairModelCalls": 0,
+        "reinstallCount": 0,
+        "rebuildCount": 1,
+        "runtimeRestartCount": 0
+      },
+      "attempts": 1
+    }
+  ],
+  "completedAt": "2026-08-11T21:42:48.782Z",
+  "passed": 1,
+  "failed": 0
+}

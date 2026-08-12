@@ -35,6 +35,10 @@ test("Phase 4 renders observations, meaningful directions, and recommendation co
   assert.match(design, /Try again/u);
   assert.match(design, /scope: "generate"/u);
   assert.match(design, /studio === null && requestError\?\.scope === "generate"/u);
+  assert.match(design, /Live activity and generated code/u);
+  assert.match(design, /concept-generation-now/u);
+  assert.match(design, /Waiting for validated model output/u);
+  assert.doesNotMatch(design, /concept-generation-tracks/u);
   assert.match(designContract, /approvedPrototypeContract\.selectedConceptId/u);
   assert.match(designContract, /approvedPrototypeContract\.creativeThesis/u);
   assert.match(designContract, /approvedPrototypeContract\.approvedSurfaceSequence/u);

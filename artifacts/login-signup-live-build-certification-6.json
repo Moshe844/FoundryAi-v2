@@ -1,0 +1,15 @@
+{
+  "startedAt": "2026-08-11T15:11:31.706Z",
+  "execute": true,
+  "resumed": true,
+  "inputs": [
+    {
+      "input": "Build a full login and signup page with durable accounts, real session persistence, sign out, accessible responsive forms, and clear validation and authentication errors",
+      "attempts": 1,
+      "error": "Build a full login and signup page with durable accounts, real session persistence, sign out, accessible responsive forms, and clear validation and authentication errors execution: Testing important actions reached its 60-second budget. The exact unfinished checks and browser evidence were preserved; Foundry did not start another full rerun."
+    }
+  ],
+  "completedAt": "2026-08-11T15:18:58.808Z",
+  "passed": 0,
+  "failed": 1
+}

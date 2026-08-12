@@ -1,0 +1,53 @@
+{
+  "startedAt": "2026-08-11T14:37:42.839Z",
+  "execute": true,
+  "resumed": true,
+  "inputs": [
+    {
+      "input": "Customer portal",
+      "missionId": "mission-1786458912308-3647ba38",
+      "subtypeCount": 6,
+      "selectedSubtype": "Customer Information Hub",
+      "blueprintVersion": 2,
+      "blueprintHash": "a2817d96c29a435914df3e82385ffc51a88c3c546d9cec06b24047386e5429f4",
+      "primaryWorkflows": [
+        "A customer opens the hub on a phone, finds a topic, reads the information, and returns safely.",
+        "A returning customer scans navigation to reach a known information section."
+      ],
+      "requiredSurfaces": [
+        "Customers can open the hub on a phone, choose a topic, read its information, and return to the topic index.",
+        "Customers can move between information sections using visible navigation and contextual breadcrumbs.",
+        "The interface explains consequential errors and provides a clear recovery path without trapping the customer.",
+        "The primary information workflow remains understandable and usable across phone and desktop widths.",
+        "The completed portal produces a successful production build without blocking errors."
+      ],
+      "designDirections": [
+        "Guided Information Shelf",
+        "Editorial Customer Brief",
+        "Answer Finder"
+      ],
+      "minimumVisualDifferences": 10,
+      "recommendations": [
+        "Orient every state",
+        "Layer the information",
+        "Delay search until it earns its place"
+      ],
+      "customMessagePresent": true,
+      "selectedSubtypePresent": true,
+      "executionState": "SUCCEEDED",
+      "contractBlueprintHash": "a2817d96c29a435914df3e82385ffc51a88c3c546d9cec06b24047386e5429f4",
+      "finishedMatchesApprovedBlueprint": true,
+      "firstPass": true,
+      "firstPassMetrics": {
+        "repairModelCalls": 0,
+        "reinstallCount": 0,
+        "rebuildCount": 1,
+        "runtimeRestartCount": 0
+      },
+      "attempts": 1
+    }
+  ],
+  "completedAt": "2026-08-11T14:42:58.710Z",
+  "passed": 1,
+  "failed": 0
+}

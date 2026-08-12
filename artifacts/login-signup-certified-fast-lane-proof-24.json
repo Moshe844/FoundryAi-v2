@@ -1,0 +1,55 @@
+{
+  "startedAt": "2026-08-11T21:20:55.445Z",
+  "execute": true,
+  "resumed": false,
+  "inputs": [
+    {
+      "input": "Build a polished responsive and accessible login and signup website. People must create durable accounts, sign in later with saved credentials, remain signed in across refresh through secure sessions, sign out with session revocation, switch clearly between sign-in and account-creation modes, use labelled keyboard-accessible forms on phone and desktop, and see useful validation and authentication errors.",
+      "missionId": "mission-1786483255474-d0373339",
+      "subtypeCount": 1,
+      "selectedSubtype": "web-application",
+      "blueprintVersion": 2,
+      "blueprintHash": "f5957c78b34acbc29f279351a968174f411b58a998e30a0a69f870d3203c91dd",
+      "primaryWorkflows": [
+        "Create an account, receive confirmation of the resulting account state, and refresh safely.",
+        "Sign in with saved credentials, remain signed in across refresh, then sign out with revocation."
+      ],
+      "requiredSurfaces": [
+        "A person can create an account and receives a durable account state that remains present after refresh.",
+        "A registered person can sign in with saved credentials and reaches an authenticated state.",
+        "An authenticated state survives a page refresh through a secure active session.",
+        "Signing out revokes the active session and leaves the person unauthenticated after refresh.",
+        "The interface switches clearly between sign-in and account-creation modes without losing the active task.",
+        "Forms expose persistent labels, keyboard navigation, visible focus, and useful validation and authentication errors on phone and desktop.",
+        "Automated tests cover account creation, valid and invalid sign-in, refresh persistence, and session revocation."
+      ],
+      "designDirections": [
+        "Focused Auth Card",
+        "Context Split",
+        "Utility Auth Surface"
+      ],
+      "minimumVisualDifferences": 7,
+      "recommendations": [
+        "Make session state explicit",
+        "Reduce recovery friction",
+        "Offer reduced-motion polish"
+      ],
+      "customMessagePresent": true,
+      "selectedSubtypePresent": true,
+      "executionState": "SUCCEEDED",
+      "contractBlueprintHash": "f5957c78b34acbc29f279351a968174f411b58a998e30a0a69f870d3203c91dd",
+      "finishedMatchesApprovedBlueprint": true,
+      "firstPass": true,
+      "firstPassMetrics": {
+        "repairModelCalls": 0,
+        "reinstallCount": 0,
+        "rebuildCount": 1,
+        "runtimeRestartCount": 0
+      },
+      "attempts": 1
+    }
+  ],
+  "completedAt": "2026-08-11T21:25:15.655Z",
+  "passed": 1,
+  "failed": 0
+}

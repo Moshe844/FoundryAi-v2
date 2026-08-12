@@ -610,16 +610,19 @@ export function normalizeDesignShortfall(value, label = "designShortfall") {
     );
   }
   assertNonEmptyString(value.reason, `${label}.reason`);
+  const comparedViewports = Array.isArray(value.comparedViewports)
+    ? value.comparedViewports.length
+    : value.comparedViewports;
   if (
-    value.comparedViewports !== null &&
-    !Number.isSafeInteger(value.comparedViewports)
+    comparedViewports !== null &&
+    !Number.isSafeInteger(comparedViewports)
   ) {
     throw new CompletionVerdictIntegrityError(
       `${label}.comparedViewports must be an integer or null.`,
     );
   }
   return deepFreeze({
-    comparedViewports: value.comparedViewports ?? null,
+    comparedViewports: comparedViewports ?? null,
     failedAspects: [...value.failedAspects],
     reason: value.reason,
   });

@@ -704,6 +704,38 @@ export type LiveConcept = Readonly<{
   thumbnailUrl: string | null;
 }>;
 
+export type ConceptGenerationProgress = Readonly<{
+  startedAt: string;
+  updatedAt: string;
+  concepts: readonly Readonly<{
+    conceptId: string;
+    conceptName: string;
+    attempt: number;
+    maxAttempts: number;
+    phase:
+      | "QUEUED"
+      | "GENERATING_FILES"
+      | "VERIFYING_BROWSER"
+      | "RETRYING"
+      | "ADMITTED"
+      | "FAILED";
+    message: string;
+    files: readonly Readonly<{
+      path: string;
+      status: "PLANNED" | "WRITTEN";
+      content: string | null;
+      truncated: boolean;
+    }>[];
+    updatedAt: string;
+  }>[];
+  events: readonly Readonly<{
+    conceptId: string;
+    conceptName: string;
+    at: string;
+    message: string;
+  }>[];
+}>;
+
 export type LiveConceptStudio = Readonly<{
   schemaVersion: 1;
   missionId: string;
@@ -746,6 +778,7 @@ export type LiveConceptStudio = Readonly<{
   }>;
   error: string | null;
   generating: boolean;
+  generationProgress: ConceptGenerationProgress | null;
   createdAt: string;
   updatedAt: string;
 }>;
@@ -816,6 +849,7 @@ export type Mission = Readonly<{
       round: number;
       maximumRounds: number;
       corrections: number;
+      correcting: boolean;
     }> | null;
     repair: Readonly<{
       state:

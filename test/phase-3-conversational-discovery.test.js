@@ -9,7 +9,9 @@ import {
   validateStructuredModelOutput,
 } from "../src/index.js";
 import {
+  bindCustomerFollowUpTraceability,
   filterContradictingRecommendations,
+  finalDecisionSelections,
   parseUnderstandingRevisionValue,
   validateCustomerFollowUpTraceability,
 } from "../src/understanding-plane/project-understanding-service.js";
@@ -127,6 +129,57 @@ test("Phase 3 prevents an explicit customer outcome from being dropped or negate
     /customer-follow-up-1 is not preserved/u,
   );
 
+  const bound = bindCustomerFollowUpTraceability(design, answers);
+  assert.equal(bound.verificationPlan.length, 1);
+  assert.equal(
+    bound.verificationPlan[0].sourceRequirement,
+    "customer-follow-up-1",
+  );
+  assert.match(bound.verificationPlan[0].observableOutcome, /admin dashboard/u);
+  assert.doesNotThrow(() =>
+    validateCustomerFollowUpTraceability(bound, answers),
+  );
+
+  const usabilityAnswer = [{
+    questionId: "customer-message-mobile-usability",
+    answer: "Keep the primary website workflow understandable on a phone.",
+    selection: { kind: "customer-message" },
+  }];
+  const usabilityDesign = bindCustomerFollowUpTraceability({
+    verificationPlan: [],
+    projectIntent: { constraints: [] },
+    productProposal: {
+      intentionallyExcludedCapabilities: [
+        "Use a responsive, content-first public website with no accounts, commerce, or specialized workflows.",
+        "Use a responsive, content-first site structure that keeps primary contact information discoverable without requiring backend features.",
+      ],
+      futureCapabilities: [],
+    },
+    architectureDecisions: [],
+  }, usabilityAnswer);
+  assert.doesNotThrow(() =>
+    validateCustomerFollowUpTraceability(usabilityDesign, usabilityAnswer),
+  );
+  const portalAnswer = [{
+    questionId: "customer-message-portal-usability",
+    answer: "Keep the primary customer portal workflow understandable on a phone.",
+    selection: { kind: "customer-message" },
+  }];
+  const portalDesign = bindCustomerFollowUpTraceability({
+    verificationPlan: [],
+    projectIntent: { constraints: [] },
+    productProposal: {
+      intentionallyExcludedCapabilities: [
+        "No sign-in or customer-specific account area.",
+      ],
+      futureCapabilities: [],
+    },
+    architectureDecisions: [],
+  }, portalAnswer);
+  assert.doesNotThrow(() =>
+    validateCustomerFollowUpTraceability(portalDesign, portalAnswer),
+  );
+
   design.verificationPlan = [{
     observableOutcome: "The admin dashboard is visible after successful sign-in.",
     sourceRequirement: "customer-follow-up-1",
@@ -143,6 +196,26 @@ test("Phase 3 prevents an explicit customer outcome from being dropped or negate
   ];
   assert.doesNotThrow(() =>
     validateCustomerFollowUpTraceability(design, answers),
+  );
+});
+
+test("Phase 3 keeps approval retries as one final choice per subject", () => {
+  const selection = (kind, subjectId, value, sourceProfileVersion) => ({
+    kind,
+    subjectId,
+    mode: "confirm",
+    optionId: null,
+    value,
+    reason: "Recorded customer approval.",
+    classification: "approval",
+    sourceProfileVersion,
+  });
+  const first = selection("blueprint-approval", "product-blueprint", "v2", 2);
+  const latest = selection("blueprint-approval", "product-blueprint", "v3", 3);
+  const design = selection("design-direction", "design-direction", "Calm", 3);
+  assert.deepEqual(
+    finalDecisionSelections([first, design, latest]),
+    [latest, design],
   );
 });
 

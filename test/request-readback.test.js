@@ -9,6 +9,7 @@ import {
   settleRequestReadback,
   unaccountedAsks,
 } from "../src/domain/request-readback.js";
+import { deterministicFocusedAuthenticationReadback } from "../src/work-plane/request-readback-service.js";
 
 // The real mission. "Build a full login/signup page for a food industry
 // inventory" — where excluding inventory management is CORRECT, and any
@@ -209,4 +210,50 @@ test("an unchanged set of asks passes regardless of order or spacing", () => {
     ],
   };
   assert.doesNotThrow(() => assertAsksUnchanged(extracted, mapped));
+});
+
+test("focused authentication requests use a complete deterministic read-back", () => {
+  const projectDesign = {
+    productProposal: {
+      essentialCapabilities: [
+        "People can create an account with durable saved credentials.",
+        "People can sign in with credentials and remain signed in across a refresh through a persisted session.",
+        "Signing out revokes the active session.",
+        "Responsive mobile presentation avoids horizontal overflow.",
+        "Accessible keyboard focus and labels cover every form control.",
+        "Useful validation and authentication errors are shown inline.",
+      ],
+      intentionallyExcludedCapabilities: [],
+    },
+  };
+  const readback = deterministicFocusedAuthenticationReadback({
+    originalCustomerRequest:
+      "Build a responsive accessible login and signup page with durable accounts, credentials, refresh-safe sessions, sign out that revokes sessions, keyboard focus, labels, validation, and useful authentication errors.",
+    projectDesign,
+    profileVersion: 3,
+  });
+
+  assert.ok(readback);
+  assert.equal(readback.deterministicFastLane, true);
+  assert.equal(readback.profileVersion, 3);
+  assert.equal(readback.demotions.length, 0);
+  assert.ok(readback.asks.length >= 7);
+  assert.ok(
+    readback.asks.every(
+      (ask) =>
+        ask.disposition === AskDisposition.BUILDING &&
+        typeof ask.citation === "string",
+    ),
+  );
+});
+
+test("broader products do not enter the focused authentication read-back", () => {
+  assert.equal(
+    deterministicFocusedAuthenticationReadback({
+      originalCustomerRequest:
+        "Build a booking portal with login, signup, sessions, and appointments.",
+      projectDesign: LOGIN_PAGE_DESIGN,
+    }),
+    null,
+  );
 });

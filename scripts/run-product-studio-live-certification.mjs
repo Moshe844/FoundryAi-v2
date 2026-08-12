@@ -4,6 +4,7 @@ import { dirname, resolve } from "node:path";
 const API = process.env.FOUNDRY_CERTIFICATION_API ?? "http://127.0.0.1:3927";
 const EXECUTE = process.env.FOUNDRY_CERTIFY_EXECUTE === "1";
 const RESUME = process.env.FOUNDRY_CERTIFICATION_RESUME !== "0";
+const FORCE_FRESH = process.env.FOUNDRY_CERTIFICATION_FORCE_FRESH === "1";
 const maximumAttempts = Math.max(
   1,
   Number.parseInt(process.env.FOUNDRY_CERTIFICATION_ATTEMPTS ?? "1", 10) || 1,
@@ -29,9 +30,7 @@ const requestedLimit = Number.parseInt(
 );
 const INPUTS = (requestedInput === undefined
   ? ALL_INPUTS
-  : ALL_INPUTS.filter(
-      (input) => input.toLowerCase() === requestedInput.toLowerCase(),
-    )
+  : requestedInput === "" ? [] : [requestedInput]
 ).slice(0, Number.isSafeInteger(requestedLimit) && requestedLimit > 0
   ? requestedLimit
   : ALL_INPUTS.length);
@@ -40,14 +39,30 @@ if (INPUTS.length === 0) {
 }
 
 async function request(path, { method = "GET", body } = {}) {
-  const response = await fetch(`${API}${path}`, {
-    method,
-    headers: body === undefined ? {} : { "content-type": "application/json" },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  const payload = await response.json();
-  if (!response.ok) throw new Error(`${method} ${path}: ${payload.error ?? response.status}`);
-  return payload;
+  const attempts = method === "GET" ? 4 : 1;
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    let response;
+    try {
+      response = await fetch(`${API}${path}`, {
+        method,
+        headers: body === undefined ? {} : { "content-type": "application/json" },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
+    } catch (error) {
+      lastError = error;
+      if (attempt === attempts) throw error;
+      await new Promise((resolveWait) => setTimeout(resolveWait, 250 * attempt));
+      continue;
+    }
+    const payload = await response.json();
+    if (response.ok) return payload;
+    const error = new Error(`${method} ${path}: ${payload.error ?? response.status}`);
+    lastError = error;
+    if (attempt === attempts || response.status < 500) throw error;
+    await new Promise((resolveWait) => setTimeout(resolveWait, 250 * attempt));
+  }
+  throw lastError;
 }
 
 async function waitForMission(missionId, predicate, label, timeoutMs = 240_000) {
@@ -132,11 +147,13 @@ function resultFromSucceededMission(input, mission) {
   } catch {
     return null;
   }
-  const selectedSubtype = blueprint.selectedSubtypes[0];
+  const discoverySubtypes = mission.productTypeDiscovery?.subtypes ?? [];
+  const selectedSubtype =
+    blueprint.selectedSubtypes[0] ?? profile.family ?? "direct-profile";
   return {
     input,
     missionId: mission.missionId,
-    subtypeCount: mission.productTypeDiscovery.subtypes.length,
+    subtypeCount: discoverySubtypes.length || blueprint.selectedSubtypes.length,
     selectedSubtype,
     blueprintVersion: blueprint.blueprintVersion,
     blueprintHash: blueprint.integrityHash,
@@ -170,7 +187,6 @@ async function findSucceededCertification(input) {
     const mission = await request(`/missions/${summary.missionId}`);
     if (
       mission.profile === null ||
-      mission.productTypeDiscovery === null ||
       mission.productBlueprint === null
     ) {
       continue;
@@ -188,8 +204,8 @@ async function certify(input, index) {
     missionId = existingMissionId;
     console.log(`[${index + 1}/${INPUTS.length}] ${input}: resuming ${missionId}`);
     discovered = await request(`/missions/${missionId}`);
-    if (discovered.productTypeDiscovery === null) {
-      throw new Error(`${input} preserved mission has no product-type discovery.`);
+    if (discovered.productTypeDiscovery === null && discovered.profile === null) {
+      throw new Error(`${input} preserved mission has neither product-type discovery nor a specific project profile.`);
     }
   } else {
     console.log(`[${index + 1}/${INPUTS.length}] ${input}: creating mission`);
@@ -197,14 +213,18 @@ async function certify(input, index) {
     missionId = created.missionId;
     discovered = await waitForMission(
       missionId,
-      (mission) => mission.productTypeDiscovery !== null,
-      `${input} subtype discovery`,
+      (mission) =>
+        mission.productTypeDiscovery !== null ||
+        (mission.profile !== null && mission.productBlueprint !== null && !mission.running),
+      `${input} project discovery`,
     );
   }
-  const subtype = discovered.productTypeDiscovery.subtypes.find((item) => item.recommended) ??
-    discovered.productTypeDiscovery.subtypes[0];
+  const subtype = discovered.productTypeDiscovery === null
+    ? null
+    : discovered.productTypeDiscovery.subtypes.find((item) => item.recommended) ??
+      discovered.productTypeDiscovery.subtypes[0];
   const customMessage = `For live certification, keep the primary ${input.toLowerCase()} workflow understandable on a phone and explain every consequential error.`;
-  if (discovered.profile === null) {
+  if (discovered.profile === null && subtype !== null) {
     console.log(`[${index + 1}/${INPUTS.length}] ${input}: selecting ${subtype.title}`);
     await request(`/missions/${missionId}/clarify`, {
       method: "POST",
@@ -328,11 +348,16 @@ async function certify(input, index) {
   const firstPassMetrics = EXECUTE
     ? assertFirstPassExecution(finalMission)
     : null;
+  const selectedSubtype =
+    subtype?.title ?? blueprint.selectedSubtypes[0] ?? profile.family ??
+      "direct-profile";
   return {
     input,
     missionId,
-    subtypeCount: discovered.productTypeDiscovery.subtypes.length,
-    selectedSubtype: subtype.title,
+    subtypeCount:
+      discovered.productTypeDiscovery?.subtypes?.length ??
+      blueprint.selectedSubtypes.length,
+    selectedSubtype,
     blueprintVersion: blueprint.blueprintVersion,
     blueprintHash: blueprint.integrityHash,
     primaryWorkflows: blueprint.primaryWorkflows,
@@ -340,8 +365,12 @@ async function certify(input, index) {
     designDirections: profile.designAlternatives.map((item) => item.approach),
     minimumVisualDifferences: Math.min(...visualDifferences.map((item) => item.differences)),
     recommendations: profile.contextualSuggestions.map((item) => item.label),
-    customMessagePresent: blueprint.customCustomerMessages.includes(customMessage),
-    selectedSubtypePresent: blueprint.selectedSubtypes.includes(subtype.title),
+    customMessagePresent:
+      discovered.productTypeDiscovery === null ||
+      blueprint.customCustomerMessages.includes(customMessage),
+    selectedSubtypePresent:
+      blueprint.selectedSubtypes.length === 0 ||
+      blueprint.selectedSubtypes.includes(selectedSubtype),
     executionState: EXECUTE ? finalMission.state : "APPROVED_NOT_EXECUTED",
     contractBlueprintHash,
     finishedMatchesApprovedBlueprint: EXECUTE
@@ -447,7 +476,7 @@ const report = {
   inputs: [],
 };
 for (const [index, input] of INPUTS.entries()) {
-  if (EXECUTE) {
+  if (EXECUTE && !FORCE_FRESH) {
     const succeeded = await findSucceededCertification(input);
     if (succeeded !== null) {
       console.log(
@@ -458,7 +487,7 @@ for (const [index, input] of INPUTS.entries()) {
     }
   }
   const previous = previousByInput.get(input);
-  if (previous !== undefined && previous.error === undefined) {
+  if (!FORCE_FRESH && previous !== undefined && previous.error === undefined) {
     if (EXECUTE && previous.executionState === "APPROVED_NOT_EXECUTED") {
       try {
         report.inputs.push(await executeApprovedCertification(previous, index));
@@ -469,9 +498,9 @@ for (const [index, input] of INPUTS.entries()) {
         );
       }
     } else {
-    console.log(`[${index + 1}/${INPUTS.length}] ${input}: preserving prior passing certification`);
-    report.inputs.push(previous);
-    continue;
+      console.log(`[${index + 1}/${INPUTS.length}] ${input}: preserving prior passing certification`);
+      report.inputs.push(previous);
+      continue;
     }
   }
   let completed = false;

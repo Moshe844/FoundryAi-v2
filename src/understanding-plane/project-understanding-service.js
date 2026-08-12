@@ -517,7 +517,14 @@ export const FAST_INITIAL_UNDERSTANDING_SCHEMA = Object.freeze({
     },
     capabilities: {
       type: "array",
-      maxItems: 10,
+      // Derived, not written down. This was 10 while the manifest offered 11,
+      // so a project that genuinely needed every capability -- a business site
+      // wanting persistence, records, tests and export all at once -- produced
+      // a valid answer that the schema refused, on every route in turn. Simple
+      // requests never reached the ceiling, so it sat unnoticed until one did.
+      // product-type-discovery already derives this; the fast path did not, and
+      // drifted the moment an eleventh capability was added.
+      maxItems: WEB_STACK_MANIFEST.supportedCapabilities.length,
       items: {
         type: "string",
         enum: WEB_STACK_MANIFEST.supportedCapabilities,
@@ -1330,6 +1337,31 @@ function customerContentFromUnderstanding(intent, answers, result) {
   };
 }
 
+// "Provided input" and "supplied details" are ordinary product language: a
+// person provides values to a calculator or form at runtime. The previous
+// matcher treated those phrases as provenance claims about customer-owned
+// business content, rejected a valid Project Design, and surfaced an internal
+// validation error before the proposal could render. Only explicit attribution
+// to the customer is a customer-content claim.
+const EXPLICIT_CUSTOMER_CONTENT_PROVENANCE =
+  /(?:\bcustomer(?:['’]s)?[-\s]+(?:supplied|provided)\s+(?:(?:business|brand|contact)\s+)?(?:assets?|content|copy|wording|images?|logos?|contact details?|pricing|business hours|testimonials?|credentials?|awards?)\b|\b(?:(?:business|brand|contact)\s+)?(?:assets?|content|copy|wording|images?|logos?|contact details?|pricing|business hours|testimonials?|credentials?|awards?)\s+(?:supplied|provided)\s+by\s+(?:the\s+)?customer\b)/iu;
+
+export function unsuppliedCustomerContentClaims(
+  verificationPlan,
+  customerContent,
+) {
+  if ((customerContent?.supplied?.length ?? 0) > 0) return Object.freeze([]);
+  return Object.freeze(
+    (verificationPlan ?? [])
+      .filter((obligation) =>
+        EXPLICIT_CUSTOMER_CONTENT_PROVENANCE.test(
+          String(obligation?.observableOutcome ?? ""),
+        ),
+      )
+      .map((obligation) => obligation.observableOutcome),
+  );
+}
+
 function validateOutcomeCoverage(result) {
   const covered = new Set();
   for (const [obligationIndex, obligation] of result.obligations.entries()) {
@@ -1360,14 +1392,19 @@ const CUSTOMER_FOLLOW_UP_STOP_WORDS = new Set([
   "about",
   "also",
   "could",
+  "customer",
   "from",
   "have",
   "into",
   "just",
+  "keep",
+  "keeps",
   "like",
   "make",
   "nice",
   "page",
+  "primary",
+  "portal",
   "should",
   "take",
   "that",
@@ -1377,7 +1414,10 @@ const CUSTOMER_FOLLOW_UP_STOP_WORDS = new Set([
   "this",
   "through",
   "want",
+  "website",
   "with",
+  "workflow",
+  "workflows",
   "would",
   "your",
 ]);
@@ -1400,6 +1440,64 @@ function customerInstructionTerms(value) {
 function containsCustomerInstructionTerm(value, terms) {
   const candidateTerms = new Set(customerInstructionTerms(value));
   return terms.some((term) => candidateTerms.has(term));
+}
+
+function negatedScopeSegments(value) {
+  const source = String(value);
+  const markers = [
+    ...source.matchAll(
+      /\b(?:avoid|do\s+not|don.t|exclude|excluded|later|no|not|outside|without)\b\s*:?/giu,
+    ),
+  ];
+  return markers
+    .map((marker, index) => {
+      const start = marker.index + marker[0].length;
+      const end = markers[index + 1]?.index ?? source.length;
+      return source.slice(start, end).split(/[.!?;]/u, 1)[0].trim();
+    })
+    .filter(Boolean);
+}
+
+// Customer-authored follow-ups are binding input, not optional model prose.
+// When the model implements the instruction but forgets to stamp a matching
+// sourceRequirement, preserve it locally as its own observable browser item.
+// This is deterministic contract bookkeeping and avoids spending another
+// interpretation call merely to copy a stable reference string.
+export function bindCustomerFollowUpTraceability(projectDesign, answers) {
+  const additions = [];
+  for (const [index, answer] of answers.entries()) {
+    if (
+      answer?.selection !== undefined &&
+      answer.selection.kind !== "customer-message"
+    ) {
+      continue;
+    }
+    const requirementReference = `customer-follow-up-${index + 1}`;
+    const terms = customerInstructionTerms(answer.answer);
+    const alreadyTraced = projectDesign.verificationPlan.some(
+      (entry) =>
+        entry.sourceRequirement === requirementReference &&
+        (terms.length === 0 ||
+          containsCustomerInstructionTerm(entry.observableOutcome, terms)),
+    );
+    if (alreadyTraced) continue;
+    additions.push({
+      observableOutcome: `${String(answer.answer).trim()} is visibly honored in the running product.`,
+      acceptanceMethod: "browser-check",
+      evidenceRequired: [
+        `Real browser evidence for customer instruction ${requirementReference}.`,
+      ],
+      sourceRequirement: requirementReference,
+      origin: "customer-stated",
+      dependencyIndexes: [],
+    });
+  }
+  return additions.length === 0
+    ? projectDesign
+    : {
+        ...projectDesign,
+        verificationPlan: [...projectDesign.verificationPlan, ...additions],
+      };
 }
 
 export function validateCustomerFollowUpTraceability(projectDesign, answers) {
@@ -1442,12 +1540,19 @@ export function validateCustomerFollowUpTraceability(projectDesign, answers) {
       ),
       ...(projectDesign.architectureDecisions ?? []),
     ];
-    const contradiction = negatedScope.find(
+    const broadContradiction = negatedScope.find(
       (entry) =>
         /\b(?:avoid|do\s+not|don['’]?t|exclude|excluded|later|no|not|outside|without)\b/iu.test(
           entry,
         ) && containsCustomerInstructionTerm(entry, terms),
     );
+    const contradiction = broadContradiction === undefined
+      ? undefined
+      : negatedScope.find((entry) =>
+          negatedScopeSegments(entry).some((segment) =>
+            containsCustomerInstructionTerm(segment, terms),
+          ),
+        );
     if (contradiction !== undefined) {
       throw new TypeError(
         `Customer instruction ${requirementReference} conflicts with proposed scope: ${contradiction}`,
@@ -1463,11 +1568,14 @@ function profileFromUnderstanding(
   result,
   profileVersion,
 ) {
-  const projectDesign = normalizeProjectDesign(
-    Object.fromEntries(
-      PROJECT_DESIGN_MODEL_FIELDS.map((key) => [key, result[key]]),
+  const projectDesign = bindCustomerFollowUpTraceability(
+    normalizeProjectDesign(
+      Object.fromEntries(
+        PROJECT_DESIGN_MODEL_FIELDS.map((key) => [key, result[key]]),
+      ),
+      { designFamily: result.family },
     ),
-    { designFamily: result.family },
+    answers,
   );
   validateCustomerFollowUpTraceability(
     {
@@ -1498,14 +1606,7 @@ function profileFromUnderstanding(
       return answer.selection === undefined ? [answer.questionId] : [];
     }),
   );
-  if (
-    customerContent.supplied.length === 0 &&
-    obligations.some((obligation) =>
-      /\b(?:supplied|provided)\s+(?:business\s+)?(?:content|wording|images?|logo|contact|details?)\b/iu.test(
-        obligation.observableOutcome,
-      ),
-    )
-  ) {
+  if (unsuppliedCustomerContentClaims(obligations, customerContent).length > 0) {
     throw new TypeError(
       "The verification plan claims customer-supplied content that was not present in the request or answers.",
     );
@@ -2140,6 +2241,24 @@ function resolvedDecisionSelections(projectDesign, answers, profileVersion) {
     }
   }
   return Object.freeze(result.map((item) => Object.freeze({ ...item })));
+}
+
+export function finalDecisionSelections(selections) {
+  const latest = new Map();
+  for (const selection of selections) {
+    const identity = selection.kind === "product-subtype"
+      ? `${selection.kind}:${selection.subjectId}:${selection.optionId ?? selection.value}`
+      : `${selection.kind}:${selection.subjectId}`;
+    // Map preserves the original display order while the latest repeated
+    // choice replaces its value. This makes approval retries idempotent and
+    // keeps exactly one final answer per decision subject.
+    latest.set(identity, selection);
+  }
+  return Object.freeze(
+    [...latest.values()].map((selection) =>
+      Object.freeze({ ...selection }),
+    ),
+  );
 }
 
 function latestBindings(ledger, missionId) {
@@ -3681,10 +3800,10 @@ export function createProjectUnderstandingService({
         ({ sourceRequirement: _sourceRequirement, ...obligation }) => obligation,
       );
       const approvalTimestamp = clock();
-      const decisionSelections = [
+      const decisionSelections = finalDecisionSelections([
         ...resolvedDecisionSelections(projectDesign, context.clarificationAnswers, profile.profileVersion),
         ...(blueprintApproval === null ? [] : [blueprintApproval.selection]),
-      ];
+      ]);
       const acceptedRecommendations = projectDesign.recommendations.filter(
         (recommendation) =>
           decisionSelections.some(

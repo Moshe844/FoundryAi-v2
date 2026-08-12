@@ -39,7 +39,10 @@ const UNSAFE_SOURCE = Object.freeze([
   { pattern: /<script\b[^>]*\bsrc\s*=\s*["'](?:https?:)?\/\//iu, reason: "external script" },
   { pattern: /<form\b[^>]*\baction\s*=\s*["'](?:https?:)?\/\//iu, reason: "external form action" },
   { pattern: /<[^>]+\bstyle\s*=/iu, reason: "inline styling blocked by the prototype CSP" },
-  { pattern: /\.style(?:\.|\s*=)/u, reason: "DOM inline styling blocked by the prototype CSP" },
+  {
+    pattern: /(?:\.style(?:\.|\s*=)|\.setAttribute\(\s*["']style["']|\.cssText\b)/u,
+    reason: "DOM inline styling blocked by the prototype CSP",
+  },
 ]);
 
 // What to do instead, per rule. A refusal that only names the rule leaves the
@@ -146,6 +149,79 @@ function validateGeneratedOutput(value, contract) {
   });
 }
 
+function correctionPaths(error, output) {
+  const message = String(error?.message ?? error ?? "");
+  const paths = new Set();
+  for (const match of message.matchAll(/files\[(\d+)\](?: \(([^)]+)\))?/gu)) {
+    const index = Number(match[1]);
+    const path = match[2] ?? output?.files?.[index]?.path;
+    if (typeof path === "string") paths.add(path);
+  }
+  if (/inline styling blocked by the prototype CSP/iu.test(message)) {
+    for (const path of ["index.html", "styles.css", "concept.js"]) {
+      if (output?.files?.some((file) => file.path === path)) paths.add(path);
+    }
+  }
+  if (paths.size === 0 && /index\.html|heading element|semantic, localized/iu.test(message)) {
+    paths.add("index.html");
+  }
+  if (paths.size === 0 && /styles\.css|responsive transformation|typograph/iu.test(message)) {
+    paths.add("styles.css");
+  }
+  return [...paths].filter((path) =>
+    output?.files?.some((file) => file.path === path),
+  );
+}
+
+function correctionSchema(paths) {
+  return Object.freeze({
+    type: "object",
+    additionalProperties: false,
+    required: ["files"],
+    properties: Object.freeze({
+      files: Object.freeze({
+        type: "array",
+        minItems: 1,
+        maxItems: paths.length,
+        items: Object.freeze({
+          type: "object",
+          additionalProperties: false,
+          required: ["path", "content"],
+          properties: Object.freeze({
+            path: Object.freeze({ type: "string", enum: Object.freeze([...paths]) }),
+            content: Object.freeze({ type: "string", minLength: 1, maxLength: 1_000_000 }),
+          }),
+        }),
+      }),
+    }),
+  });
+}
+
+function mergeCorrection(output, correction, allowedPaths) {
+  const allowed = new Set(allowedPaths);
+  const replacements = new Map();
+  for (const file of correction?.files ?? []) {
+    if (
+      typeof file?.path !== "string" ||
+      typeof file?.content !== "string" ||
+      !allowed.has(file.path) ||
+      replacements.has(file.path)
+    ) {
+      fail("a scoped prototype correction returned an unexpected or duplicate file.");
+    }
+    replacements.set(file.path, file.content);
+  }
+  if (replacements.size === 0) fail("a scoped prototype correction returned no files.");
+  return {
+    ...output,
+    files: output.files.map((file) =>
+      replacements.has(file.path)
+        ? { path: file.path, content: replacements.get(file.path) }
+        : file,
+    ),
+  };
+}
+
 function prompt(contract, admissionFeedback = []) {
   return [
     "Generate one real, runnable Live HTML Concept Studio prototype from the exact immutable contract below.",
@@ -159,7 +235,9 @@ function prompt(contract, admissionFeedback = []) {
     "Build a real type scale rather than arbitrary sizes: pick a base of 15-17px for body and interface text, and derive headings from it with clear steps. Set line-height near 1.5 for body text and 1.0-1.15 for display sizes, and give large display type negative letter-spacing while leaving small text alone.",
     "Craft the surface as well as the layout: keep one consistent corner-radius language, one consistent border colour, and enough contrast that body text sits at 4.5:1 or better against its background. Prefer generous vertical rhythm over decoration.",
     "Do not use network requests, external URLs or scripts, environment variables, cookies, parent-window control, database code, authentication, payments, package dependencies, or build tooling.",
+    "Never use eval, new Function, Function(), or any string-to-code execution. If the prototype performs arithmetic, keep explicit operands and a pending operator and compute with normal +, -, *, and / branches; never evaluate an expression string.",
     "Keep every style in styles.css. Do not use style attributes or JavaScript element.style mutations; interactions must toggle classes, data attributes, or accessible state because the runtime CSP blocks inline styling.",
+    "When the design calls for scroll or task progress, use a native <progress max=\"100\" value=\"0\"> element and update its JavaScript .value property plus aria-valuenow. Never animate progress by assigning width, setAttribute('style', ...), cssText, style.setProperty, or any other inline style. Style the progress element and its pseudo-elements entirely in styles.css.",
     "Forbidden literal patterns in every returned file include data:, blob:, javascript:, http://, https://, protocol-relative host URLs, style= attributes, and .style DOM access. Do not add data stylesheets, data images, preload shims, CSS imports, SVG data URIs, or placeholder network URLs; use local CSS gradients and semantic HTML instead.",
     "Before returning, scan all three files for those forbidden patterns and replace them with class-based, data-attribute-based, local behavior.",
     ...(contract.strategy === "shock"
@@ -235,11 +313,58 @@ export function createPrototypeGenerationService({ modelGateway, workspaceServic
       ],
       expectedStructuredOutputSchema: CONCEPT_GENERATION_OUTPUT_SCHEMA,
       sensitiveValues: [],
-      structuredOutputValidator: (output) => validateGeneratedOutput(output, contract),
       depthLevel: 2,
       routingReason: "A lightweight static concept needs capable HTML/CSS generation at the lowest adequate design-coding depth.",
     });
-    const output = validateGeneratedOutput(response.structuredOutput, contract);
+    let candidate = response.structuredOutput;
+    let correctionResponse = null;
+    try {
+      candidate = validateGeneratedOutput(candidate, contract);
+    } catch (error) {
+      const paths = correctionPaths(error, candidate);
+      if (paths.length === 0) throw error;
+      const correctionId = `${baseId}-prototype-file-correction`;
+      try {
+        correctionResponse = await modelGateway.request({
+          requestId: correctionId,
+          missionId: contract.missionId,
+          workUnitId: `${correctionId}-work`,
+          idempotencyKey: `prototype-correction-${contract.integrityHash.slice(0, 40)}-${paths.join("-")}`,
+          purpose: [
+            "Correct only the generated prototype files named below. Return complete replacement contents for each file you change and no other files.",
+            `DETERMINISTIC_ADMISSION_FAILURE\n${String(error?.message ?? error).slice(0, 2_000)}`,
+            `ALLOWED_CORRECTION_PATHS\n${paths.join("\n")}`,
+            "Preserve the concept contract, all valid markup, CSS, interactions, accessibility, and responsive behavior. Do not simplify or replace the creative direction.",
+            "All styling must remain in styles.css. For dynamic progress use a native progress element and its value property. Never use a style attribute, setAttribute('style', ...), cssText, element.style, or style.setProperty.",
+            `CURRENT_GENERATED_FILES\n${JSON.stringify(candidate.files)}`,
+          ].join("\n\n"),
+          taskClass: ModelTaskClass.FILE_GENERATION,
+          executionStage: ModelExecutionStage.DESIGN_PROTOTYPE,
+          contextReferences: [
+            { kind: "concept-prototype-contract", id: contract.integrityHash },
+            { kind: "prototype-admission-failure", id: response.requestId },
+          ],
+          expectedStructuredOutputSchema: correctionSchema(paths),
+          sensitiveValues: [],
+          structuredOutputValidator: (correction) =>
+            validateGeneratedOutput(
+              mergeCorrection(candidate, correction, paths),
+              contract,
+            ),
+          depthLevel: 2,
+          routingReason: "A deterministic prototype admission failure needs a small file-scoped correction, not another complete concept generation.",
+        });
+        candidate = validateGeneratedOutput(
+          mergeCorrection(candidate, correctionResponse.structuredOutput, paths),
+          contract,
+        );
+      } catch (correctionError) {
+        throw new TypeError(
+          `${String(error?.message ?? error)} Scoped correction failed: ${String(correctionError?.message ?? correctionError)}`,
+        );
+      }
+    }
+    const output = candidate;
     workspaceService.writeFiles(
       contract,
       Object.fromEntries(output.files.map((file) => [file.path, file.content])),
@@ -251,9 +376,15 @@ export function createPrototypeGenerationService({ modelGateway, workspaceServic
       generationSummary: output.generationSummary,
       cached: false,
       usage: Object.freeze({
-        inputTokens: response.tokenMetadata?.inputTokens ?? 0,
-        outputTokens: response.tokenMetadata?.outputTokens ?? 0,
-        costUsd: response.costMetadata?.costUsd ?? 0,
+        inputTokens:
+          (response.tokenMetadata?.inputTokens ?? 0) +
+          (correctionResponse?.tokenMetadata?.inputTokens ?? 0),
+        outputTokens:
+          (response.tokenMetadata?.outputTokens ?? 0) +
+          (correctionResponse?.tokenMetadata?.outputTokens ?? 0),
+        costUsd:
+          (response.costMetadata?.costUsd ?? 0) +
+          (correctionResponse?.costMetadata?.costUsd ?? 0),
       }),
       requestId: response.requestId,
     });

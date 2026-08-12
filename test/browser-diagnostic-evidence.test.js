@@ -2,9 +2,14 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { parseBrowserResult } from "../src/domain/runtime-preview.js";
-import { runtimeSourceManifest } from "../src/work-plane/runtime-preview-service.js";
+import {
+  browserCertificationCheckpoint,
+  resolveAuthoritativeBrowserChecks,
+  runtimeSourceManifest,
+} from "../src/work-plane/runtime-preview-service.js";
 import {
   ProductionRepairScope,
+  browserCheckAuthorityPlan,
   browserCheckObservationFailure,
   bindFoundryObservationHarness,
   deepestRepairScope,
@@ -13,6 +18,134 @@ import {
   validateBrowserObservationTestSource,
   validateBrowserRepairProposal,
 } from "../src/work-plane/production-mission-service.js";
+
+test("approved prototype fidelity is the sole authority for derived design checks", () => {
+  const obligations = [
+    {
+      obligationId: "workflow-signup",
+      sourceRequirement: "customer-intent-1",
+    },
+    {
+      obligationId: "design-composition",
+      sourceRequirement: "approved-design-composition",
+    },
+    {
+      obligationId: "design-navigation",
+      sourceRequirement: "approved-design-navigation",
+    },
+  ];
+  const bindings = {
+    "workflow-signup": "browser-check",
+    "design-composition": "browser-check",
+    "design-navigation": "browser-check",
+  };
+
+  assert.deepEqual(
+    browserCheckAuthorityPlan({
+      obligations,
+      bindings,
+      approvedPrototypeContract: { approvedDesignId: "approved-design-1" },
+    }),
+    {
+      required: [
+        "design-composition",
+        "design-navigation",
+        "workflow-signup",
+      ],
+      functional: ["workflow-signup"],
+      design: ["design-composition", "design-navigation"],
+    },
+  );
+  assert.deepEqual(
+    browserCheckAuthorityPlan({ obligations, bindings }),
+    {
+      required: [
+        "design-composition",
+        "design-navigation",
+        "workflow-signup",
+      ],
+      functional: [
+        "design-composition",
+        "design-navigation",
+        "workflow-signup",
+      ],
+      design: [],
+    },
+  );
+  // The executable RequirementContract omits sourceRequirement; production
+  // must plan authority from ApprovedProjectContract.acceptanceObligations.
+  assert.deepEqual(
+    browserCheckAuthorityPlan({
+      obligations: obligations.map(({ obligationId }) => ({ obligationId })),
+      bindings,
+      approvedPrototypeContract: { approvedDesignId: "approved-design-1" },
+    }).design,
+    [],
+  );
+});
+
+test("saved-credential login proof has the same browser authority as its injected check", () => {
+  const obligations = [
+    {
+      obligationId: "credential-login",
+      origin: "customer-stated",
+      statement:
+        "Submitting valid credentials creates a server-validated session that remains authenticated after refresh.",
+    },
+    {
+      obligationId: "ordinary-structured-test",
+      origin: "customer-stated",
+      statement: "A generated identifier is stored durably.",
+    },
+  ];
+  const bindings = {
+    "credential-login": "structured-tests",
+    "ordinary-structured-test": "structured-tests",
+  };
+  assert.deepEqual(browserCheckAuthorityPlan({ obligations, bindings }), {
+    required: ["credential-login"],
+    functional: ["credential-login"],
+    design: [],
+  });
+});
+
+test("a passing fidelity verdict resolves stale derived design booleans without weakening workflows", () => {
+  // This is the exact contradiction from mission-1786399616518-33deeabe:
+  // every customer workflow was true, two model-authored design checks were
+  // stale, and the deterministic 12-aspect prototype comparison passed.
+  const raw = {
+    "obligation-001": true,
+    "obligation-002": true,
+    "obligation-005": true,
+    "obligation-006": true,
+    "obligation-007": true,
+    "obligation-010": false,
+    "obligation-011": false,
+    "obligation-012": true,
+    "obligation-013": true,
+    "obligation-014": true,
+  };
+  const resolved = resolveAuthoritativeBrowserChecks(raw, {
+    "obligation-010": true,
+    "obligation-011": true,
+  });
+  assert.equal(Object.values(resolved).every(Boolean), true);
+  assert.equal(raw["obligation-010"], false, "raw evidence remains immutable");
+  assert.throws(
+    () =>
+      resolveAuthoritativeBrowserChecks(raw, {
+        "unobserved-design-check": true,
+      }),
+    /only promote an observed check/u,
+  );
+  assert.throws(
+    () =>
+      resolveAuthoritativeBrowserChecks(raw, {
+        "obligation-001": false,
+      }),
+    /only promote an observed check/u,
+  );
+});
 
 test("browser observations retain deterministic scalar diagnostics", () => {
   const parsed = parseBrowserResult(
@@ -90,6 +223,53 @@ test("evidence written by the observation is not treated as changed source", () 
     ],
   };
   assert.notEqual(runtimeSourceManifest(started), runtimeSourceManifest(tampered));
+});
+
+test("a restored clean checkpoint owns the derived browser verdict", () => {
+  const source = [
+    { path: "app/page.tsx", contentHash: "a".repeat(64), size: 100 },
+    { path: "app/globals.css", contentHash: "b".repeat(64), size: 200 },
+  ];
+  const startedCheckpoint = {
+    checkpointId: "runtime-start",
+    contentManifest: source,
+  };
+  const observedCheckpoint = {
+    checkpointId: "browser-post",
+    contentManifest: [
+      ...source,
+      { path: "data/app.db", contentHash: "c".repeat(64), size: 300 },
+      { path: "evidence/desktop.png", contentHash: "d".repeat(64), size: 400 },
+    ],
+  };
+  const currentCheckpoint = {
+    checkpointId: "browser-pre-restored",
+    contentManifest: source,
+  };
+  assert.equal(
+    browserCertificationCheckpoint({
+      startedCheckpoint,
+      observedCheckpoint,
+      currentCheckpoint,
+    }),
+    currentCheckpoint.checkpointId,
+  );
+
+  assert.throws(
+    () =>
+      browserCertificationCheckpoint({
+        startedCheckpoint,
+        observedCheckpoint: {
+          ...observedCheckpoint,
+          contentManifest: [
+            { ...source[0], contentHash: "9".repeat(64) },
+            source[1],
+          ],
+        },
+        currentCheckpoint,
+      }),
+    /differs from the running artifact/u,
+  );
 });
 
 test("a check that was never computed is not reported as an application defect", () => {
@@ -202,9 +382,24 @@ test("Foundry's observation harness satisfies every scaffolding gate itself", ()
   assert.match(harness, /clientWidth/u);
   assert.match(harness, /keyboard\.press\("Tab"\)/u);
   assert.match(harness, /activeElement/u);
+  assert.match(harness, /const responsiveEvidence = \{\s*phone,/u);
+  assert.match(harness, /mobile:\s*phone/u);
+  assert.match(harness, /focus:\s*keyboardFocusObservable/u);
+  assert.match(harness, /labels:\s*accessibleLabellingObserved/u);
   // Per-check isolation: one failing check cannot leave another unobserved.
   assert.match(harness, /try \{[\s\S]*check\(\{ page, expect/u);
   assert.match(harness, /catch \(error: unknown\)[\s\S]*checks\[id\] = false/u);
+});
+
+test("simple projects receive a shorter per-check browser budget", () => {
+  const harness = foundryObservationHarness(["obligation-001"], {
+    checkBudgetMs: 8_000,
+  });
+  assert.match(harness, /const CHECK_BUDGET_MS = 8_000;/u);
+  assert.match(
+    harness,
+    /querySelectorAll\("a\[href\], button, input, select, textarea"\)/u,
+  );
 });
 
 test("one repair corrects a failure whose causes span several files", () => {
@@ -386,6 +581,7 @@ test("an unbalanced delimiter is reported with its position and cause", async ()
   for (const balanced of [
     "export default function P(){return (<main><h1>Hi</h1></main>)}",
     "export default function P(){return <p>Bea&apos;s desk isn't ready</p>}",
+    "import type{Metadata}from'next';import'./globals.css';export const metadata:Metadata={title:'Secure access'};",
     "const re = /[/]{1,2}/g; const n = [1,2].map((x)=>({x}));",
   ]) {
     assert.equal(unbalancedJavaScriptDelimiter(balanced), null, balanced);
@@ -590,7 +786,7 @@ test("a failing workflow reports the request that failed under it", async () => 
   // watching console and page errors while ignoring the network entirely.
   const harness = foundryObservationHarness(["obligation-004"]);
 
-  assert.match(harness, /page\.on\("response"/u);
+  assert.match(harness, /observedPage\.on\("response"/u);
   assert.match(harness, /if \(status < 400 \|\| failedRequests\.length >= 25\) return;/u);
 
   // Each failure is tagged with the check that was running when it arrived, so
@@ -603,6 +799,16 @@ test("a failing workflow reports the request that failed under it", async () => 
   assert.match(harness, /\.filter\(\(entry\) => checks\[entry\.check\] === false\)/u);
   assert.match(harness, /"While computing " \+ entry\.check \+ ", " \+ entry\.method/u);
   assert.match(harness, /answered " \+ entry\.status/u);
+  assert.match(harness, /\[400, 401, 403, 409, 422\]\.includes\(entry\.status\)/u);
+  assert.match(harness, /checks\[entry\.check\] === true/u);
+  assert.match(harness, /blockingFailedRequests\(\)\.length === 0/u);
+  assert.match(harness, /consoleErrors: blockingConsoleErrors\(\)/u);
+  assert.equal(harness.includes("/\\/api\\//u.test(entry.url)"), true);
+  assert.equal(
+    harness.includes("/status(?: code)? of (\\d{3})/iu.exec(message)"),
+    true,
+  );
+  assert.equal(harness.includes("//api//u"), false);
 
   // The harness must still be valid source and still satisfy its own gates.
   const { unbalancedJavaScriptDelimiter } = await import(
@@ -629,21 +835,15 @@ test("no check can inherit the browser state another check left behind", async (
   // waited the entire test budget for a "Sign in" tab and every check after it
   // reported that the browser had closed. One cause, nine reported failures.
   const harness = foundryObservationHarness(["obligation-001", "obligation-002"]);
-  assert.match(
-    harness,
-    /const resetBrowserState = async \(\) => \{/u,
-    "the harness must define a state reset",
-  );
-  assert.match(harness, /await page\.context\(\)\.clearCookies\(\)/u);
-  assert.match(harness, /localStorage\.clear\(\)/u);
-  // The reset has to run inside the loop, before the check -- defining it and
-  // never calling it is exactly the bug this replaces.
-  const loop = harness.slice(harness.indexOf("for (const id of requiredCheckIds)"));
+  assert.match(harness, /async \(\{ browser \}\) =>/u);
+  const loop = harness.slice(harness.lastIndexOf("for (const id of requiredCheckIds)"));
   assert.match(
     loop,
-    /await resetBrowserState\(\);[\s\S]{0,400}?check\(\{ page, expect/u,
-    "each check must be preceded by the reset",
+    /checkContext = await browser\.newContext\([\s\S]{0,700}?check\(\{ page, expect/u,
+    "each check must receive a new browser context",
   );
+  assert.match(loop, /finally \{\s*await checkContext\?\.close\(\)/u);
+  assert.doesNotMatch(loop, /resetBrowserState/u);
 });
 
 test("one stuck check cannot spend the whole run's time", async () => {
@@ -658,4 +858,6 @@ test("one stuck check cannot spend the whole run's time", async () => {
   // The budget helper must be typed: the observation spec is TypeScript, and an
   // implicit any parameter here is a type error in the generated project.
   assert.match(harness, /const withBudget = async <T>\(work: \(\) => Promise<T>\): Promise<T>/u);
+  assert.match(harness, /repeatedFailureCount >= 2/u);
+  assert.match(harness, /Skipped " \+ id \+ " because two isolated checks already failed identically/u);
 });

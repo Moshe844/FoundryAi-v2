@@ -1817,8 +1817,8 @@ details[open] > summary .chev {
 }
 .discovery-workspace {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(290px, 360px);
-  gap: clamp(var(--space-8), 5vw, var(--space-16));
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-6);
   align-items: start;
 }
 .discovery-stage {
@@ -1859,18 +1859,65 @@ details[open] > summary .chev {
   margin-top: var(--space-3);
 }
 .discovery-companion {
-  position: sticky;
-  top: var(--space-6);
+  width: min(100%, 760px);
+  overflow: clip;
+  border: 1px solid var(--line-hairline);
+  border-radius: var(--radius-md);
+  background: var(--surface-raised);
+}
+.discovery-companion[open] {
+  border-color: var(--line);
+}
+.companion-trigger {
+  min-height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  list-style: none;
+  color: var(--ink-primary);
+  cursor: pointer;
+}
+.companion-trigger::-webkit-details-marker {
+  display: none;
+}
+.companion-trigger > span:first-child {
+  display: grid;
+  gap: 2px;
+}
+.companion-trigger strong {
+  font: 600 14px/20px var(--font-text);
+}
+.companion-trigger small {
+  color: var(--ink-tertiary);
+  font: 400 12px/18px var(--font-text);
+}
+.companion-trigger::after {
+  content: "+";
+  flex: 0 0 auto;
+  color: var(--ink-secondary);
+  font: 400 22px/1 var(--font-text);
+}
+.discovery-companion[open] .companion-trigger::after {
+  content: "\2212";
+}
+.companion-count {
+  min-width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  margin-left: auto;
+  border-radius: 999px;
+  background: var(--accent-wash);
+  color: var(--accent-fill);
+  font: 600 11px/1 var(--font-text);
+}
+.companion-body {
   display: grid;
   gap: var(--space-3);
-  max-height: calc(100dvh - var(--space-12));
-  overflow-y: auto;
-  padding: var(--space-5);
-  border: 1px solid var(--line-hairline);
-  border-radius: var(--radius-lg);
-  background: var(--surface-cream);
-  box-shadow: var(--shadow-1);
-  scrollbar-width: thin;
+  padding: var(--space-4);
+  border-top: 1px solid var(--line-hairline);
 }
 .companion-heading {
   display: grid;
@@ -1990,8 +2037,7 @@ details[open] > summary .chev {
     grid-template-columns: 1fr;
   }
   .discovery-companion {
-    position: static;
-    max-height: none;
+    width: 100%;
   }
 }
 

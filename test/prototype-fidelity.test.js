@@ -70,6 +70,25 @@ test("the same experience passes deterministic prototype-to-production fidelity"
   assert.equal(result.integrityHash.length, 64);
 });
 
+test("a stateful initial screen does not pad controls to match a multi-surface concept", () => {
+  const initialStateOnly = VIEWPORTS.map((entry) => {
+    const copy = structuredClone(entry);
+    copy.measurement.focusableCount = 2;
+    return copy;
+  });
+  const result = evaluatePrototypeFidelity({
+    approvedDesignContract: APPROVED,
+    prototypeVerification: evidence(VIEWPORTS),
+    productionBrowserResult: { results: initialStateOnly },
+  });
+
+  assert.ok(!result.failedAspects.includes("interactions"), JSON.stringify(result.failedAspects));
+  assert.equal(
+    result.verdicts.find((entry) => entry.aspect === "interactions").detail.comparisons[0].minimumRequired,
+    1,
+  );
+});
+
 test("matching colors cannot hide a generic replacement composition", () => {
   const flat = VIEWPORTS.map((entry) => ({
     ...structuredClone(entry),
