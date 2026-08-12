@@ -733,6 +733,54 @@ function addBlueprintDesignRequirements(add, implementation, exclusions, bluepri
   }
 }
 
+// Every certified web build carries these, whatever it is. They said nothing
+// about the product and they dominated the score: a todo dashboard measured 14
+// -- eight capabilities, three acceptance methods, three journeys -- of which
+// only the three journeys described anything the customer asked for. Anything
+// at 12 or above routed to the ARCHITECTURE tier, so a todo list and a bank
+// were handed the same model, and every project paid the deepest tier's
+// latency on file generation and again on each repair.
+const BASELINE_STACK_CAPABILITIES = Object.freeze(new Set([
+  "automated-tests",
+  "browser-verification",
+  "development-runtime",
+  "package-export",
+  "production-build",
+  "typescript",
+  "web-application",
+]));
+
+/**
+ * Scores what varies with the product. Acceptance methods are excluded
+ * entirely: browser-check, production-build and browser-errors describe how
+ * Foundry verifies, not what was asked for, and they are present on every
+ * build.
+ */
+export function projectComplexityScore({
+  capabilities = [],
+  integrationRequirements = [],
+  primaryJourneys = [],
+  secondaryJourneys = [],
+} = {}) {
+  const productCapabilities = [...capabilities].filter(
+    (capability) => !BASELINE_STACK_CAPABILITIES.has(capability),
+  );
+  return (
+    productCapabilities.length +
+    integrationRequirements.length +
+    primaryJourneys.length +
+    secondaryJourneys.length
+  );
+}
+
+// Rescaled with the constants removed: the old thresholds were calibrated
+// against a score that started around eleven before a single journey counted.
+export function modelDepthForComplexity(complexity) {
+  if (complexity >= 10) return 4;
+  if (complexity >= 6) return 3;
+  return 2;
+}
+
 export function approvedContractRequirementCatalogue(contractInput) {
   const contract = normalizeApprovedProjectContract(contractInput);
   const implementation = new Map();
@@ -851,8 +899,13 @@ export function deriveContractRoutingRequirements(contractInput, stackManifest) 
   if (unsupported.length > 0) fail(`Approved contract requires unsupported stack capabilities: ${unsupported.join(", ")}.`);
   const integrationRequirements = [...new Set(contract.acceptedRecommendations.flatMap((item) => item.requiredDependencies))];
   const verificationMethods = [...new Set(contract.verificationPlan.map((item) => item.acceptanceMethod))].sort();
-  const complexity = contract.selectedStackCapability.capabilities.length + integrationRequirements.length + verificationMethods.length + contract.workflows.primaryJourneys.length + contract.workflows.secondaryJourneys.length;
-  const modelDepth = complexity >= 12 ? 4 : complexity >= 7 ? 3 : 2;
+  const complexity = projectComplexityScore({
+    capabilities: contract.selectedStackCapability.capabilities,
+    integrationRequirements,
+    primaryJourneys: contract.workflows.primaryJourneys,
+    secondaryJourneys: contract.workflows.secondaryJourneys,
+  });
+  const modelDepth = modelDepthForComplexity(complexity);
   return freeze({
     contractHash: contract.contentHash,
     contractVersion: contract.contractVersion,
