@@ -22,7 +22,7 @@ import { ObservationKind } from "../domain/observation-evidence.js";
 import { assertObservationIndependence } from "../domain/observation-independence.js";
 import {
   compileDeclaredChecks,
-  normalizeDeclaredChecks,
+  readDeclaredChecks,
 } from "../domain/observation-primitives.js";
 import {
   ObservationAction,
@@ -4823,16 +4823,32 @@ export function bindFoundryObservationHarness(plan, requiredCheckIds, options = 
   );
   let compiledChecks = null;
   if (declarationFile !== undefined) {
-    const declared = normalizeDeclaredChecks(
-      JSON.parse(String(declarationFile.content)),
-      requiredCheckIds,
-    );
-    compiledChecks = {
-      path: "tests/foundry-checks.ts",
-      content: compileDeclaredChecks(declared),
-      contractRequirementIds: declarationFile.contractRequirementIds ?? traceIds,
-      sourceRequirementIds: declarationFile.sourceRequirementIds ?? [],
-    };
+    // A declaration Foundry cannot read costs that one check, never the
+    // bundle. Throwing here sends the mission back for a paid regeneration,
+    // and two consecutive builds died that way -- once on `field` versus
+    // `target`, once on a bare count -- while every other check in the file
+    // was fine. A rejected check is simply absent from the compiled module:
+    // the harness reports it unimplemented, its obligation fails honestly, and
+    // the repair edits one field of data instead of rebuilding a project.
+    let declared = null;
+    try {
+      declared = readDeclaredChecks(
+        JSON.parse(String(declarationFile.content)),
+        requiredCheckIds,
+      );
+    } catch {
+      declared = null;
+    }
+    if (declared !== null && declared.checks.length > 0) {
+      compiledChecks = {
+        path: "tests/foundry-checks.ts",
+        content: compileDeclaredChecks(declared),
+        contractRequirementIds: declarationFile.contractRequirementIds ?? traceIds,
+        sourceRequirementIds: declarationFile.sourceRequirementIds ?? [],
+      };
+    }
+    // Nothing readable at all leaves the model's own module in place, if it
+    // wrote one, so the previous path still runs rather than the build dying.
   }
   const retained = plan.files.filter(
     (file) =>

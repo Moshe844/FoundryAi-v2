@@ -292,6 +292,47 @@ export function normalizeDeclaredChecks(value, requiredCheckIds = []) {
 }
 
 /**
+ * The same normalisation, but a declaration Foundry cannot read costs that one
+ * check rather than the whole bundle.
+ *
+ * Refusing the bundle sends the mission back for a paid regeneration, and two
+ * consecutive builds died that way -- once on `field` versus `target`, once on
+ * a bare count -- while every other check in the file was fine. That is the
+ * repair loop this module exists to remove, relocated one stage earlier and
+ * made more expensive.
+ *
+ * A rejected check is not quietly dropped: it is absent from the compiled
+ * module, the harness reports it as unimplemented, and its obligation fails
+ * honestly. The repair that follows edits one field of data instead of
+ * regenerating a project.
+ */
+export function readDeclaredChecks(value, requiredCheckIds = []) {
+  if (value === null || typeof value !== "object" || !Array.isArray(value.checks)) {
+    return { checks: [], rejected: [], unreadable: "no checks array was declared." };
+  }
+  const checks = [];
+  const rejected = [];
+  value.checks.forEach((entry, index) => {
+    try {
+      checks.push(normalizeDeclaredCheck(entry, `checks[${index}]`));
+    } catch (error) {
+      rejected.push({
+        checkId: typeof entry?.checkId === "string" ? entry.checkId : `checks[${index}]`,
+        reason: String(error?.message ?? error),
+      });
+    }
+  });
+  const declared = new Set(checks.map((entry) => entry.checkId));
+  const missing = [...requiredCheckIds].filter((id) => !declared.has(id));
+  return Object.freeze({
+    checks: Object.freeze(checks),
+    rejected: Object.freeze(rejected),
+    missing: Object.freeze(missing),
+    unreadable: null,
+  });
+}
+
+/**
  * True when a declaration compares something the application computed against a
  * number the author chose. The collusion rule, but structural: with primitives
  * it is a property of the data, so it cannot be written around in code.

@@ -7,6 +7,7 @@ import {
   compileDeclaredChecks,
   normalizeDeclaredCheck,
   normalizeDeclaredChecks,
+  readDeclaredChecks,
 } from "../src/domain/observation-primitives.js";
 
 const rows = { how: "css", value: "tbody tr" };
@@ -199,4 +200,40 @@ test("a count naming nothing to count is still refused, with the shape", () => {
     () => normalizeDeclaredCheck({ checkId: "a", primitive: P.TEXT_PRESENT, expectText: "x", expectCount: 3 }),
     /names no locator to count/u,
   );
+});
+
+test("one unreadable check costs that check, not the bundle", () => {
+  // Two consecutive builds died because a single malformed declaration threw
+  // and sent the whole mission back for a paid regeneration, while every other
+  // check in the file was fine.
+  const result = readDeclaredChecks(
+    {
+      checks: [
+        { checkId: "obligation-001", primitive: P.ELEMENT_VISIBLE, target: rows },
+        { checkId: "obligation-002", primitive: P.SUBMIT_FORM, fields: [{ value: "x" }], submit: rows, expectText: "y" },
+      ],
+    },
+    ["obligation-001", "obligation-002"],
+  );
+  assert.equal(result.checks.length, 1);
+  assert.equal(result.checks[0].checkId, "obligation-001");
+  assert.equal(result.rejected.length, 1);
+  assert.equal(result.rejected[0].checkId, "obligation-002");
+});
+
+test("a rejected check is reported missing rather than quietly passing", () => {
+  // Dropping it silently would be the false-success problem: the obligation
+  // must fail honestly, and the repair then edits one field of data.
+  const result = readDeclaredChecks(
+    { checks: [{ checkId: "obligation-002", primitive: "not-a-primitive" }] },
+    ["obligation-001", "obligation-002"],
+  );
+  assert.deepEqual([...result.missing], ["obligation-001", "obligation-002"]);
+  assert.equal(result.checks.length, 0);
+});
+
+test("an entirely unreadable declaration reports itself rather than throwing", () => {
+  const result = readDeclaredChecks({ nonsense: true }, ["obligation-001"]);
+  assert.equal(result.checks.length, 0);
+  assert.match(result.unreadable, /no checks array/u);
 });
