@@ -646,7 +646,23 @@ test("a Playwright test cannot break the production build", async () => {
     harness,
     /check\(\{ page, expect, responsiveEvidence, accessibilityEvidence \}\)/u,
   );
-  assert.match(source, /Take expect from the supplied context rather than importing it/u);
+  // Stronger than the old prompt rule it replaces: the checks module is now
+  // compiled by Foundry from declarations, so it cannot import expect at all.
+  const { compileDeclaredChecks, normalizeDeclaredChecks, ObservationPrimitive } =
+    await import("../src/domain/observation-primitives.js");
+  const compiled = compileDeclaredChecks(
+    normalizeDeclaredChecks({
+      checks: [
+        {
+          checkId: "obligation-001",
+          primitive: ObservationPrimitive.ELEMENT_VISIBLE,
+          target: { how: "role", value: "table" },
+        },
+      ],
+    }),
+  );
+  assert.doesNotMatch(compiled, /@playwright\/test/u, "the compiled module imports nothing");
+  assert.match(compiled, /async \(\{ page, expect \}: Context\)/u, "expect arrives in the context");
 });
 
 test("the responsive probe measures the narrow end, where layouts break", async () => {

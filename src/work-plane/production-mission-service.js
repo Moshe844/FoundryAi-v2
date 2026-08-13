@@ -21,6 +21,10 @@ import {
 import { ObservationKind } from "../domain/observation-evidence.js";
 import { assertObservationIndependence } from "../domain/observation-independence.js";
 import {
+  compileDeclaredChecks,
+  normalizeDeclaredChecks,
+} from "../domain/observation-primitives.js";
+import {
   ObservationAction,
   browserObservationDecision,
 } from "../domain/browser-observation-policy.js";
@@ -4796,6 +4800,8 @@ test("foundry contract observation", async ({ browser }) => {
 
 // Foundry's harness is the only thing permitted to emit the evidence marker:
 // two markers would make the observation ambiguous.
+export const DECLARED_CHECKS_PATH = "tests/foundry-checks.json";
+
 export function bindFoundryObservationHarness(plan, requiredCheckIds, options = {}) {
   if (!Array.isArray(plan?.files) || (requiredCheckIds ?? []).length === 0) {
     return plan;
@@ -4807,16 +4813,41 @@ export function bindFoundryObservationHarness(plan, requiredCheckIds, options = 
       ),
     ),
   ];
+  // When the model declared its observations, Foundry compiles the checks
+  // module rather than accepting one it wrote. Waiting, derived counts and
+  // stated outcomes then hold by construction instead of by twenty-five
+  // instructions the generated code had to remember. Absent declarations the
+  // hand-written path still runs, so this cannot brick a build on its own.
+  const declarationFile = plan.files.find(
+    (file) => file.path === DECLARED_CHECKS_PATH,
+  );
+  let compiledChecks = null;
+  if (declarationFile !== undefined) {
+    const declared = normalizeDeclaredChecks(
+      JSON.parse(String(declarationFile.content)),
+      requiredCheckIds,
+    );
+    compiledChecks = {
+      path: "tests/foundry-checks.ts",
+      content: compileDeclaredChecks(declared),
+      contractRequirementIds: declarationFile.contractRequirementIds ?? traceIds,
+      sourceRequirementIds: declarationFile.sourceRequirementIds ?? [],
+    };
+  }
   const retained = plan.files.filter(
     (file) =>
-      file.path === "tests/foundry-checks.ts" ||
-      !/^tests\/.*\.(?:spec|test)\.(?:js|jsx|ts|tsx)$/u.test(file.path) ||
-      !/FOUNDRY_BROWSER_RESULT/u.test(String(file.content)),
+      file.path !== DECLARED_CHECKS_PATH &&
+      // A compiled module replaces anything the model wrote at that path.
+      !(compiledChecks !== null && file.path === "tests/foundry-checks.ts") &&
+      (file.path === "tests/foundry-checks.ts" ||
+        !/^tests\/.*\.(?:spec|test)\.(?:js|jsx|ts|tsx)$/u.test(file.path) ||
+        !/FOUNDRY_BROWSER_RESULT/u.test(String(file.content))),
   );
   return {
     ...plan,
     files: [
       ...retained.filter((file) => file.path !== "tests/foundry-observation.spec.ts"),
+      ...(compiledChecks === null ? [] : [compiledChecks]),
       {
         path: "tests/foundry-observation.spec.ts",
         content: foundryObservationHarness(requiredCheckIds, options),
@@ -5218,7 +5249,17 @@ function bundlePrompt(
     // policing fifty rules about how it chose to write them, and rejecting
     // correct code for its style. It supplies the assertions only.
     "Do not write a Playwright spec file and do not emit FOUNDRY_BROWSER_RESULT. Foundry generates tests/foundry-observation.spec.ts, which owns the evidence marker, console and page error capture, per-check isolation, and the shared phone-layout and accessibility measurements. A spec file you write that emits the marker is discarded.",
-    "Write exactly one observation file, tests/foundry-checks.ts, exporting `export const obligationChecks: Record<string, (context: { page: any; expect: any; responsiveEvidence: Record<string, boolean>; accessibilityEvidence: Record<string, boolean> }) => Promise<{ passed: boolean; diagnostics: Record<string, boolean | number | string | null> }>> = { ... }` with one entry keyed by each exact supplied checkId. Take expect from the supplied context rather than importing it; the file must import nothing from @playwright/test.",
+    // Declared, not written. Across 251 builds, 57% of every repair rewrite
+    // landed on test files rather than on the application, and the defects
+    // repeated: reading the DOM before the request resolved, asserting a
+    // literal the buggy code produced, leaving a session behind for the next
+    // check. None of that is project reasoning, so the model supplies the part
+    // that varies -- selectors and values -- and Foundry compiles the rest.
+    "Write exactly one observation file, tests/foundry-checks.json, containing {\"checks\": [ ... ]} with one entry for each exact supplied checkId. Do not write TypeScript or Playwright code: Foundry compiles this declaration into the checks module, and it owns waiting, isolation and evidence.",
+    "Each entry is { checkId, primitive, ... }. The primitives are: element-visible (target), text-present (expectText), element-count (target, expectCount), computed-style (target, property, equals), attribute-equals (target, property, equals), submit-form (fields, submit), click-then-expect (target), select-then-expect (target, equals), survives-reload.",
+    "A locator is { how, value } where how is role, label, text, placeholder, testId or css; add name for a role. Prefer role with an exact accessible name, then label, then testId; use css last.",
+    "Any primitive that acts -- submit-form, click-then-expect, select-then-expect, survives-reload -- must also state its outcome as expectVisible, expectText or expectCount. An action whose result is never observed proves only that it did not throw, and is refused.",
+    "expectCount is { of, equals }, where of is the locator being counted and equals is either a whole number or { countOf: locator } derived from the page. For anything the application computed -- a total, a count, a summary -- derive it: compare the displayed value against the elements that genuinely satisfy the condition, never against a number you worked out yourself. A dashboard whose open-count wrongly included pending rows passed its own check because the check asserted the literal the wrong code produced.",
     "Each entry drives the running UI with Playwright through `context.page` and returns { passed, diagnostics }. passed must be computed from what the browser actually showed. diagnostics names the sub-observations behind that verdict, so a false verdict identifies its exact failed predicate. Do not initialize arrays, attach listeners, catch your own errors, or print anything: the harness does all of it.",
     "The harness clears browser cookies and storage between checks, but it deliberately preserves the real SQLite database. Any account email, username, list name, or other unique record created by a check must therefore be generated inside that check or helper invocation. Never declare a reusable identity once at module load, including a template using Date.now(), because every later check will submit the same value and receive a conflict or 422 response.",
     "Every check that observes a protected or authenticated surface must establish its own unique account/session inside that same check before locating dashboard content. This includes composition, navigation, responsive, visual-character, and accessibility checks; none may inspect the signed-out page and claim that as evidence for a protected dashboard.",
