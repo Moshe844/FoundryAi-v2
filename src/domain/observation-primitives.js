@@ -353,9 +353,13 @@ function locatorExpression(locator) {
     case "role":
       return locator.name === undefined
         ? `page.getByRole(${value})`
-        : `page.getByRole(${value}, { name: ${JSON.stringify(locator.name)} })`;
+        : `page.getByRole(${value}, { name: ${JSON.stringify(locator.name)}, exact: true })`;
     case "label":
-      return `page.getByLabel(${value})`;
+      // Exact by default. Playwright label queries also match longer accessible
+      // names, so "New task" matches "New task progress" and the strict action
+      // aborts the workflow. A generated runner must not leave that to chance:
+      // the bundle gate refuses it, and it failed a build.
+      return `page.getByLabel(${value}, { exact: true })`;
     case "text":
       return `page.getByText(${value})`;
     case "placeholder":
