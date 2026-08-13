@@ -5259,6 +5259,37 @@ function bundlePrompt(
     "Each entry is { checkId, primitive, ... }. The primitives are: element-visible (target), text-present (expectText), element-count (target, expectCount), computed-style (target, property, equals), attribute-equals (target, property, equals), submit-form (fields, submit), click-then-expect (target), select-then-expect (target, equals), survives-reload.",
     "A locator is { how, value } where how is role, label, text, placeholder, testId or css; add name for a role. Prefer role with an exact accessible name, then label, then testId; use css last.",
     "Any primitive that acts -- submit-form, click-then-expect, select-then-expect, survives-reload -- must also state its outcome as expectVisible, expectText or expectCount. An action whose result is never observed proves only that it did not throw, and is refused.",
+    // A worked example, because the declarations travel as a JSON string inside
+    // a file and no schema constrains them there. Generation wrote `target`
+    // where the shape wants `field`, was corrected, and regressed to `target`
+    // again on the next attempt -- two paid regenerations spent on a spelling
+    // it had no example to copy.
+    `Worked example of tests/foundry-checks.json:\n${JSON.stringify({
+      checks: [
+        {
+          checkId: "obligation-001",
+          primitive: "element-visible",
+          target: { how: "role", value: "heading", name: "Tasks" },
+        },
+        {
+          checkId: "obligation-002",
+          primitive: "submit-form",
+          fields: [{ field: { how: "label", value: "New task" }, value: "Buy milk" }],
+          submit: { how: "role", value: "button", name: "Add task" },
+          expectVisible: { how: "text", value: "Buy milk" },
+        },
+        {
+          checkId: "obligation-003",
+          primitive: "select-then-expect",
+          target: { how: "label", value: "Status" },
+          equals: "Done",
+          expectCount: {
+            of: { how: "css", value: "[data-task]" },
+            equals: { countOf: { how: "css", value: "[data-task][data-done]" } },
+          },
+        },
+      ],
+    }, null, 1)}`,
     "expectCount is { of, equals }, where of is the locator being counted and equals is either a whole number or { countOf: locator } derived from the page. For anything the application computed -- a total, a count, a summary -- derive it: compare the displayed value against the elements that genuinely satisfy the condition, never against a number you worked out yourself. A dashboard whose open-count wrongly included pending rows passed its own check because the check asserted the literal the wrong code produced.",
     "Each entry drives the running UI with Playwright through `context.page` and returns { passed, diagnostics }. passed must be computed from what the browser actually showed. diagnostics names the sub-observations behind that verdict, so a false verdict identifies its exact failed predicate. Do not initialize arrays, attach listeners, catch your own errors, or print anything: the harness does all of it.",
     "The harness clears browser cookies and storage between checks, but it deliberately preserves the real SQLite database. Any account email, username, list name, or other unique record created by a check must therefore be generated inside that check or helper invocation. Never declare a reusable identity once at module load, including a template using Date.now(), because every later check will submit the same value and receive a conflict or 422 response.",

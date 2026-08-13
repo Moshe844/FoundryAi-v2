@@ -134,3 +134,38 @@ test("the emitted module is syntactically whole and typed", () => {
   assert.doesNotMatch(source, /\((\w+)\)\s*=>/u, "callback parameters must be annotated");
   assert.match(source, /export const obligationChecks: Record<string, \(context: Context\) => Promise<Result>>/u);
 });
+
+test("target is accepted where the shape wants field", () => {
+  // Generation wrote `target` on three attempts out of four and oscillated
+  // between the two spellings across two paid regenerations, which failed a
+  // whole build over a naming disagreement rather than a defect.
+  const withTarget = normalizeDeclaredCheck({
+    checkId: "c",
+    primitive: P.SUBMIT_FORM,
+    fields: [{ target: { how: "label", value: "New task" }, value: "Buy milk" }],
+    submit: { how: "role", value: "button", name: "Add task" },
+    expectText: "Buy milk",
+  });
+  assert.deepEqual(withTarget.fields[0].field, { how: "label", value: "New task" });
+});
+
+test("a field naming no control says what the shape looks like", () => {
+  assert.throws(
+    () =>
+      normalizeDeclaredCheck({
+        checkId: "c",
+        primitive: P.SUBMIT_FORM,
+        fields: [{ value: "Buy milk" }],
+        submit: { how: "role", value: "button" },
+        expectText: "x",
+      }),
+    /"field": \{ "how": "label", "value": "Email address" \}/u,
+  );
+});
+
+test("a malformed locator says what the shape looks like", () => {
+  assert.throws(
+    () => normalizeDeclaredCheck({ checkId: "c", primitive: P.ELEMENT_VISIBLE, target: "a button" }),
+    /"how": "role", "value": "button", "name": "Save"/u,
+  );
+});

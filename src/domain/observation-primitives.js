@@ -146,7 +146,9 @@ function fail(message) {
 
 function assertLocator(value, label) {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
-    fail(`${label} must be a locator object.`);
+    fail(
+      `${label} must be a locator object, as { "how": "role", "value": "button", "name": "Save" }. how is one of role, label, text, placeholder, testId, css.`,
+    );
   }
   if (!["role", "label", "text", "placeholder", "testId", "css"].includes(value.how)) {
     fail(`${label}.how must be one of role, label, text, placeholder, testId, css.`);
@@ -174,6 +176,7 @@ const REQUIREMENTS = Object.freeze({
 const OUTCOME_KEYS = Object.freeze(["expectVisible", "expectText", "expectCount"]);
 
 export function normalizeDeclaredCheck(value, label = "check") {
+  let normalizedFields;
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     fail(`${label} must be an object.`);
   }
@@ -215,11 +218,22 @@ export function normalizeDeclaredCheck(value, label = "check") {
     if (!Array.isArray(value.fields) || value.fields.length === 0) {
       fail(`${label}.fields must list at least one field to fill.`);
     }
-    value.fields.forEach((entry, index) => {
-      assertLocator(entry?.field, `${label}.fields[${index}].field`);
+    // `target` is accepted as an alias for `field`. Generation reached for it
+    // three attempts out of four and oscillated between the two spellings
+    // across paid regenerations -- a naming disagreement, not a defect, and
+    // refusing it cost an entire build.
+    normalizedFields = value.fields.map((entry, index) => {
+      const field = entry?.field ?? entry?.target;
+      if (field === undefined) {
+        fail(
+          `${label}.fields[${index}] must name the control to fill, as { "field": { "how": "label", "value": "Email address" }, "value": "typed text" }.`,
+        );
+      }
+      assertLocator(field, `${label}.fields[${index}].field`);
       if (typeof entry.value !== "string") {
         fail(`${label}.fields[${index}].value must be a string.`);
       }
+      return Object.freeze({ field, value: entry.value });
     });
   }
   // An action with no stated outcome proves nothing: it confirms the click did
@@ -236,7 +250,11 @@ export function normalizeDeclaredCheck(value, label = "check") {
       `${label} performs an action but states no outcome. Add expectVisible, expectText or expectCount: an action whose result is never checked proves only that it did not throw.`,
     );
   }
-  return Object.freeze({ ...value });
+  return Object.freeze(
+    normalizedFields === undefined
+      ? { ...value }
+      : { ...value, fields: Object.freeze(normalizedFields) },
+  );
 }
 
 export function normalizeDeclaredChecks(value, requiredCheckIds = []) {
