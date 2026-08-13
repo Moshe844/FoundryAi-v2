@@ -169,3 +169,34 @@ test("a malformed locator says what the shape looks like", () => {
     /"how": "role", "value": "button", "name": "Save"/u,
   );
 });
+
+test("every unambiguous way to say a count is accepted", () => {
+  // Generation alternated between the full shape and a bare number across paid
+  // regenerations, and each guess it got wrong cost a whole build -- the same
+  // repair loop this change exists to remove, moved one stage earlier.
+  const forms = [
+    { checkId: "a", primitive: P.ELEMENT_COUNT, target: rows, expectCount: 3 },
+    { checkId: "b", primitive: P.ELEMENT_COUNT, target: rows, expectCount: { countOf: openRows } },
+    { checkId: "c", primitive: P.ELEMENT_COUNT, target: rows, expectCount: { of: rows, equals: 3 } },
+  ];
+  for (const form of forms) {
+    const normalized = normalizeDeclaredCheck(form);
+    assert.equal(normalized.expectCount.of.value, rows.value, `${form.checkId} counts the target`);
+    assert.ok(normalized.expectCount.equals !== undefined);
+  }
+});
+
+test("a bare count still compiles to a real assertion", () => {
+  const source = compileDeclaredChecks(
+    declare([{ checkId: "a", primitive: P.ELEMENT_COUNT, target: rows, expectCount: 3 }]),
+  );
+  assert.match(source, /const expected = 3;/u);
+  assert.match(source, /toHaveCount\(expected/u);
+});
+
+test("a count naming nothing to count is still refused, with the shape", () => {
+  assert.throws(
+    () => normalizeDeclaredCheck({ checkId: "a", primitive: P.TEXT_PRESENT, expectText: "x", expectCount: 3 }),
+    /names no locator to count/u,
+  );
+});

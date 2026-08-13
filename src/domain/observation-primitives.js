@@ -199,9 +199,28 @@ export function normalizeDeclaredCheck(value, label = "check") {
     assertLocator(value.expectVisible, `${label}.expectVisible`);
   }
   if (value.expectCount !== undefined) {
+    // Liberal on purpose. Generation alternated between the full { of, equals }
+    // shape and a bare number across paid regenerations, and each spelling it
+    // guessed wrong cost an entire build -- which is the repair loop this whole
+    // change exists to remove, moved one stage earlier. Every form below says
+    // the same unambiguous thing, so all of them are accepted and normalised.
+    //   expectCount: 3                    -> count the target, expect 3
+    //   expectCount: { countOf: locator } -> count the target, expect that many
+    //   expectCount: { of, equals }       -> as written
+    const raw = value.expectCount;
+    if (typeof raw === "number" || (raw !== null && typeof raw === "object" && raw.countOf !== undefined && raw.of === undefined)) {
+      if (value.target === undefined) {
+        fail(
+          `${label}.expectCount names no locator to count, and the check has no target either. Write { "of": { … }, "equals": 3 }.`,
+        );
+      }
+      value = { ...value, expectCount: { of: value.target, equals: raw } };
+    }
     const count = value.expectCount;
     if (count === null || typeof count !== "object" || Array.isArray(count)) {
-      fail(`${label}.expectCount must name what is counted and what it equals.`);
+      fail(
+        `${label}.expectCount must name what is counted and what it equals, as { "of": { "how": "css", "value": "[data-task]" }, "equals": 3 } — or a bare number to count this check's target.`,
+      );
     }
     assertLocator(count.of, `${label}.expectCount.of`);
     if (typeof count.equals === "number") {
